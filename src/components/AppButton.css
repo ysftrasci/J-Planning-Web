@@ -1,0 +1,64 @@
+.app-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-sm);
+  width: 100%;
+  padding: var(--space-md) var(--space-lg);
+  border-radius: var(--radius-md);
+  border: none;
+  cursor: pointer;
+  font-size: var(--font-body-medium-size);
+  font-weight: var(--font-body-medium-weight);
+  transition: opacity 0.15s ease;
+}
+
+.app-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.app-button:not(:disabled):active {
+  opacity: 0.75;
+}
+
+.app-button--primary {
+  background-color: var(--color-accent);
+  color: #ffffff;
+}
+
+.app-button--secondary {
+  background-color: var(--color-accent-soft);
+  color: var(--color-accent-dark);
+}
+
+.app-button--ghost {
+  background-color: transparent;
+  color: var(--color-text-secondary);
+}
+
+.app-button--danger {
+  background-color: var(--color-danger-soft);
+  color: var(--color-danger);
+}
+
+.app-button__spinner {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.5);
+  border-top-color: #ffffff;
+  animation: app-button-spin 0.7s linear infinite;
+}
+
+.app-button--secondary .app-button__spinner,
+.app-button--ghost .app-button__spinner {
+  border-color: rgba(0, 0, 0, 0.15);
+  border-top-color: var(--color-accent);
+}
+
+@keyframes app-button-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
