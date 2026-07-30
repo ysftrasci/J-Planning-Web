@@ -1,0 +1,90 @@
+.tasks-list-page__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--space-md);
+}
+
+.tasks-list-page__header-buttons {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+}
+
+.tasks-list-page__icon-button {
+  width: 40px;
+  height: 40px;
+  border-radius: var(--radius-pill);
+  background-color: var(--color-surface-alt);
+  color: var(--color-text-secondary);
+  border: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.tasks-list-page__add-button {
+  width: 40px;
+  height: 40px;
+  border-radius: var(--radius-pill);
+  background-color: var(--color-accent);
+  color: #ffffff;
+  border: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.tasks-list-page__pending-banner {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  width: 100%;
+  background-color: var(--color-accent-soft);
+  color: var(--color-accent-dark);
+  border: none;
+  padding: var(--space-md);
+  border-radius: var(--radius-md);
+  margin-bottom: var(--space-sm);
+  font-size: var(--font-caption-size);
+  cursor: pointer;
+  text-align: left;
+}
+
+.tasks-list-page__pending-banner span {
+  flex: 1;
+}
+
+.tasks-list-page__toast {
+  background-color: var(--color-accent-soft);
+  color: var(--color-accent-dark);
+  padding: var(--space-md);
+  border-radius: var(--radius-md);
+  margin-bottom: var(--space-md);
+  font-size: var(--font-caption-size);
+}
+
+.tasks-list-page__section-title {
+  font-size: var(--font-caption-size);
+  font-weight: 400;
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin: var(--space-lg) 0 var(--space-sm);
+}
+
+.tasks-list-page__danger-zone-link {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-xs);
+  width: 100%;
+  border: none;
+  background: none;
+  color: var(--color-text-muted);
+  font-size: var(--font-caption-size);
+  cursor: pointer;
+  padding: var(--space-lg) 0;
+}

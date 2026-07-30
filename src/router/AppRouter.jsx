@@ -2,16 +2,26 @@ import { Routes, Route, Navigate } from 'react-router-dom';
 import AppLayout from './AppLayout.jsx';
 import PlaceholderPage from '../pages/PlaceholderPage.jsx';
 import LoginPage from '../pages/LoginPage.jsx';
+import TasksListPage from '../pages/TasksListPage.jsx';
+import AddTaskPage from '../pages/AddTaskPage.jsx';
+import TaskDetailPage from '../pages/TaskDetailPage.jsx';
+import CategoriesPage from '../pages/CategoriesPage.jsx';
 import { useAuth } from '../context/AuthContext.jsx';
 
 // Aşama 0 kapsamında kurulan temel yönlendirme (routing) iskeleti,
 // Aşama 2 ile birlikte kimlik doğrulama koruması eklendi.
+// Aşama 3 ile birlikte çekirdek görev ekranları eklendi.
 // Rotalar, ilgili Aşama tamamlandıkça gerçek ekranlarla değiştirilecek:
-//   "/"         -> Aşama 3: TasksListScreen
-//   "/rewards"  -> Aşama 4: RewardsScreen
-//   "/friends"  -> Aşama 5: FriendsListScreen
-//   "/focus"    -> Aşama 6: FocusScreen
-//   "/profile"  -> Aşama 7: ProfileScreen
+//   "/"             -> Aşama 3: TasksListPage (tamamlandı)
+//   "/add-task"     -> Aşama 3: AddTaskPage (tamamlandı)
+//   "/task/:taskId" -> Aşama 3: TaskDetailPage (tamamlandı)
+//   "/categories"   -> Aşama 3: CategoriesPage (tamamlandı) — kalıcı yeri
+//                      Aşama 7'de Profil altına taşınacak, şimdilik
+//                      Görevlerim üzerinden erişilir.
+//   "/rewards"      -> Aşama 4: RewardsScreen
+//   "/friends"      -> Aşama 5: FriendsListScreen
+//   "/focus"        -> Aşama 6: FocusScreen
+//   "/profile"      -> Aşama 7: ProfileScreen
 
 // Giriş yapılmamışsa /login'e yönlendirir; auth durumu netleşene kadar
 // (initializing) hiçbir şey render etmez, böylece kısa süreliğine
@@ -49,10 +59,10 @@ export default function AppRouter() {
           </RequireAuth>
         }
       >
-        <Route
-          index
-          element={<PlaceholderPage title="Görevler" stageLabel="Aşama 3" />}
-        />
+        <Route index element={<TasksListPage />} />
+        <Route path="add-task" element={<AddTaskPage />} />
+        <Route path="task/:taskId" element={<TaskDetailPage />} />
+        <Route path="categories" element={<CategoriesPage />} />
         <Route
           path="rewards"
           element={<PlaceholderPage title="Ödüller" stageLabel="Aşama 4" />}
