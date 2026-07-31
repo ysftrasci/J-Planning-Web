@@ -1,0 +1,60 @@
+.add-friend-page__back {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  border: none;
+  background: none;
+  color: var(--color-text-secondary);
+  font-size: var(--font-caption-size);
+  cursor: pointer;
+  padding: 0;
+  margin-bottom: var(--space-lg);
+}
+
+.add-friend-page__form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+}
+
+.add-friend-page__label {
+  font-size: var(--font-body-medium-size);
+  font-weight: var(--font-body-medium-weight);
+  color: var(--color-text-primary);
+}
+
+.add-friend-page__input {
+  background-color: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: var(--space-md);
+  font-size: var(--font-body-size);
+  color: var(--color-text-primary);
+  font-family: inherit;
+  width: 100%;
+  text-transform: uppercase;
+}
+
+.add-friend-page__hint {
+  font-size: var(--font-caption-size);
+  color: var(--color-text-muted);
+  margin: var(--space-xs) 0 0;
+}
+
+.add-friend-page__error {
+  color: var(--color-danger);
+  font-size: var(--font-caption-size);
+  margin: 0;
+}
+
+.add-friend-page__success {
+  color: var(--color-success);
+  font-size: var(--font-caption-size);
+  margin: 0;
+}
+
+.add-friend-page__footer {
+  margin-top: var(--space-lg);
+  padding-top: var(--space-lg);
+  border-top: 1px solid var(--color-border);
+}

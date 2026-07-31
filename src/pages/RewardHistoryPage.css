@@ -1,0 +1,74 @@
+.reward-history-page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+}
+
+.reward-history-page__back {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  align-self: flex-start;
+  border: none;
+  background: none;
+  color: var(--color-text-secondary);
+  font-size: var(--font-caption-size);
+  cursor: pointer;
+  padding: 0;
+  margin-bottom: var(--space-md);
+}
+
+.reward-history-page__list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  margin-top: var(--space-md);
+}
+
+.reward-history-page__card {
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+  background-color: var(--color-surface);
+  padding: var(--space-md);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-card);
+}
+
+.reward-history-page__icon-wrap {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background-color: var(--color-accent-soft);
+  color: var(--color-accent-dark);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.reward-history-page__info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.reward-history-page__title {
+  font-size: var(--font-body-medium-size);
+  font-weight: var(--font-body-medium-weight);
+  color: var(--color-text-primary);
+}
+
+.reward-history-page__date {
+  font-size: var(--font-caption-size);
+  color: var(--color-text-muted);
+  margin-top: 2px;
+}
+
+.reward-history-page__cost {
+  font-size: var(--font-body-medium-size);
+  font-weight: var(--font-body-medium-weight);
+  color: var(--color-danger);
+  flex-shrink: 0;
+}

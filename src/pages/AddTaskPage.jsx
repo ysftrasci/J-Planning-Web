@@ -1,16 +1,13 @@
 // J-Planning — Görev Ekle Sayfası (Web)
 // Mobildeki src/screens/AddTaskScreen.js dosyasının web karşılığı.
-//
-// NOT (Aşama 3 -> Aşama 5 sınırı): "Kime atanacak?" seçiminde arkadaşa atama
-// arayüzü burada zaten gösteriliyor (kullanıcı kararı), ama gerçek arkadaş
-// listesi ve gönderim mantığı (services/friendService, taskAssignmentService)
-// henüz web'e taşınmadı. Bu yüzden "Arkadaşıma gönder" seçilirse kaydetme
-// engellenir ve Aşama 5'in henüz aktif olmadığı bilgisi gösterilir.
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { X, Plus, Info } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
-import { createTask } from '../db/taskRepository';
+import { createTask, createSentTaskRecord } from '../db/taskRepository';
 import { getCategories } from '../db/categoryRepository';
+import { useAuth } from '../context/AuthContext.jsx';
+import { listenFriends } from '../services/friendService';
+import { assignTaskToFriend } from '../services/taskAssignmentService';
 import AppButton from '../components/AppButton.jsx';
 import './AddTaskPage.css';
 
@@ -34,21 +31,25 @@ const PERIODS = [
   { key: 'ONCE', label: 'Tek Seferlik' },
 ];
 
-// Aşama 5'e kadar arkadaş listesi her zaman boş — gerçek liste
-// services/friendService bağlandığında burada state olarak doldurulacak.
-const FRIENDS_PLACEHOLDER = [];
-
 export default function AddTaskPage() {
+  const { user } = useAuth();
   const navigate = useNavigate();
   const [title, setTitle] = useState('');
   const [priority, setPriority] = useState('MEDIUM');
   const [period, setPeriod] = useState('DAILY');
   const [categoryId, setCategoryId] = useState(null);
-  const [assignTo, setAssignTo] = useState('me'); // 'me' | 'friend' (Aşama 5'e kadar sembolik)
+  const [assignTo, setAssignTo] = useState('me'); // 'me' | friendUid
   const [categories] = useState(() => getCategories());
+  const [friends, setFriends] = useState([]);
   const [subtaskLabels, setSubtaskLabels] = useState(['']);
   const [errorMessage, setErrorMessage] = useState('');
   const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (!user) return;
+    const unsub = listenFriends(user.uid, setFriends);
+    return unsub;
+  }, [user]);
 
   const isOnce = period === 'ONCE';
 
@@ -65,7 +66,7 @@ export default function AddTaskPage() {
     setSubtaskLabels((prev) => prev.map((l, i) => (i === index ? value : l)));
   };
 
-  const handleSave = (e) => {
+  const handleSave = async (e) => {
     e.preventDefault();
     setErrorMessage('');
 
@@ -74,18 +75,46 @@ export default function AddTaskPage() {
       return;
     }
 
-    if (assignTo === 'friend') {
-      setErrorMessage('Arkadaşına görev atama özelliği yakında (Aşama 5) aktif olacak.');
-      return;
-    }
-
-    setSaving(true);
     // Tek seferlik görevlerde alt görev/sıklık kavramı yok — her zaman 1.
     const subtaskCount = isOnce ? 1 : subtaskLabels.length;
     const effectiveSubtaskLabels = isOnce ? [''] : subtaskLabels;
 
-    createTask({ title: title.trim(), categoryId, priority, period, subtaskCount, subtaskLabels: effectiveSubtaskLabels });
-    navigate('/');
+    if (assignTo === 'me') {
+      createTask({ title: title.trim(), categoryId, priority, period, subtaskCount, subtaskLabels: effectiveSubtaskLabels });
+      navigate('/');
+      return;
+    }
+
+    const friend = friends.find((f) => f.friendUid === assignTo);
+    setSaving(true);
+    try {
+      await assignTaskToFriend({
+        assignedByUid: user.uid,
+        assignedByName: user.profile?.displayName || user.displayName || 'Kullanıcı',
+        assignedToUid: assignTo,
+        assignedToName: friend?.friendName ?? 'Arkadaşın',
+        title: title.trim(),
+        priority,
+        period,
+        subtaskCount,
+        subtaskLabels: effectiveSubtaskLabels,
+      });
+      // Kendi tarafımda da bu görevi "gönderdiklerim" olarak izleyebilmem için bir kayıt oluştur.
+      createSentTaskRecord({
+        title: title.trim(),
+        priority,
+        period,
+        subtaskCount,
+        subtaskLabels: effectiveSubtaskLabels,
+        assignedToUserId: assignTo,
+        assignedToName: friend?.friendName ?? 'Arkadaşın',
+      });
+      navigate('/');
+    } catch (e2) {
+      setErrorMessage(e2.message);
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
@@ -105,16 +134,18 @@ export default function AddTaskPage() {
         <span className="add-task-page__label">Kime atanacak?</span>
         <div className="add-task-page__chip-row">
           <Chip label="Kendime" selected={assignTo === 'me'} onClick={() => setAssignTo('me')} />
-          <Chip label="Arkadaşıma gönder" selected={assignTo === 'friend'} onClick={() => setAssignTo('friend')} />
+          {friends.map((f) => (
+            <Chip key={f.friendUid} label={f.friendName} selected={assignTo === f.friendUid} onClick={() => setAssignTo(f.friendUid)} />
+          ))}
         </div>
-        {assignTo === 'friend' && (
+        {assignTo === 'me' && friends.length === 0 && (
+          <p className="add-task-page__hint">Henüz arkadaşın yok. Arkadaşlar sekmesinden ekleyebilirsin.</p>
+        )}
+        {assignTo !== 'me' && (
           <p className="add-task-page__hint add-task-page__hint--info">
             <Info size={14} />
-            Arkadaşa görev atama, Aşama 5'te arkadaşlık sistemiyle birlikte aktif olacak.
+            Görev, arkadaşın kabul ettikten sonra onun görev listesinde aktif olur.
           </p>
-        )}
-        {assignTo === 'me' && FRIENDS_PLACEHOLDER.length === 0 && (
-          <p className="add-task-page__hint">Henüz arkadaşın yok. Arkadaşlar sekmesinden ekleyebilirsin.</p>
         )}
 
         <span className="add-task-page__label">Periyot</span>

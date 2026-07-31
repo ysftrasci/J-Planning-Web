@@ -6,11 +6,19 @@ import TasksListPage from '../pages/TasksListPage.jsx';
 import AddTaskPage from '../pages/AddTaskPage.jsx';
 import TaskDetailPage from '../pages/TaskDetailPage.jsx';
 import CategoriesPage from '../pages/CategoriesPage.jsx';
+import RewardsPage from '../pages/RewardsPage.jsx';
+import RewardHistoryPage from '../pages/RewardHistoryPage.jsx';
+import FriendsListPage from '../pages/FriendsListPage.jsx';
+import AddFriendPage from '../pages/AddFriendPage.jsx';
+import FriendDetailPage from '../pages/FriendDetailPage.jsx';
+import AssignedByMePage from '../pages/AssignedByMePage.jsx';
 import { useAuth } from '../context/AuthContext.jsx';
 
 // Aşama 0 kapsamında kurulan temel yönlendirme (routing) iskeleti,
 // Aşama 2 ile birlikte kimlik doğrulama koruması eklendi.
 // Aşama 3 ile birlikte çekirdek görev ekranları eklendi.
+// Aşama 4 ile birlikte ödül/puan ekranları eklendi.
+// Aşama 5 ile birlikte arkadaşlık/sosyal ekranları eklendi.
 // Rotalar, ilgili Aşama tamamlandıkça gerçek ekranlarla değiştirilecek:
 //   "/"             -> Aşama 3: TasksListPage (tamamlandı)
 //   "/add-task"     -> Aşama 3: AddTaskPage (tamamlandı)
@@ -18,8 +26,12 @@ import { useAuth } from '../context/AuthContext.jsx';
 //   "/categories"   -> Aşama 3: CategoriesPage (tamamlandı) — kalıcı yeri
 //                      Aşama 7'de Profil altına taşınacak, şimdilik
 //                      Görevlerim üzerinden erişilir.
-//   "/rewards"      -> Aşama 4: RewardsScreen
-//   "/friends"      -> Aşama 5: FriendsListScreen
+//   "/rewards"              -> Aşama 4: RewardsPage (tamamlandı)
+//   "/rewards/history"      -> Aşama 4: RewardHistoryPage (tamamlandı)
+//   "/friends"              -> Aşama 5: FriendsListPage (tamamlandı)
+//   "/friends/add"          -> Aşama 5: AddFriendPage (tamamlandı)
+//   "/friends/:friendshipId"-> Aşama 5: FriendDetailPage (tamamlandı)
+//   "/assigned-by-me"       -> Aşama 5: AssignedByMePage (tamamlandı)
 //   "/focus"        -> Aşama 6: FocusScreen
 //   "/profile"      -> Aşama 7: ProfileScreen
 
@@ -63,14 +75,12 @@ export default function AppRouter() {
         <Route path="add-task" element={<AddTaskPage />} />
         <Route path="task/:taskId" element={<TaskDetailPage />} />
         <Route path="categories" element={<CategoriesPage />} />
-        <Route
-          path="rewards"
-          element={<PlaceholderPage title="Ödüller" stageLabel="Aşama 4" />}
-        />
-        <Route
-          path="friends"
-          element={<PlaceholderPage title="Arkadaşlar" stageLabel="Aşama 5" />}
-        />
+        <Route path="rewards" element={<RewardsPage />} />
+        <Route path="rewards/history" element={<RewardHistoryPage />} />
+        <Route path="friends" element={<FriendsListPage />} />
+        <Route path="friends/add" element={<AddFriendPage />} />
+        <Route path="friends/:friendshipId" element={<FriendDetailPage />} />
+        <Route path="assigned-by-me" element={<AssignedByMePage />} />
         <Route
           path="focus"
           element={<PlaceholderPage title="Odaklanma" stageLabel="Aşama 6" />}

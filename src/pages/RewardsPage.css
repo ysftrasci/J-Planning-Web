@@ -1,0 +1,270 @@
+.rewards-page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-lg);
+  padding-bottom: var(--space-xxl);
+}
+
+.rewards-page__balance-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-xs);
+  background-color: var(--color-accent);
+  border-radius: var(--radius-xl);
+  padding: var(--space-xl);
+}
+
+.rewards-page__balance-label {
+  font-size: var(--font-caption-size);
+  color: #ffffff;
+  opacity: 0.85;
+}
+
+.rewards-page__balance-value {
+  font-size: 36px;
+  font-weight: var(--font-h1-weight);
+  color: #ffffff;
+}
+
+.rewards-page__balance-buttons {
+  display: flex;
+  gap: var(--space-sm);
+  margin-top: var(--space-sm);
+}
+
+.rewards-page__how-to-button {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background-color: rgba(255, 255, 255, 0.2);
+  border: none;
+  color: #ffffff;
+  padding: var(--space-xs) var(--space-md);
+  border-radius: var(--radius-pill);
+  font-size: var(--font-small-size);
+  cursor: pointer;
+}
+
+.rewards-page__error-banner {
+  background-color: var(--color-danger-soft);
+  color: var(--color-danger);
+  padding: var(--space-md);
+  border-radius: var(--radius-md);
+  font-size: var(--font-caption-size);
+  margin: 0;
+}
+
+.rewards-page__section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.rewards-page__section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+}
+
+.rewards-page__section-title {
+  font-size: var(--font-h3-size);
+  font-weight: var(--font-h3-weight);
+  color: var(--color-text-primary);
+  margin: 0;
+}
+
+.rewards-page__pending-card {
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+  width: 100%;
+  background-color: var(--color-accent-soft);
+  color: var(--color-accent-dark);
+  border: none;
+  padding: var(--space-md);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  text-align: left;
+  font-family: inherit;
+}
+
+.rewards-page__pending-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.rewards-page__pending-meta {
+  font-size: var(--font-caption-size);
+  color: var(--color-accent-dark);
+  margin-top: 2px;
+}
+
+.rewards-page__add-button {
+  width: 40px;
+  height: 40px;
+  border-radius: var(--radius-pill);
+  background-color: var(--color-accent);
+  color: #ffffff;
+  border: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.rewards-page__list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+}
+
+.rewards-page__card {
+  display: flex;
+  gap: var(--space-md);
+  background-color: var(--color-surface);
+  padding: var(--space-lg);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-card);
+}
+
+.rewards-page__card-info {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.rewards-page__card-title {
+  font-size: var(--font-body-medium-size);
+  font-weight: var(--font-body-medium-weight);
+  color: var(--color-text-primary);
+}
+
+.rewards-page__card-desc {
+  font-size: var(--font-caption-size);
+  color: var(--color-text-secondary);
+  margin-top: 2px;
+}
+
+.rewards-page__card-cost {
+  font-size: var(--font-h3-size);
+  font-weight: var(--font-h3-weight);
+  color: var(--color-accent);
+  margin-top: var(--space-sm);
+}
+
+.rewards-page__card-actions {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+  align-items: stretch;
+}
+
+.rewards-page__delete-link {
+  border: none;
+  background: none;
+  color: var(--color-text-muted);
+  font-size: var(--font-small-size);
+  cursor: pointer;
+  padding: 4px 0;
+}
+
+.rewards-page__form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+}
+
+.rewards-page__input {
+  background-color: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: var(--space-md);
+  font-size: var(--font-body-size);
+  color: var(--color-text-primary);
+  font-family: inherit;
+  width: 100%;
+}
+
+.rewards-page__label {
+  font-size: var(--font-body-medium-size);
+  font-weight: var(--font-body-medium-weight);
+  color: var(--color-text-primary);
+}
+
+.rewards-page__chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-sm);
+}
+
+.rewards-page__chip {
+  padding: var(--space-sm) var(--space-lg);
+  border-radius: var(--radius-pill);
+  background-color: var(--color-surface-alt);
+  border: 1px solid var(--color-border);
+  color: var(--color-text-secondary);
+  font-size: var(--font-caption-size);
+  cursor: pointer;
+}
+
+.rewards-page__chip--selected {
+  background-color: var(--color-accent);
+  border-color: var(--color-accent);
+  color: #ffffff;
+  font-weight: 700;
+}
+
+.rewards-page__hint {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+  color: var(--color-accent-dark);
+  font-size: var(--font-caption-size);
+  margin: 0;
+}
+
+.rewards-page__form-error {
+  color: var(--color-danger);
+  font-size: var(--font-caption-size);
+  margin: 0;
+}
+
+.rewards-page__modal-actions {
+  display: flex;
+  gap: var(--space-sm);
+  margin-top: var(--space-sm);
+}
+
+.rewards-page__modal-actions .app-button {
+  flex: 1;
+}
+
+.rewards-page__how-to-row {
+  display: flex;
+  justify-content: space-between;
+  padding: var(--space-xs) 0;
+  color: var(--color-text-secondary);
+  font-size: var(--font-body-size);
+}
+
+.rewards-page__how-to-value {
+  color: var(--color-accent);
+  font-weight: var(--font-body-medium-weight);
+}
+
+.rewards-page__how-to-divider {
+  height: 1px;
+  background-color: var(--color-border);
+  margin: var(--space-sm) 0;
+}
+
+.rewards-page__how-to-bonus {
+  font-size: var(--font-caption-size);
+  color: var(--color-text-secondary);
+  line-height: 1.5;
+  margin: 0 0 var(--space-md);
+}

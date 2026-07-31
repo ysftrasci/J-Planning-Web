@@ -1,0 +1,106 @@
+.assigned-task-modal__overlay {
+  position: fixed;
+  inset: 0;
+  background-color: var(--color-overlay);
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  z-index: 100;
+}
+
+.assigned-task-modal__card {
+  width: 100%;
+  max-width: 480px;
+  background-color: var(--color-background);
+  border-top-left-radius: var(--radius-xl);
+  border-top-right-radius: var(--radius-xl);
+  padding: var(--space-xl);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  animation: assigned-task-modal-slide-up 0.2s ease-out;
+}
+
+@keyframes assigned-task-modal-slide-up {
+  from {
+    transform: translateY(24px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+.assigned-task-modal__header-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.assigned-task-modal__header-title {
+  font-size: var(--font-h3-size);
+  font-weight: var(--font-h3-weight);
+  color: var(--color-text-primary);
+  margin: 0;
+}
+
+.assigned-task-modal__close {
+  border: none;
+  background: none;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  display: flex;
+  padding: 0;
+}
+
+.assigned-task-modal__sender-text {
+  font-size: var(--font-body-size);
+  color: var(--color-text-secondary);
+  margin: var(--space-sm) 0 0;
+}
+
+.assigned-task-modal__task-title {
+  font-size: var(--font-h2-size);
+  font-weight: var(--font-h2-weight);
+  color: var(--color-text-primary);
+  margin: 0 0 var(--space-md);
+}
+
+.assigned-task-modal__detail-grid {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+  margin-bottom: var(--space-lg);
+}
+
+.assigned-task-modal__detail-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+}
+
+.assigned-task-modal__detail-icon {
+  color: var(--color-text-muted);
+  flex-shrink: 0;
+}
+
+.assigned-task-modal__detail-label {
+  font-size: var(--font-caption-size);
+  color: var(--color-text-muted);
+}
+
+.assigned-task-modal__detail-value {
+  font-size: var(--font-caption-size);
+  color: var(--color-text-primary);
+  font-weight: 600;
+}
+
+.assigned-task-modal__actions {
+  display: flex;
+  gap: var(--space-sm);
+}
+
+.assigned-task-modal__actions .app-button {
+  flex: 1;
+}

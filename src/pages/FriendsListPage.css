@@ -1,0 +1,165 @@
+.friends-list-page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  padding-bottom: var(--space-xxl);
+}
+
+.friends-list-page__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--space-sm);
+}
+
+.friends-list-page__add-button {
+  width: 40px;
+  height: 40px;
+  border-radius: var(--radius-pill);
+  background-color: var(--color-accent);
+  color: #ffffff;
+  border: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.friends-list-page__error {
+  background-color: var(--color-danger-soft);
+  color: var(--color-danger);
+  padding: var(--space-md);
+  border-radius: var(--radius-md);
+  font-size: var(--font-caption-size);
+  margin: 0;
+}
+
+.friends-list-page__pending-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+}
+
+.friends-list-page__section-title {
+  font-size: var(--font-caption-size);
+  font-weight: 400;
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin: var(--space-md) 0 var(--space-xs);
+}
+
+.friends-list-page__pending-card {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  background-color: var(--color-accent-soft);
+  padding: var(--space-md);
+  border-radius: var(--radius-md);
+}
+
+.friends-list-page__pending-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.friends-list-page__reject-button {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background-color: var(--color-danger-soft);
+  color: var(--color-danger);
+  border: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.friends-list-page__accept-button {
+  background-color: var(--color-accent);
+  color: #ffffff;
+  border: none;
+  padding: var(--space-sm) var(--space-md);
+  border-radius: var(--radius-pill);
+  font-size: var(--font-small-size);
+  font-weight: 700;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.friends-list-page__list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+}
+
+.friends-list-page__friend-card {
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+  background-color: var(--color-surface);
+  padding: var(--space-md);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-card);
+  border: none;
+  cursor: pointer;
+  text-align: left;
+  font-family: inherit;
+  width: 100%;
+}
+
+.friends-list-page__friend-card:hover {
+  background-color: var(--color-surface-alt);
+}
+
+.friends-list-page__avatar {
+  width: 42px;
+  height: 42px;
+  border-radius: 50%;
+  background-color: var(--color-accent-soft);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+.friends-list-page__avatar-image {
+  width: 42px;
+  height: 42px;
+  border-radius: 50%;
+  object-fit: cover;
+}
+
+.friends-list-page__avatar-text {
+  font-size: var(--font-h3-size);
+  font-weight: var(--font-h3-weight);
+  color: var(--color-accent-dark);
+}
+
+.friends-list-page__friend-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.friends-list-page__name {
+  font-size: var(--font-body-medium-size);
+  font-weight: var(--font-body-medium-weight);
+  color: var(--color-text-primary);
+}
+
+.friends-list-page__code {
+  font-size: var(--font-caption-size);
+  color: var(--color-text-muted);
+}
+
+.friends-list-page__chevron {
+  color: var(--color-text-muted);
+  flex-shrink: 0;
+}
