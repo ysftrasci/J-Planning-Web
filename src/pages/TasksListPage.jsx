@@ -20,6 +20,7 @@ import EmptyState from '../components/EmptyState.jsx';
 import AssignedTaskModal from '../components/AssignedTaskModal.jsx';
 import AppModal from '../components/AppModal.jsx';
 import AppButton from '../components/AppButton.jsx';
+import { triggerConfetti } from '../utils/confetti';
 import './TasksListPage.css';
 
 export default function TasksListPage() {
@@ -97,8 +98,11 @@ export default function TasksListPage() {
   const handleComplete = (task) => {
     try {
       const result = completeSubtask(task.id);
-      if (result?.fullyCompleted && result.bonus > 0) {
-        showToast(`Seri Bonusu! 🔥 ${result.newStreak} günlük seriye ulaştın! +${result.bonus} JP bonus kazandın (toplam +${result.total} JP).`);
+      if (result?.fullyCompleted) {
+        triggerConfetti();
+        if (result.bonus > 0) {
+          showToast(`Seri Bonusu! 🔥 ${result.newStreak} günlük seriye ulaştın! +${result.bonus} JP bonus kazandın (toplam +${result.total} JP).`);
+        }
       }
       if (result?.firestoreAssignmentId) {
         syncCompletionStatusToFirestore(result.firestoreAssignmentId, {

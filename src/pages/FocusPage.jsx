@@ -23,6 +23,7 @@ import { playFocusSound, stopFocusSound } from '../services/focusSoundService.js
 import { calculateFocusSessionJP } from '../utils/rewards.js';
 import { addWalletTransaction } from '../db/taskRepository.js';
 import { recordFocusSession } from '../db/focusSessionRepository.js';
+import { triggerConfetti } from '../utils/confetti.js';
 import './FocusPage.css';
 
 const DURATION_OPTIONS = [
@@ -117,6 +118,7 @@ export default function FocusPage() {
 
   const handleSessionComplete = async () => {
     await stopFocusSound();
+    triggerConfetti();
     const jp = calculateFocusSessionJP(selectedMinutes);
     if (jp > 0) {
       addWalletTransaction('me', jp, 'FOCUS_SESSION');

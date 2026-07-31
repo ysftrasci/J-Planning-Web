@@ -333,12 +333,42 @@ export function lateMarkTaskUncomplete(taskId, periodKey) {
   );
 }
 
+export function getStreakFreezeCount() {
+  const db = getDb();
+  const row = db.getFirstSync(`SELECT value FROM app_meta WHERE key = 'streak_freeze_count'`);
+  return row ? Math.max(0, parseInt(row.value, 10) || 0) : 0;
+}
+
+export function buyStreakFreeze(cost = 50) {
+  const balance = getWalletBalance('me');
+  if (balance < cost) {
+    throw new Error(`Seri dondurma rozeti almak için en az ${cost} JP gerekiyor.`);
+  }
+  addWalletTransaction('me', -cost, 'BUY_STREAK_FREEZE');
+  const db = getDb();
+  const current = getStreakFreezeCount();
+  db.runSync(
+    `INSERT INTO app_meta (key, value) VALUES ('streak_freeze_count', ?)
+     ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+    [String(current + 1)]
+  );
+}
+
+export function consumeStreakFreeze() {
+  const current = getStreakFreezeCount();
+  if (current <= 0) return false;
+  const db = getDb();
+  db.runSync(
+    `INSERT INTO app_meta (key, value) VALUES ('streak_freeze_count', ?)
+     ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+    [String(current - 1)]
+  );
+  return true;
+}
+
 // Süresi dolan ama işaretlenmemiş periyotları otomatik FAILED yapar.
-// Uygulama açılışında ve periyodik olarak çağrılmalı.
-// NOT: 'SENT' yönündeki görevler (arkadaşına attıklarım) bu kontrolden
-// muaf tutulur — onların başarı/başarısızlığı arkadaşımın cihazında yönetilir.
-// NOT: 'ONCE' (tek seferlik) görevler de muaf — bunlar hiç tekrarlanmaz,
-// otomatik başarısız olmazlar; kullanıcı tamamlayınca kendisi siler.
+// Eğer kullanıcının Seri Dondurma Hakkı (streak freeze) varsa, 1 dondurma hakkı
+// harcanarak seri korunur ('FROZEN' durumu).
 export function processExpiredPeriods() {
   const db = getDb();
   const tasks = db.getAllSync(
@@ -358,13 +388,24 @@ export function processExpiredPeriods() {
         [task.id, checkKey]
       );
       if (!existing) {
-        db.runSync(
-          `INSERT INTO task_records (id, taskId, periodKey, status, jpEarned) VALUES (?, ?, ?, 'FAILED', 0)`,
-          [uuid(), task.id, checkKey]
-        );
+        // Günü kaçırdı — dondurma hakkı var mı?
+        if (consumeStreakFreeze()) {
+          db.runSync(
+            `INSERT INTO task_records (id, taskId, periodKey, status, jpEarned) VALUES (?, ?, ?, 'FROZEN', 0)`,
+            [uuid(), task.id, checkKey]
+          );
+        } else {
+          db.runSync(
+            `INSERT INTO task_records (id, taskId, periodKey, status, jpEarned) VALUES (?, ?, ?, 'FAILED', 0)`,
+            [uuid(), task.id, checkKey]
+          );
+        }
       } else if (existing.status === 'PENDING_PARTIAL') {
-        // Süre doldu ama tüm alt adımlar tamamlanmamış -> FAILED (JP zaten verilmemişti)
-        db.runSync(`UPDATE task_records SET status = 'FAILED' WHERE id = ?`, [existing.id]);
+        if (consumeStreakFreeze()) {
+          db.runSync(`UPDATE task_records SET status = 'FROZEN' WHERE id = ?`, [existing.id]);
+        } else {
+          db.runSync(`UPDATE task_records SET status = 'FAILED' WHERE id = ?`, [existing.id]);
+        }
       }
       checkKey = getPreviousPeriodKey(task.period, checkKey);
     }

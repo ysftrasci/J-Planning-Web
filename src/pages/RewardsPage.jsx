@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { HelpCircle, History, Gift, Plus, ChevronRight } from 'lucide-react';
 import { getActiveRewards, createReward, redeemReward, deleteReward } from '../db/rewardRepository';
-import { getWalletBalance } from '../db/taskRepository';
+import { getWalletBalance, getStreakFreezeCount, buyStreakFreeze } from '../db/taskRepository';
 import { useAuth } from '../context/AuthContext.jsx';
 import { listenFriends } from '../services/friendService';
 import { assignRewardToFriend, acceptAssignedReward, rejectAssignedReward, listenPendingRewardsAssignedToMe } from '../services/rewardAssignmentService';
@@ -12,12 +12,14 @@ import { PRIORITY_JP, STREAK_BONUS_JP, STREAK_BONUS_INTERVAL } from '../utils/re
 import AppButton from '../components/AppButton.jsx';
 import AppModal from '../components/AppModal.jsx';
 import EmptyState from '../components/EmptyState.jsx';
+import { triggerConfetti } from '../utils/confetti';
 import './RewardsPage.css';
 
 export default function RewardsPage() {
   const { user } = useAuth();
   const navigate = useNavigate();
   const [balance, setBalance] = useState(0);
+  const [freezeCount, setFreezeCount] = useState(0);
   const [rewards, setRewards] = useState([]);
   const [pendingRewards, setPendingRewards] = useState([]);
   const [showAddModal, setShowAddModal] = useState(false);
@@ -29,6 +31,7 @@ export default function RewardsPage() {
 
   const load = useCallback(() => {
     setBalance(getWalletBalance('me'));
+    setFreezeCount(getStreakFreezeCount());
     setRewards(getActiveRewards());
   }, []);
 
@@ -40,10 +43,21 @@ export default function RewardsPage() {
     return unsub;
   }, [user]);
 
+  const handleBuyFreeze = () => {
+    try {
+      buyStreakFreeze(50);
+      triggerConfetti();
+      load();
+    } catch (e) {
+      setErrorMessage(e.message);
+    }
+  };
+
   const confirmRedeem = () => {
     if (!rewardToRedeem) return;
     try {
       redeemReward(rewardToRedeem.id);
+      triggerConfetti();
       setRewardToRedeem(null);
       load();
     } catch (e) {
@@ -63,7 +77,6 @@ export default function RewardsPage() {
     if (!pendingToDecide) return;
     acceptAssignedReward(pendingToDecide.id)
       .then(() => {
-        // Kabul edildiğinde kişisel ödül listesine de eklenir (kendi JP bakiyesinden harcanabilsin diye).
         createReward({ title: pendingToDecide.title, description: pendingToDecide.description, cost: pendingToDecide.cost });
         setPendingToDecide(null);
         load();
@@ -96,6 +109,29 @@ export default function RewardsPage() {
       </div>
 
       {errorMessage && <p className="rewards-page__error-banner">{errorMessage}</p>}
+
+      {/* Özel Güç Mağazası: Seri Dondurma Rozeti */}
+      <div className="rewards-page__section">
+        <h2 className="rewards-page__section-title">Özel Güçler 🧊</h2>
+        <div className="rewards-page__card" style={{ border: '1px solid var(--color-accent)' }}>
+          <div className="rewards-page__card-info">
+            <span className="rewards-page__card-title">Seri Dondurma Rozeti 🧊</span>
+            <span className="rewards-page__card-desc">
+              Bir gün görevi unutursanız serinizin sıfırlanmasını engeller (Mevcut: {freezeCount} Adet).
+            </span>
+            <span className="rewards-page__card-cost">50 JP</span>
+          </div>
+          <div className="rewards-page__card-actions">
+            <AppButton
+              title={balance >= 50 ? 'Satın Al (50 JP)' : 'Yetersiz JP'}
+              variant="primary"
+              disabled={balance < 50}
+              onClick={handleBuyFreeze}
+              style={{ padding: 'var(--space-sm) var(--space-md)' }}
+            />
+          </div>
+        </div>
+      </div>
 
       {pendingRewards.length > 0 && (
         <div className="rewards-page__section">

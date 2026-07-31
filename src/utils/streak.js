@@ -26,7 +26,7 @@ export function calculateStreakUpTo(task, records, uptoPeriodKey) {
   let iterations = 0;
   while (iterations < 1000) {
     const rec = recordsMap.get(checkKey);
-    if (rec && rec.status === 'SUCCESSFUL') {
+    if (rec && (rec.status === 'SUCCESSFUL' || rec.status === 'FROZEN')) {
       streak += 1;
     } else {
       break;
@@ -42,20 +42,19 @@ export function calculateStreakUpTo(task, records, uptoPeriodKey) {
 export function calculateCurrentStreak(task, records) {
   if (task.period === 'ONCE') return 0;
   const todayKey = getPeriodKey(task.period, new Date());
-  // Bugünün periyodu henüz kayıtlı değilse (henüz işaretlenmemiş), bir önceki periyottan başla.
   const recordsMap = new Map(records.map((r) => [r.periodKey, r]));
   const startKey = recordsMap.has(todayKey) ? todayKey : getPreviousPeriodKey(task.period, todayKey);
   return calculateStreakUpTo(task, records, startKey);
 }
 
-// En uzun seri (rekor) — Tehlikeli Alan / istatistik için değil ama ileride lazım olabilir.
+// En uzun seri (rekor)
 export function calculateMaxStreak(task, records) {
   if (task.period === 'ONCE') return 0;
   const sorted = [...records].sort((a, b) => (a.periodKey < b.periodKey ? -1 : 1));
   let max = 0;
   let current = 0;
   for (const rec of sorted) {
-    if (rec.status === 'SUCCESSFUL') {
+    if (rec.status === 'SUCCESSFUL' || rec.status === 'FROZEN') {
       current += 1;
       max = Math.max(max, current);
     } else {
@@ -65,12 +64,10 @@ export function calculateMaxStreak(task, records) {
   return max;
 }
 
-// Tamamlanma oranı: kaç periyottan kaçında başarılı olunmuş (SUCCESSFUL / toplam).
-// PENDING_PARTIAL (henüz devam eden, bugünün periyodu gibi) sayıma dahil edilmez —
-// sadece kesinleşmiş (SUCCESSFUL/FAILED) periyotlar üzerinden hesaplanır.
+// Tamamlanma oranı
 export function calculateCompletionStats(records) {
-  const finalized = records.filter((r) => r.status === 'SUCCESSFUL' || r.status === 'FAILED');
-  const successCount = finalized.filter((r) => r.status === 'SUCCESSFUL').length;
+  const finalized = records.filter((r) => r.status === 'SUCCESSFUL' || r.status === 'FAILED' || r.status === 'FROZEN');
+  const successCount = finalized.filter((r) => r.status === 'SUCCESSFUL' || r.status === 'FROZEN').length;
   const total = finalized.length;
   const rate = total > 0 ? Math.round((successCount / total) * 100) : 0;
   return { successCount, failedCount: total - successCount, total, rate };
