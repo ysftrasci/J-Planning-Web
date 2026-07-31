@@ -1,0 +1,75 @@
+.danger-zone-page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+  max-width: 600px;
+  margin: 0 auto;
+  padding-bottom: var(--space-xxl);
+}
+
+.danger-zone-page__back {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-xs);
+  background: none;
+  border: none;
+  color: var(--color-accent-dark);
+  font-size: var(--font-body-size);
+  font-weight: 500;
+  cursor: pointer;
+  padding: 0;
+  align-self: flex-start;
+}
+
+.danger-zone-page__back:hover {
+  text-decoration: underline;
+}
+
+.danger-zone-page h1 {
+  font-size: var(--font-h1-size);
+  font-weight: var(--font-h1-weight);
+  color: var(--color-text-primary);
+}
+
+.danger-zone-page__intro {
+  font-size: var(--font-caption-size);
+  color: var(--color-text-muted);
+  margin: 0;
+}
+
+.danger-zone-page__list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  margin-top: var(--space-sm);
+}
+
+.danger-zone-page__card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+  padding: var(--space-lg);
+}
+
+.danger-zone-page__header-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+}
+
+.danger-zone-page__task-title {
+  font-size: var(--font-body-medium-size);
+  font-weight: var(--font-body-medium-weight);
+  color: var(--color-text-primary);
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.danger-zone-page__rate {
+  font-size: var(--font-caption-size);
+  color: var(--color-danger);
+  font-weight: 600;
+  margin-left: 26px;
+}

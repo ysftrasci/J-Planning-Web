@@ -14,6 +14,10 @@ import FriendDetailPage from '../pages/FriendDetailPage.jsx';
 import AssignedByMePage from '../pages/AssignedByMePage.jsx';
 import FocusPage from '../pages/FocusPage.jsx';
 import FocusHistoryPage from '../pages/FocusHistoryPage.jsx';
+import ProfilePage from '../pages/ProfilePage.jsx';
+import EditProfilePage from '../pages/EditProfilePage.jsx';
+import NotificationSettingsPage from '../pages/NotificationSettingsPage.jsx';
+import DangerZonePage from '../pages/DangerZonePage.jsx';
 import { useAuth } from '../context/AuthContext.jsx';
 
 // Aşama 0 kapsamında kurulan temel yönlendirme (routing) iskeleti,
@@ -22,13 +26,12 @@ import { useAuth } from '../context/AuthContext.jsx';
 // Aşama 4 ile birlikte ödül/puan ekranları eklendi.
 // Aşama 5 ile birlikte arkadaşlık/sosyal ekranları eklendi.
 // Aşama 6 ile birlikte odaklanma modu ekranları eklendi.
-// Rotalar, ilgili Aşama tamamlandıkça gerçek ekranlarla değiştirilecek:
-//   "/"             -> Aşama 3: TasksListPage (tamamlandı)
-//   "/add-task"     -> Aşama 3: AddTaskPage (tamamlandı)
-//   "/task/:taskId" -> Aşama 3: TaskDetailPage (tamamlandı)
-//   "/categories"   -> Aşama 3: CategoriesPage (tamamlandı) — kalıcı yeri
-//                      Aşama 7'de Profil altına taşınacak, şimdilik
-//                      Görevlerim üzerinden erişilir.
+// Aşama 7 ile birlikte profil ve ayarlar ekranları eklendi.
+// Rotalar:
+//   "/"                     -> Aşama 3: TasksListPage (tamamlandı)
+//   "/add-task"             -> Aşama 3: AddTaskPage (tamamlandı)
+//   "/task/:taskId"         -> Aşama 3: TaskDetailPage (tamamlandı)
+//   "/categories"           -> Aşama 3 & 7: CategoriesPage (tamamlandı)
 //   "/rewards"              -> Aşama 4: RewardsPage (tamamlandı)
 //   "/rewards/history"      -> Aşama 4: RewardHistoryPage (tamamlandı)
 //   "/friends"              -> Aşama 5: FriendsListPage (tamamlandı)
@@ -37,7 +40,10 @@ import { useAuth } from '../context/AuthContext.jsx';
 //   "/assigned-by-me"       -> Aşama 5: AssignedByMePage (tamamlandı)
 //   "/focus"                -> Aşama 6: FocusPage (tamamlandı)
 //   "/focus/history"        -> Aşama 6: FocusHistoryPage (tamamlandı)
-//   "/profile"              -> Aşama 7: ProfileScreen
+//   "/profile"              -> Aşama 7: ProfilePage (tamamlandı)
+//   "/profile/edit"         -> Aşama 7: EditProfilePage (tamamlandı)
+//   "/profile/notifications"-> Aşama 7: NotificationSettingsPage (tamamlandı)
+//   "/profile/danger-zone"   -> Aşama 7: DangerZonePage (tamamlandı)
 
 // Giriş yapılmamışsa /login'e yönlendirir; auth durumu netleşene kadar
 // (initializing) hiçbir şey render etmez, böylece kısa süreliğine
@@ -87,10 +93,10 @@ export default function AppRouter() {
         <Route path="assigned-by-me" element={<AssignedByMePage />} />
         <Route path="focus" element={<FocusPage />} />
         <Route path="focus/history" element={<FocusHistoryPage />} />
-        <Route
-          path="profile"
-          element={<PlaceholderPage title="Profil" stageLabel="Aşama 7" />}
-        />
+        <Route path="profile" element={<ProfilePage />} />
+        <Route path="profile/edit" element={<EditProfilePage />} />
+        <Route path="profile/notifications" element={<NotificationSettingsPage />} />
+        <Route path="profile/danger-zone" element={<DangerZonePage />} />
         <Route
           path="*"
           element={<PlaceholderPage title="Sayfa bulunamadı" stageLabel="404" />}

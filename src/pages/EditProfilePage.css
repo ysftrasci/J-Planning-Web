@@ -1,0 +1,127 @@
+.edit-profile-page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-lg);
+  max-width: 600px;
+  margin: 0 auto;
+  padding-bottom: var(--space-xxl);
+}
+
+.edit-profile-page__back {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-xs);
+  background: none;
+  border: none;
+  color: var(--color-accent-dark);
+  font-size: var(--font-body-size);
+  font-weight: 500;
+  cursor: pointer;
+  padding: 0;
+  align-self: flex-start;
+}
+
+.edit-profile-page__back:hover {
+  text-decoration: underline;
+}
+
+.edit-profile-page h1 {
+  font-size: var(--font-h1-size);
+  font-weight: var(--font-h1-weight);
+  color: var(--color-text-primary);
+}
+
+.edit-profile-page__error {
+  background-color: var(--color-danger-soft);
+  color: var(--color-danger);
+  padding: var(--space-md);
+  border-radius: var(--radius-md);
+  font-size: var(--font-caption-size);
+  margin: 0;
+}
+
+.edit-profile-page__content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-sm);
+  padding-top: var(--space-md);
+}
+
+.edit-profile-page__avatar-wrap {
+  position: relative;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  padding: 0;
+}
+
+.edit-profile-page__avatar-img {
+  width: 96px;
+  height: 96px;
+  border-radius: 50%;
+  object-fit: cover;
+}
+
+.edit-profile-page__avatar-placeholder {
+  width: 96px;
+  height: 96px;
+  border-radius: 50%;
+  background-color: var(--color-accent-soft);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.edit-profile-page__camera-badge {
+  position: absolute;
+  bottom: 0;
+  right: 0;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background-color: var(--color-accent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 2px solid var(--color-background);
+}
+
+.edit-profile-page__photo-hint {
+  font-size: var(--font-caption-size);
+  color: var(--color-text-muted);
+  margin-bottom: var(--space-md);
+}
+
+.edit-profile-page__form {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+}
+
+.edit-profile-page__label {
+  font-size: var(--font-body-medium-size);
+  font-weight: var(--font-body-medium-weight);
+  color: var(--color-text-primary);
+}
+
+.edit-profile-page__input {
+  width: 100%;
+  background-color: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: var(--space-md);
+  font-size: var(--font-body-size);
+  color: var(--color-text-primary);
+  outline: none;
+  transition: border-color 0.2s ease;
+}
+
+.edit-profile-page__input:focus {
+  border-color: var(--color-accent);
+}
+
+.edit-profile-page__footer {
+  margin-top: var(--space-xl);
+}
