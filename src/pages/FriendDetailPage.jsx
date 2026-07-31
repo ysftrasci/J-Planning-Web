@@ -18,18 +18,24 @@ export default function FriendDetailPage() {
   // Sayfaya FriendsListPage üzerinden gelindiyse isim state'te hazır bulunur.
   // Sayfa doğrudan yenilenirse (state kaybolur), arkadaş listesinden tekrar bulunur.
   const [friendName, setFriendName] = useState(location.state?.friendName || '');
+  const [friendPhotoURL, setFriendPhotoURL] = useState(location.state?.friendPhotoURL || '');
   const [loading, setLoading] = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
 
   useEffect(() => {
-    if (friendName || !user) return;
+    if (!user) return;
     const unsub = listenFriends(user.uid, (friends) => {
       const match = friends.find((f) => f.id === friendshipId);
-      if (match) setFriendName(match.friendName);
+      if (match) {
+        setFriendName(match.friendName);
+        if (match.friendPhotoURL) {
+          setFriendPhotoURL(match.friendPhotoURL);
+        }
+      }
     });
     return unsub;
-  }, [friendName, user, friendshipId]);
+  }, [user, friendshipId]);
 
   const handleRemove = async () => {
     setLoading(true);
@@ -55,7 +61,11 @@ export default function FriendDetailPage() {
 
       <div className="friend-detail-page__content">
         <div className="friend-detail-page__avatar">
-          <span>{friendName ? friendName.charAt(0).toUpperCase() : '?'}</span>
+          {friendPhotoURL ? (
+            <img src={friendPhotoURL} alt={friendName} className="friend-detail-page__avatar-image" />
+          ) : (
+            <span>{friendName ? friendName.charAt(0).toUpperCase() : '?'}</span>
+          )}
         </div>
         <h1 className="friend-detail-page__name">{friendName || 'Yükleniyor...'}</h1>
         <p className="friend-detail-page__hint">

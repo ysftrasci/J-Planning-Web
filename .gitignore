@@ -17,5 +17,6 @@ yarn-error.log*
 *.suo
 *.ntvs*
 *.njsproj
-*.sln
-*.sw?
+# Mobile backup
+J-Planning-clean/
+

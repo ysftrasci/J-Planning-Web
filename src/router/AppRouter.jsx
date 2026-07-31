@@ -12,6 +12,8 @@ import FriendsListPage from '../pages/FriendsListPage.jsx';
 import AddFriendPage from '../pages/AddFriendPage.jsx';
 import FriendDetailPage from '../pages/FriendDetailPage.jsx';
 import AssignedByMePage from '../pages/AssignedByMePage.jsx';
+import FocusPage from '../pages/FocusPage.jsx';
+import FocusHistoryPage from '../pages/FocusHistoryPage.jsx';
 import { useAuth } from '../context/AuthContext.jsx';
 
 // Aşama 0 kapsamında kurulan temel yönlendirme (routing) iskeleti,
@@ -19,6 +21,7 @@ import { useAuth } from '../context/AuthContext.jsx';
 // Aşama 3 ile birlikte çekirdek görev ekranları eklendi.
 // Aşama 4 ile birlikte ödül/puan ekranları eklendi.
 // Aşama 5 ile birlikte arkadaşlık/sosyal ekranları eklendi.
+// Aşama 6 ile birlikte odaklanma modu ekranları eklendi.
 // Rotalar, ilgili Aşama tamamlandıkça gerçek ekranlarla değiştirilecek:
 //   "/"             -> Aşama 3: TasksListPage (tamamlandı)
 //   "/add-task"     -> Aşama 3: AddTaskPage (tamamlandı)
@@ -32,8 +35,9 @@ import { useAuth } from '../context/AuthContext.jsx';
 //   "/friends/add"          -> Aşama 5: AddFriendPage (tamamlandı)
 //   "/friends/:friendshipId"-> Aşama 5: FriendDetailPage (tamamlandı)
 //   "/assigned-by-me"       -> Aşama 5: AssignedByMePage (tamamlandı)
-//   "/focus"        -> Aşama 6: FocusScreen
-//   "/profile"      -> Aşama 7: ProfileScreen
+//   "/focus"                -> Aşama 6: FocusPage (tamamlandı)
+//   "/focus/history"        -> Aşama 6: FocusHistoryPage (tamamlandı)
+//   "/profile"              -> Aşama 7: ProfileScreen
 
 // Giriş yapılmamışsa /login'e yönlendirir; auth durumu netleşene kadar
 // (initializing) hiçbir şey render etmez, böylece kısa süreliğine
@@ -81,10 +85,8 @@ export default function AppRouter() {
         <Route path="friends/add" element={<AddFriendPage />} />
         <Route path="friends/:friendshipId" element={<FriendDetailPage />} />
         <Route path="assigned-by-me" element={<AssignedByMePage />} />
-        <Route
-          path="focus"
-          element={<PlaceholderPage title="Odaklanma" stageLabel="Aşama 6" />}
-        />
+        <Route path="focus" element={<FocusPage />} />
+        <Route path="focus/history" element={<FocusHistoryPage />} />
         <Route
           path="profile"
           element={<PlaceholderPage title="Profil" stageLabel="Aşama 7" />}

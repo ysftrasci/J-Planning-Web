@@ -88,7 +88,7 @@ export default function FriendsListPage() {
               type="button"
               key={item.id}
               className="friends-list-page__friend-card"
-              onClick={() => navigate(`/friends/${item.id}`, { state: { friendName: item.friendName, friendUid: item.friendUid } })}
+              onClick={() => navigate(`/friends/${item.id}`, { state: { friendName: item.friendName, friendUid: item.friendUid, friendPhotoURL: item.friendPhotoURL } })}
             >
               <div className="friends-list-page__avatar">
                 {item.friendPhotoURL ? (

@@ -5,17 +5,19 @@
 import { useEffect } from 'react';
 import './AppModal.css';
 
-export default function AppModal({ open, onClose, title, children }) {
+export default function AppModal({ open, visible, onClose, title, children }) {
+  const isOpen = open ?? visible;
+
   useEffect(() => {
-    if (!open) return;
+    if (!isOpen) return;
     const handleKey = (e) => {
       if (e.key === 'Escape') onClose?.();
     };
     window.addEventListener('keydown', handleKey);
     return () => window.removeEventListener('keydown', handleKey);
-  }, [open, onClose]);
+  }, [isOpen, onClose]);
 
-  if (!open) return null;
+  if (!isOpen) return null;
 
   return (
     <div className="app-modal__overlay" onClick={onClose}>
