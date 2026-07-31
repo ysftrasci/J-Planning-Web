@@ -21,12 +21,12 @@ import {
 import { getFirestore } from 'firebase/firestore';
 
 const firebaseConfig = {
-  apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
-  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
-  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
-  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
-  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
-  appId: import.meta.env.VITE_FIREBASE_APP_ID,
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY || 'AIzaSyBtVOLogan59jxLkr5U9QNS2gCLCxMBKoM',
+  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || 'j-planning.firebaseapp.com',
+  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID || 'j-planning',
+  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || 'j-planning.firebasestorage.app',
+  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || '928119312572',
+  appId: import.meta.env.VITE_FIREBASE_APP_ID || '1:928119312572:web:c44c226954d1d4e95c00b9',
 };
 
 // Vite'ın Fast Refresh'i sırasında initializeApp'in tekrar çağrılmasını önle
