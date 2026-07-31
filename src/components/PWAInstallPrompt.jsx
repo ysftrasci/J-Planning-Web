@@ -10,39 +10,38 @@ export default function PWAInstallPrompt() {
   const [isIOS, setIsIOS] = useState(false);
 
   useEffect(() => {
-    // Uygulama zaten standalone/PWA olarak çalışıyorsa gösterme
-    const isStandalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone;
-    if (isStandalone) return;
+    try {
+      const isStandalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone;
+      if (isStandalone) return;
 
-    // iOS Safari tespiti
-    const userAgent = window.navigator.userAgent.toLowerCase();
-    const isIosDevice = /iphone|ipad|ipod/.test(userAgent);
-    setIsIOS(isIosDevice);
+      const userAgent = window.navigator.userAgent.toLowerCase();
+      const isIosDevice = /iphone|ipad|ipod/.test(userAgent);
+      setIsIOS(isIosDevice);
 
-    if (isIosDevice) {
-      // iOS Safari için daha önce kapatılmadıysa göster
-      const dismissed = localStorage.getItem('jplanning:pwa_dismissed');
-      if (!dismissed) {
+      let dismissed = false;
+      try {
+        dismissed = !!localStorage.getItem('jplanning:pwa_dismissed');
+      } catch (e) {}
+
+      if (isIosDevice && !dismissed) {
         setShowBanner(true);
       }
+
+      const handleBeforeInstallPrompt = (e) => {
+        e.preventDefault();
+        setDeferredPrompt(e);
+        if (!dismissed) {
+          setShowBanner(true);
+        }
+      };
+
+      window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+      return () => {
+        window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+      };
+    } catch (err) {
+      // PWA tespiti başarısız olursa uygulamayı çökertme
     }
-
-    // Android / Chrome / Desktop için install prompt olayı
-    const handleBeforeInstallPrompt = (e) => {
-      e.preventDefault();
-      setDeferredPrompt(e);
-
-      const dismissed = localStorage.getItem('jplanning:pwa_dismissed');
-      if (!dismissed) {
-        setShowBanner(true);
-      }
-    };
-
-    window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
-
-    return () => {
-      window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
-    };
   }, []);
 
   const handleInstallClick = async () => {
