@@ -31,6 +31,54 @@
   color: var(--color-text-primary);
 }
 
+.notification-settings-page__toast {
+  background-color: var(--color-accent-soft);
+  color: var(--color-accent-dark);
+  padding: var(--space-md);
+  border-radius: var(--radius-md);
+  font-size: var(--font-caption-size);
+  font-weight: 600;
+  text-align: center;
+  animation: notification-fade-in 0.2s ease-out;
+}
+
+.notification-settings-page__perm-banner {
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+  background-color: var(--color-accent-soft);
+  padding: var(--space-md);
+  border-radius: var(--radius-md);
+}
+
+.notification-settings-page__perm-text {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+
+.notification-settings-page__perm-text strong {
+  font-size: var(--font-body-medium-size);
+  color: var(--color-accent-dark);
+}
+
+.notification-settings-page__perm-text p {
+  font-size: var(--font-caption-size);
+  color: var(--color-accent-dark);
+  margin: 0;
+}
+
+.notification-settings-page__perm-button {
+  background-color: var(--color-accent);
+  color: #ffffff;
+  border: none;
+  padding: var(--space-xs) var(--space-md);
+  border-radius: var(--radius-pill);
+  font-size: var(--font-caption-size);
+  font-weight: 600;
+  cursor: pointer;
+}
+
 .notification-settings-page__intro {
   font-size: var(--font-caption-size);
   color: var(--color-text-muted);
@@ -85,20 +133,35 @@
   margin-top: 2px;
 }
 
-.notification-settings-page__delete-button {
+.notification-settings-page__card-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+}
+
+.notification-settings-page__action-button {
   background: transparent;
   border: none;
   color: var(--color-text-muted);
   cursor: pointer;
   padding: var(--space-xs);
-  transition: color 0.2s ease;
+  border-radius: var(--radius-sm);
+  transition: all 0.2s ease;
 }
 
-.notification-settings-page__delete-button:hover {
+.notification-settings-page__action-button:hover {
+  color: var(--color-accent-dark);
+  background-color: var(--color-surface-alt);
+}
+
+.notification-settings-page__action-button--danger:hover {
   color: var(--color-danger);
+  background-color: var(--color-danger-soft);
 }
 
-.notification-settings-page__add-wrap {
+.notification-settings-page__actions {
+  display: flex;
+  gap: var(--space-md);
   margin-top: var(--space-md);
 }
 
@@ -200,4 +263,9 @@
 
 .notification-settings-page__modal-actions button {
   flex: 1;
+}
+
+@keyframes notification-fade-in {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
 }

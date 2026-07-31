@@ -1,9 +1,11 @@
 // J-Planning — Bildirim Servisi (Web)
 //
 // Web ortamında zamanlamalar localStorage üzerinde saklanır.
-// Web Notification API (veya PWA Service Worker bildirimleri) entegrasyonu sağlar.
+// Web Notification API ile tarayıcı bildirimi gönderilmesi ve arka plan
+// kontrol döngüsü sağlanır.
 
 const STORAGE_KEY = 'jplanning:notification_schedules';
+let lastTriggeredMinuteKey = '';
 
 export const WEEKDAYS = [
   { value: 1, label: 'Pazar', short: 'Paz' },
@@ -35,6 +37,22 @@ export async function getNotificationPermissionStatus() {
   return Notification.permission;
 }
 
+export function sendWebNotification(title, body) {
+  if (!('Notification' in window)) return false;
+  if (Notification.permission === 'granted') {
+    try {
+      new Notification(title, {
+        body: body || 'Görevlerine göz atmayı unutma!',
+        icon: '/favicon.svg',
+      });
+      return true;
+    } catch (e) {
+      console.warn('Web bildirim hatası:', e);
+    }
+  }
+  return false;
+}
+
 export async function getSchedules() {
   const raw = localStorage.getItem(STORAGE_KEY);
   return raw ? JSON.parse(raw) : [];
@@ -50,6 +68,14 @@ export async function addSchedule(schedule) {
   schedules.push(newSchedule);
   await saveSchedules(schedules);
   return newSchedule.id;
+}
+
+export async function updateSchedule(scheduleId, updatedData) {
+  const schedules = await getSchedules();
+  const updated = schedules.map((s) =>
+    s.id === scheduleId ? { ...s, ...updatedData } : s
+  );
+  await saveSchedules(updated);
 }
 
 export async function removeSchedule(scheduleId) {
@@ -68,4 +94,37 @@ export function weekdayLabel(value) {
 
 export function formatTime(hour, minute) {
   return `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
+}
+
+// Zamanlanmış bildirim kontrolü (Uygulama açıkken veya PWA ortamında zamanı gelen bildirimi tetikler)
+export async function checkAndTriggerSchedules() {
+  const now = new Date();
+  // 1 = Pazar, 2 = Pazartesi ... 7 = Cumartesi (Expo/JS Date standardı)
+  const currentWeekday = now.getDay() + 1;
+  const currentHour = now.getHours();
+  const currentMinute = now.getMinutes();
+
+  const minuteKey = `${now.getFullYear()}-${now.getMonth()}-${now.getDate()}-${currentHour}:${currentMinute}`;
+  if (lastTriggeredMinuteKey === minuteKey) return;
+
+  const schedules = await getSchedules();
+  for (const schedule of schedules) {
+    if (
+      schedule.weekdays.includes(currentWeekday) &&
+      schedule.hour === currentHour &&
+      schedule.minute === currentMinute
+    ) {
+      lastTriggeredMinuteKey = minuteKey;
+      sendWebNotification(
+        'J-Planning Hatırlatması 🔔',
+        schedule.label || schedule.body || 'Görevlerine göz atmayı unutma!'
+      );
+      break;
+    }
+  }
+}
+
+// Uygulama açık olduğu sürece her 15 saniyede bir zamanlamaları kontrol et
+if (typeof window !== 'undefined') {
+  setInterval(checkAndTriggerSchedules, 15000);
 }

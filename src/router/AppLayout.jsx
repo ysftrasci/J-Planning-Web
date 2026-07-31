@@ -1,13 +1,11 @@
 import { NavLink, Outlet } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext.jsx';
+import PWAInstallPrompt from '../components/PWAInstallPrompt.jsx';
 
 // J-Planning — Temel Sayfa Yönlendirme İskeleti (Web)
 //
 // Mobildeki alt sekme (bottom tab) navigasyonunun (RootNavigator.js)
-// web karşılığıdır. Şu an için sadece iskelet: her sekme, ilgili Aşama
-// (3-7) hayata geçtikçe gerçek ekranlarla doldurulacak.
-// Aşama 2: geçici bir "Çıkış yap" bağlantısı eklendi — asıl yeri
-// Aşama 7'deki ProfileScreen olacak, o zamana kadar test amaçlı burada.
+// web karşılığıdır.
 
 const TABS = [
   { to: '/', label: 'Görevler', end: true },
@@ -59,6 +57,8 @@ export default function AppLayout() {
       <main style={{ flex: 1, padding: 'var(--space-lg)' }}>
         <Outlet />
       </main>
+
+      <PWAInstallPrompt />
 
       <nav
         style={{
