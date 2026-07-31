@@ -31,10 +31,10 @@ export default function DangerZonePage() {
       <button
         type="button"
         className="danger-zone-page__back"
-        onClick={() => navigate('/profile')}
+        onClick={() => navigate('/')}
       >
         <ChevronLeft size={18} />
-        Profil
+        Görevlerim
       </button>
 
       <h1>Tehlikeli Alan</h1>

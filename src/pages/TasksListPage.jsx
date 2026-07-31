@@ -229,7 +229,7 @@ export default function TasksListPage() {
         <button
           type="button"
           className="tasks-list-page__danger-zone-link"
-          onClick={() => showToast('Tehlikeli Alan, Aşama 7\'de Profil bölümüyle birlikte eklenecek.')}
+          onClick={() => navigate('/profile/danger-zone')}
         >
           Tehlikeli Alan'ı görüntüle
           <ChevronRight size={14} />

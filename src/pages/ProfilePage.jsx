@@ -142,12 +142,6 @@ export default function ProfilePage() {
           label="Şifre Değiştir"
           onClick={() => setShowResetPasswordConfirm(true)}
         />
-        <MenuRow
-          Icon={ShieldAlert}
-          label="Tehlikeli Alan"
-          onClick={() => navigate('/profile/danger-zone')}
-          danger
-        />
       </div>
 
       <div className="profile-page__signout-wrap">
