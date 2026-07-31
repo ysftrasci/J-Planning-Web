@@ -24,14 +24,12 @@ export function AuthProvider({ children }) {
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
       if (firebaseUser) {
         try {
-          // updateProfile (displayName ayarlama) ile onAuthStateChanged
-          // tetiklenmesi arasında olası bir yarış durumuna karşı, en güncel
-          // bilgiyi tazele.
-          await firebaseUser.reload();
-          // Kullanıcı ilk kez giriş yapıyorsa, benzersiz Kullanıcı ID'sini
-          // (bkz. doküman bölüm 0.1) Firestore'da oluştur/getir.
+          try {
+            await firebaseUser.reload();
+          } catch (reloadErr) {
+            // Ağ yavaşlığında reload hatasını yut, devam et
+          }
           const profile = await ensureUserProfile(firebaseUser);
-          // Bu kullanıcıya ait sql.js veritabanını (IndexedDB'den) yükle/aç.
           await initDatabase(firebaseUser.uid);
           setUser({ ...firebaseUser, profile });
         } catch (error) {

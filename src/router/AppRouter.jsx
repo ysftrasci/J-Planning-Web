@@ -48,17 +48,37 @@ import { useAuth } from '../context/AuthContext.jsx';
 // Giriş yapılmamışsa /login'e yönlendirir; auth durumu netleşene kadar
 // (initializing) hiçbir şey render etmez, böylece kısa süreliğine
 // LoginPage'in yanıp sönmesi önlenir.
+function LoadingScreen() {
+  return (
+    <div
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        justifyContent: 'center',
+        minHeight: '100vh',
+        backgroundColor: 'var(--color-background, #FAF5F7)',
+        color: 'var(--color-accent, #E06D8C)',
+        fontFamily: 'sans-serif',
+        gap: '12px',
+      }}
+    >
+      <h2 style={{ margin: 0, fontSize: '22px', fontWeight: '700' }}>J-Planning</h2>
+      <p style={{ margin: 0, opacity: 0.7, fontSize: '14px' }}>Yükleniyor, lütfen bekleyin...</p>
+    </div>
+  );
+}
+
 function RequireAuth({ children }) {
   const { user, initializing } = useAuth();
-  if (initializing) return null;
+  if (initializing) return <LoadingScreen />;
   if (!user) return <Navigate to="/login" replace />;
   return children;
 }
 
-// Zaten giriş yapmış bir kullanıcı /login'e giderse ana ekrana yönlendirir.
 function RedirectIfAuthed({ children }) {
   const { user, initializing } = useAuth();
-  if (initializing) return null;
+  if (initializing) return <LoadingScreen />;
   if (user) return <Navigate to="/" replace />;
   return children;
 }

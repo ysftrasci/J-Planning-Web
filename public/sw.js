@@ -1,26 +1,13 @@
 // J-Planning — Service Worker (PWA Çevrimdışı Çalışma Desteği)
 
-const CACHE_NAME = 'j-planning-v1';
-const PRECACHE_ASSETS = [
-  '/',
-  '/index.html',
-  '/favicon.svg',
-  '/manifest.json',
-  '/icons/icon-192.png',
-  '/icons/icon-512.png',
-  '/icons/maskable-icon.png',
-];
+const CACHE_NAME = 'j-planning-v2';
 
 // Service Worker Kurulumu & Önbelleğe alma
 self.addEventListener('install', (event) => {
-  event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => {
-      return cache.addAll(PRECACHE_ASSETS);
-    }).then(() => self.skipWaiting())
-  );
+  self.skipWaiting();
 });
 
-// Eski Önbellekleri Temizleme
+// Eski Önbellekleri Temizleme (Her yeni yayında eski önbelleği anında sil)
 self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches.keys().then((cacheNames) => {
@@ -35,41 +22,35 @@ self.addEventListener('activate', (event) => {
   );
 });
 
-// Çevrimdışı İstek Yönetimi (Network First, Cache Fallback)
+// İstek Yönetimi (Network First — Her zaman öncelikle güncel sunucu dosyasını çek)
 self.addEventListener('fetch', (event) => {
-  // Sadece GET isteklerini işle (Firebase veya API POST isteklerini bypass et)
   if (event.request.method !== 'GET') return;
+  if (!event.request.url.startsWith('http')) return;
 
-  const url = new URL(event.request.url);
+  // HTML sayfa gezintisi için her zaman canlı sunucudan dene
+  if (event.request.mode === 'navigate') {
+    event.respondWith(
+      fetch(event.request).catch(() => {
+        return caches.match('/index.html');
+      })
+    );
+    return;
+  }
 
-  // Statik varlıklar veya sayfa yönlendirmeleri için strateji
+  // Statik dosyalar için Network-First stratejisi
   event.respondWith(
     fetch(event.request)
-      .then((networkResponse) => {
-        // Başarılı sunucu yanıtını önbelleğe kaydet
-        if (
-          networkResponse &&
-          networkResponse.status === 200 &&
-          networkResponse.type === 'basic'
-        ) {
-          const responseToCache = networkResponse.clone();
+      .then((response) => {
+        if (response && response.status === 200) {
+          const responseClone = response.clone();
           caches.open(CACHE_NAME).then((cache) => {
-            cache.put(event.request, responseToCache);
+            cache.put(event.request, responseClone);
           });
         }
-        return networkResponse;
+        return response;
       })
       .catch(() => {
-        // Çevrimdışıysak önbellekten yanıt dön
-        return caches.match(event.request).then((cachedResponse) => {
-          if (cachedResponse) {
-            return cachedResponse;
-          }
-          // Sayfa navigasyonu için index.html dön
-          if (event.request.mode === 'navigate') {
-            return caches.match('/index.html');
-          }
-        });
+        return caches.match(event.request);
       })
   );
 });
