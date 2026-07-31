@@ -54,6 +54,15 @@
   overflow-wrap: anywhere;
 }
 
+.task-card__description {
+  font-size: var(--font-caption-size);
+  color: var(--color-text-secondary);
+  margin: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .task-card__badge {
   display: flex;
   align-items: center;

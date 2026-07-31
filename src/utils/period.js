@@ -63,10 +63,10 @@ export function getPeriodEndTimestamp(period, periodKey) {
   return d.getTime();
 }
 
-// 1.5 kuralı: geçmişe dönük düzeltme için 30 günlük sınır kontrolü.
+// 1.5 kuralı: geçmişe dönük düzeltme için 7 günlük (1 hafta) sınır kontrolü.
 export function isWithinLateMarkWindow(periodEndTimestamp) {
-  const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
-  return Date.now() - periodEndTimestamp <= THIRTY_DAYS_MS;
+  const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
+  return Date.now() - periodEndTimestamp <= SEVEN_DAYS_MS;
 }
 
 export function periodLabel(period) {

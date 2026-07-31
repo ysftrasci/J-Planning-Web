@@ -66,6 +66,10 @@ export default function TaskCard({ task, status, completedSubtasks, streak, onOp
             )}
           </div>
 
+          {task.description && (
+            <p className="task-card__description">{task.description}</p>
+          )}
+
           <div className="task-card__meta-row">
             <span>{periodLabel(task.period)}</span>
             <span className="task-card__meta-dot">•</span>

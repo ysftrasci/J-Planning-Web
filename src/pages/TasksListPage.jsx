@@ -1,8 +1,6 @@
-// J-Planning — Görevlerim Sayfası (Web)
-// Mobildeki src/screens/TasksListScreen.js dosyasının web karşılığı.
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Send, Plus, CheckCircle2, ChevronRight, Tags, Bell } from 'lucide-react';
+import { Send, Plus, CheckCircle2, ChevronRight, Tags, Bell, Search, X, SlidersHorizontal, Filter } from 'lucide-react';
 import {
   getActiveTasks,
   getCurrentPeriodStatus,
@@ -20,6 +18,8 @@ import { listenFriends } from '../services/friendService';
 import TaskCard from '../components/TaskCard.jsx';
 import EmptyState from '../components/EmptyState.jsx';
 import AssignedTaskModal from '../components/AssignedTaskModal.jsx';
+import AppModal from '../components/AppModal.jsx';
+import AppButton from '../components/AppButton.jsx';
 import './TasksListPage.css';
 
 export default function TasksListPage() {
@@ -31,6 +31,13 @@ export default function TasksListPage() {
   const [pendingAssigned, setPendingAssigned] = useState([]);
   const [modalTask, setModalTask] = useState(null);
   const [friendNameByUid, setFriendNameByUid] = useState({});
+  const [searchQuery, setSearchQuery] = useState('');
+  
+  // Filtre durumları
+  const [showFilterModal, setShowFilterModal] = useState(false);
+  const [periodFilter, setPeriodFilter] = useState('ALL'); // 'ALL' | 'DAILY' | 'WEEKLY' | 'MONTHLY' | 'ONCE'
+  const [priorityFilter, setPriorityFilter] = useState('ALL'); // 'ALL' | 'HIGH' | 'MEDIUM' | 'LOW'
+  const [sourceFilter, setSourceFilter] = useState('ALL'); // 'ALL' | 'MINE' | 'RECEIVED'
 
   useEffect(() => {
     if (!user) return;
@@ -51,13 +58,8 @@ export default function TasksListPage() {
     const grouped = new Map();
 
     tasks.forEach((task) => {
-      // Arkadaşıma attığım görevler (SENT) burada gösterilmez — kendi görev
-      // listem sadece benim yapmam gereken görevleri içerir. Attıklarımı
-      // ayrı bir sayfada ("Attıklarım") görebilirim.
       if (task.assignmentDirection === 'SENT') return;
 
-      // Arkadaşın atama anındaki ismi (assignedByName) sonradan değişmiş
-      // olabilir — gösterirken her zaman GÜNCEL ismi kullan.
       const displayTask = task.assignedByUserId && friendNameByUid[task.assignedByUserId]
         ? { ...task, assignedByName: friendNameByUid[task.assignedByUserId] }
         : task;
@@ -98,8 +100,6 @@ export default function TasksListPage() {
       if (result?.fullyCompleted && result.bonus > 0) {
         showToast(`Seri Bonusu! 🔥 ${result.newStreak} günlük seriye ulaştın! +${result.bonus} JP bonus kazandın (toplam +${result.total} JP).`);
       }
-      // Bu görev bir arkadaşımdan atandıysa (RECEIVED), tamamlanma durumunu
-      // Firestore'a da yansıt ki atayan kişi gerçek zamanlı görebilsin.
       if (result?.firestoreAssignmentId) {
         syncCompletionStatusToFirestore(result.firestoreAssignmentId, {
           isCompleted: !!result.fullyCompleted || !!result.alreadyComplete,
@@ -133,8 +133,6 @@ export default function TasksListPage() {
     if (!modalTask) return;
     try {
       await acceptAssignedTask(modalTask.id);
-      // Kabul edilen görev, kendi yerel görev listesine de eklenir (tamamlanabilmesi için).
-      // Not: kabul sonrası silinemez (bkz. taskRepository.deleteTask kuralı).
       createTaskFromAssignment(modalTask);
       setModalTask(null);
       load();
@@ -153,6 +151,39 @@ export default function TasksListPage() {
     }
   };
 
+  const isFilterActive = periodFilter !== 'ALL' || priorityFilter !== 'ALL' || sourceFilter !== 'ALL';
+
+  const resetFilters = () => {
+    setPeriodFilter('ALL');
+    setPriorityFilter('ALL');
+    setSourceFilter('ALL');
+  };
+
+  const filteredSections = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    return sections
+      .map((sec) => {
+        const matchingData = sec.data.filter((item) => {
+          const t = item.task;
+          const matchesQuery = !q || t.title.toLowerCase().includes(q) || (t.description && t.description.toLowerCase().includes(q));
+
+          let matchesPeriod = true;
+          if (periodFilter !== 'ALL') matchesPeriod = t.period === periodFilter;
+
+          let matchesPriority = true;
+          if (priorityFilter !== 'ALL') matchesPriority = t.priority === priorityFilter;
+
+          let matchesSource = true;
+          if (sourceFilter === 'MINE') matchesSource = !t.assignmentDirection;
+          else if (sourceFilter === 'RECEIVED') matchesSource = t.assignmentDirection === 'RECEIVED';
+
+          return matchesQuery && matchesPeriod && matchesPriority && matchesSource;
+        });
+        return { ...sec, data: matchingData };
+      })
+      .filter((sec) => sec.data.length > 0);
+  }, [sections, searchQuery, periodFilter, priorityFilter, sourceFilter]);
+
   const hasTasks = sections.length > 0;
 
   return (
@@ -160,6 +191,15 @@ export default function TasksListPage() {
       <div className="tasks-list-page__header">
         <h1>Görevlerim</h1>
         <div className="tasks-list-page__header-buttons">
+          <button
+            type="button"
+            className={`tasks-list-page__icon-button ${isFilterActive ? 'tasks-list-page__icon-button--active' : ''}`}
+            onClick={() => setShowFilterModal(true)}
+            aria-label="Filtrele"
+            title="Filtrele"
+          >
+            <SlidersHorizontal size={18} />
+          </button>
           <button
             type="button"
             className="tasks-list-page__icon-button"
@@ -199,15 +239,69 @@ export default function TasksListPage() {
 
       {toast && <div className="tasks-list-page__toast">{toast}</div>}
 
-      {!loading && !hasTasks && (
+      {/* Arama ve Filtreleme Bölümü */}
+      <div className="tasks-list-page__filter-bar">
+        <div className="tasks-list-page__search-wrap">
+          <Search size={16} color="var(--color-text-secondary)" />
+          <input
+            type="text"
+            className="tasks-list-page__search-input"
+            placeholder="Görevlerde ara..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+          />
+          {searchQuery && (
+            <button
+              type="button"
+              className="tasks-list-page__search-clear"
+              onClick={() => setSearchQuery('')}
+            >
+              <X size={14} />
+            </button>
+          )}
+        </div>
+
+        <div className="tasks-list-page__chips-row">
+          <button
+            type="button"
+            className={`tasks-list-page__chip ${!isFilterActive ? 'tasks-list-page__chip--active' : ''}`}
+            onClick={resetFilters}
+          >
+            Tümü
+          </button>
+          <button
+            type="button"
+            className={`tasks-list-page__chip ${periodFilter === 'DAILY' ? 'tasks-list-page__chip--active' : ''}`}
+            onClick={() => setPeriodFilter((prev) => (prev === 'DAILY' ? 'ALL' : 'DAILY'))}
+          >
+            Günlük
+          </button>
+          <button
+            type="button"
+            className={`tasks-list-page__chip ${priorityFilter === 'HIGH' ? 'tasks-list-page__chip--active' : ''}`}
+            onClick={() => setPriorityFilter((prev) => (prev === 'HIGH' ? 'ALL' : 'HIGH'))}
+          >
+            Yüksek Öncelik
+          </button>
+          <button
+            type="button"
+            className={`tasks-list-page__chip ${sourceFilter === 'RECEIVED' ? 'tasks-list-page__chip--active' : ''}`}
+            onClick={() => setSourceFilter((prev) => (prev === 'RECEIVED' ? 'ALL' : 'RECEIVED'))}
+          >
+            Arkadaşımdan
+          </button>
+        </div>
+      </div>
+
+      {!loading && filteredSections.length === 0 && (
         <EmptyState
           icon={CheckCircle2}
-          title="Henüz görev yok"
-          subtitle="Sağ üstteki + butonuna dokunarak ilk görevini ekle"
+          title={searchQuery || isFilterActive ? 'Eşleşen görev bulunamadı' : 'Henüz görev yok'}
+          subtitle={searchQuery || isFilterActive ? 'Filtreleri veya arama kelimesini değiştirmeyi dene' : 'Sağ üstteki + butonuna dokunarak ilk görevini ekle'}
         />
       )}
 
-      {sections.map((section) => (
+      {filteredSections.map((section) => (
         <div key={section.title} className="tasks-list-page__section">
           <h2 className="tasks-list-page__section-title">{section.title}</h2>
           {section.data.map((item) => (
@@ -243,6 +337,71 @@ export default function TasksListPage() {
         onAccept={handleAcceptAssigned}
         onReject={handleRejectAssigned}
       />
+
+      {/* Detaylı Filtreleme Modalı */}
+      {showFilterModal && (
+        <AppModal
+          open={showFilterModal}
+          onClose={() => setShowFilterModal(false)}
+          title="Görevleri Filtrele"
+        >
+          <div className="tasks-list-page__filter-modal">
+            <div className="tasks-list-page__filter-group">
+              <label className="tasks-list-page__filter-label">Periyot</label>
+              <div className="tasks-list-page__chip-row">
+                <Chip label="Tümü" selected={periodFilter === 'ALL'} onClick={() => setPeriodFilter('ALL')} />
+                <Chip label="Günlük" selected={periodFilter === 'DAILY'} onClick={() => setPeriodFilter('DAILY')} />
+                <Chip label="Haftalık" selected={periodFilter === 'WEEKLY'} onClick={() => setPeriodFilter('WEEKLY')} />
+                <Chip label="Aylık" selected={periodFilter === 'MONTHLY'} onClick={() => setPeriodFilter('MONTHLY')} />
+                <Chip label="Tek Seferlik" selected={periodFilter === 'ONCE'} onClick={() => setPeriodFilter('ONCE')} />
+              </div>
+            </div>
+
+            <div className="tasks-list-page__filter-group">
+              <label className="tasks-list-page__filter-label">Öncelik / Zorluk</label>
+              <div className="tasks-list-page__chip-row">
+                <Chip label="Tümü" selected={priorityFilter === 'ALL'} onClick={() => setPriorityFilter('ALL')} />
+                <Chip label="Yüksek / Zor" selected={priorityFilter === 'HIGH'} onClick={() => setPriorityFilter('HIGH')} />
+                <Chip label="Orta" selected={priorityFilter === 'MEDIUM'} onClick={() => setPriorityFilter('MEDIUM')} />
+                <Chip label="Düşük / Kolay" selected={priorityFilter === 'LOW'} onClick={() => setPriorityFilter('LOW')} />
+              </div>
+            </div>
+
+            <div className="tasks-list-page__filter-group">
+              <label className="tasks-list-page__filter-label">Görev Kaynağı</label>
+              <div className="tasks-list-page__chip-row">
+                <Chip label="Tümü" selected={sourceFilter === 'ALL'} onClick={() => setSourceFilter('ALL')} />
+                <Chip label="Kendi Görevlerim" selected={sourceFilter === 'MINE'} onClick={() => setSourceFilter('MINE')} />
+                <Chip label="Arkadaşımdan Gelenler" selected={sourceFilter === 'RECEIVED'} onClick={() => setSourceFilter('RECEIVED')} />
+              </div>
+            </div>
+
+            <div className="tasks-list-page__modal-actions">
+              <AppButton
+                title="Filtreleri Sıfırla"
+                variant="secondary"
+                onClick={resetFilters}
+              />
+              <AppButton
+                title="Uygula"
+                onClick={() => setShowFilterModal(false)}
+              />
+            </div>
+          </div>
+        </AppModal>
+      )}
     </div>
+  );
+}
+
+function Chip({ label, selected, onClick }) {
+  return (
+    <button
+      type="button"
+      className={`tasks-list-page__chip ${selected ? 'tasks-list-page__chip--active' : ''}`}
+      onClick={onClick}
+    >
+      {label}
+    </button>
   );
 }

@@ -14,7 +14,7 @@ import {
   Check,
 } from 'lucide-react';
 import { getDb } from '../db/database';
-import { getTaskRecords, deleteTask, lateMarkTaskComplete, getSubtaskLabels, getTotalJPEarnedForTask } from '../db/taskRepository';
+import { getTaskRecords, deleteTask, lateMarkTaskComplete, lateMarkTaskUncomplete, getSubtaskLabels, getTotalJPEarnedForTask } from '../db/taskRepository';
 import { getPeriodEndTimestamp, isWithinLateMarkWindow, periodLabel } from '../utils/period';
 import {
   calculateCurrentStreak,
@@ -51,7 +51,7 @@ export default function TaskDetailPage() {
   const [records, setRecords] = useState([]);
   const [totalJP, setTotalJP] = useState(0);
   const [selectedMonthKey, setSelectedMonthKey] = useState(null);
-  const [recordToLateMark, setRecordToLateMark] = useState(null);
+  const [recordToLateMark, setRecordToLateMark] = useState(null); // { record, action: 'COMPLETE' | 'UNCOMPLETE' }
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
 
@@ -65,10 +65,9 @@ export default function TaskDetailPage() {
 
   useEffect(load, [load]);
 
-  // Kayıtları ay ay grupla — kullanıcı istediği ayı seçip sadece onu görebilsin.
   const availableMonths = useMemo(() => {
     const months = new Set(records.map((r) => monthKeyOf(r.periodKey)));
-    return Array.from(months).sort().reverse(); // en yeni ay en başta
+    return Array.from(months).sort().reverse();
   }, [records]);
 
   const effectiveMonthKey = selectedMonthKey || availableMonths[0] || monthKeyOf(new Date().toISOString().slice(0, 10));
@@ -101,19 +100,23 @@ export default function TaskDetailPage() {
     if (canGoNewer) setSelectedMonthKey(availableMonths[currentMonthIndex - 1]);
   };
 
-  const openLateMarkConfirm = (record) => {
+  const openLateMarkConfirm = (record, action = 'COMPLETE') => {
     const periodEnd = getPeriodEndTimestamp(task.period, record.periodKey);
     if (!isWithinLateMarkWindow(periodEnd)) {
-      setErrorMessage('Bu görev 30 günden eski olduğu için artık değiştirilemez.');
+      setErrorMessage('Bu görev 7 günden (1 hafta) eski olduğu için artık değiştirilemez.');
       return;
     }
-    setRecordToLateMark(record);
+    setRecordToLateMark({ record, action });
   };
 
   const confirmLateMark = () => {
     if (!recordToLateMark) return;
     try {
-      lateMarkTaskComplete(taskId, recordToLateMark.periodKey);
+      if (recordToLateMark.action === 'UNCOMPLETE') {
+        lateMarkTaskUncomplete(taskId, recordToLateMark.record.periodKey);
+      } else {
+        lateMarkTaskComplete(taskId, recordToLateMark.record.periodKey);
+      }
       setRecordToLateMark(null);
       load();
     } catch (e) {
@@ -140,6 +143,11 @@ export default function TaskDetailPage() {
       <p className="caption task-detail-page__subtitle">
         {periodLabel(task.period)} görev • {PRIORITY_LABEL[task.priority]} öncelik
       </p>
+      {task.description && (
+        <p className="caption" style={{ marginTop: 'var(--space-xs)', color: 'var(--color-text-primary)' }}>
+          📝 {task.description}
+        </p>
+      )}
       <p className="small task-detail-page__start-date">Başlangıç: {startDateLabel}</p>
 
       {isFriendAssigned && (
@@ -217,7 +225,12 @@ export default function TaskDetailPage() {
       ) : (
         <div className="task-detail-page__history-list">
           {filteredRecords.map((record) => (
-            <HistoryRow key={record.id} record={record} task={task} onLateMark={() => openLateMarkConfirm(record)} />
+            <HistoryRow
+              key={record.id}
+              record={record}
+              task={task}
+              onLateMark={(action) => openLateMarkConfirm(record, action)}
+            />
           ))}
         </div>
       )}
@@ -228,14 +241,19 @@ export default function TaskDetailPage() {
         </div>
       )}
 
-      <AppModal open={!!recordToLateMark} onClose={() => setRecordToLateMark(null)} title="Geçmişe Dönük İşaretle">
+      <AppModal open={!!recordToLateMark} onClose={() => setRecordToLateMark(null)} title="Geçmiş Görev Düzenle">
         <p className="caption">
-          {recordToLateMark && formatDate(recordToLateMark.periodKey)} tarihli görevi "Tamamlandı" olarak
-          işaretlemek istediğine emin misin? Bu işlem serini yeniden hesaplayacak.
+          {recordToLateMark && formatDate(recordToLateMark.record.periodKey)} tarihli görevi{" "}
+          <strong>{recordToLateMark?.action === 'UNCOMPLETE' ? '"Yapılmadı"' : '"Tamamlandı"'}</strong> olarak
+          işaretlemek istediğine emin misin? Bu işlem puanı ve serini yeniden hesaplayacak.
         </p>
         <div className="task-detail-page__modal-actions">
           <AppButton title="Vazgeç" variant="ghost" onClick={() => setRecordToLateMark(null)} />
-          <AppButton title="Tamamlandı İşaretle" onClick={confirmLateMark} />
+          <AppButton
+            title={recordToLateMark?.action === 'UNCOMPLETE' ? 'Yapılmadı Yap' : 'Tamamlandı Yap'}
+            variant={recordToLateMark?.action === 'UNCOMPLETE' ? 'danger' : 'primary'}
+            onClick={confirmLateMark}
+          />
         </div>
       </AppModal>
 
@@ -264,12 +282,9 @@ function HistoryRow({ record, task, onLateMark }) {
   const isSuccess = record.status === 'SUCCESSFUL';
   const isPartial = record.status === 'PENDING_PARTIAL';
   const periodEnd = getPeriodEndTimestamp(task.period, record.periodKey);
-  const canLateMark = !isSuccess && isWithinLateMarkWindow(periodEnd);
+  const canLateMark = isWithinLateMarkWindow(periodEnd);
   const subtaskCount = task.subtaskCount || 1;
 
-  // Günlük görevlerde periodKey zaten gerçek günün tarihi. Ama haftalık/aylık
-  // görevlerde periodKey "periyodun başlangıcı"dır — kafa karışıklığını
-  // önlemek için tamamlanmış kayıtlarda gerçek tamamlama tarihi gösterilir.
   const showsRealCompletionDate = isSuccess && record.completedAt && task.period !== 'DAILY';
   const primaryDateLabel = showsRealCompletionDate ? formatDate(new Date(record.completedAt)) : formatDate(record.periodKey);
   const periodContextLabel = showsRealCompletionDate ? `${periodLabel(task.period)} periyodu: ${formatDate(record.periodKey)}` : null;
@@ -291,11 +306,16 @@ function HistoryRow({ record, task, onLateMark }) {
             ? `Tamamlandı${record.isLateMarked ? ' (geç işaretlendi)' : ''}`
             : isPartial
               ? `Devam ediyor (${record.completedSubtasks}/${subtaskCount})`
-              : 'Başarısız'}
+              : 'Başarısız / Yapılmadı'}
         </p>
       </div>
       {canLateMark && (
-        <AppButton title="Düzelt" variant="secondary" onClick={onLateMark} style={{ width: 'auto', padding: 'var(--space-xs) var(--space-md)' }} />
+        <AppButton
+          title={isSuccess ? 'Geri Al' : 'Tamamla'}
+          variant={isSuccess ? 'ghost' : 'secondary'}
+          onClick={() => onLateMark(isSuccess ? 'UNCOMPLETE' : 'COMPLETE')}
+          style={{ width: 'auto', padding: 'var(--space-xs) var(--space-md)' }}
+        />
       )}
     </div>
   );

@@ -27,7 +27,7 @@ function uuid() {
   });
 }
 
-export function createTask({ title, categoryId, priority, period, subtaskCount, subtaskLabels, assignedByUserId, assignedByName }) {
+export function createTask({ title, description, categoryId, priority, period, subtaskCount, subtaskLabels, assignedByUserId, assignedByName }) {
   const db = getDb();
   const id = uuid();
   const now = Date.now();
@@ -36,12 +36,15 @@ export function createTask({ title, categoryId, priority, period, subtaskCount, 
     ? JSON.stringify(subtaskLabels.map((l) => (l || '').trim()))
     : null;
 
+  const descText = typeof description === 'string' && description.trim() ? description.trim() : null;
+
   db.runSync(
-    `INSERT INTO tasks (id, title, categoryId, priority, period, ownerUserId, assignedByUserId, assignedByName, assignmentStatus, subtaskCount, subtaskLabels, createdAt)
-     VALUES (?, ?, ?, ?, ?, 'me', ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO tasks (id, title, description, categoryId, priority, period, ownerUserId, assignedByUserId, assignedByName, assignmentStatus, subtaskCount, subtaskLabels, createdAt)
+     VALUES (?, ?, ?, ?, ?, ?, 'me', ?, ?, ?, ?, ?, ?)`,
     [
       id,
       title,
+      descText,
       categoryId ?? null,
       priority ?? 'MEDIUM',
       period ?? 'DAILY',
@@ -263,8 +266,7 @@ export function uncompleteSubtask(taskId) {
   return { completedSubtasks: Math.max(0, newCompleted), subtaskCount: task.subtaskCount, firestoreAssignmentId: task.firestoreAssignmentId };
 }
 
-// Kural 1.5: Süresi geçmiş bir görevi geriye dönük "Tamamlandı" işaretleme (30 gün sınırı).
-// Geçmişe dönük düzeltme her zaman TÜM alt adımları tamamlanmış sayar (basitlik için).
+// Geçmişe dönük düzeltme (1 hafta / 7 gün sınırı).
 export function lateMarkTaskComplete(taskId, periodKey) {
   const db = getDb();
   const task = db.getFirstSync('SELECT * FROM tasks WHERE id = ?', [taskId]);
@@ -272,7 +274,7 @@ export function lateMarkTaskComplete(taskId, periodKey) {
 
   const periodEnd = getPeriodEndTimestamp(task.period, periodKey);
   if (!isWithinLateMarkWindow(periodEnd)) {
-    throw new Error('Bu görev 30 günden eski olduğu için artık değiştirilemez.');
+    throw new Error('Bu görev 7 günden (1 hafta) eski olduğu için artık değiştirilemez.');
   }
 
   const existing = db.getFirstSync(
@@ -303,6 +305,32 @@ export function lateMarkTaskComplete(taskId, periodKey) {
 
   addWalletTransaction('me', total, 'TASK_COMPLETE', taskId);
   return { newStreak, total };
+}
+
+export function lateMarkTaskUncomplete(taskId, periodKey) {
+  const db = getDb();
+  const task = db.getFirstSync('SELECT * FROM tasks WHERE id = ?', [taskId]);
+  if (!task) throw new Error('Görev bulunamadı');
+
+  const periodEnd = getPeriodEndTimestamp(task.period, periodKey);
+  if (!isWithinLateMarkWindow(periodEnd)) {
+    throw new Error('Bu görev 7 günden (1 hafta) eski olduğu için artık değiştirilemez.');
+  }
+
+  const existing = db.getFirstSync(
+    'SELECT * FROM task_records WHERE taskId = ? AND periodKey = ?',
+    [taskId, periodKey]
+  );
+  if (!existing || existing.status !== 'SUCCESSFUL') return;
+
+  if (existing.jpEarned) {
+    addWalletTransaction('me', -existing.jpEarned, 'TASK_COMPLETE', taskId);
+  }
+
+  db.runSync(
+    `UPDATE task_records SET status = 'FAILED', completedSubtasks = 0, completedAt = NULL, jpEarned = 0, streakBonusEarned = 0 WHERE id = ?`,
+    [existing.id]
+  );
 }
 
 // Süresi dolan ama işaretlenmemiş periyotları otomatik FAILED yapar.

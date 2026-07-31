@@ -8,15 +8,20 @@ import {
   Bell,
   UserCheck,
   Lock,
-  ShieldAlert,
   ChevronRight,
   LogOut,
   Check,
-  AlertTriangle,
   Mail,
+  Moon,
+  Sun,
+  Database,
+  Download,
+  Upload,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext.jsx';
 import { sendResetPasswordEmail } from '../services/emailAuth.js';
+import { getStoredTheme, setStoredTheme } from '../utils/theme.js';
+import { exportAllUserData, importUserData } from '../services/dataBackupService.js';
 import { useEasterEggTrigger, BudgieEasterEggModal } from '../components/BudgieEasterEgg.jsx';
 import AppButton from '../components/AppButton.jsx';
 import AppModal from '../components/AppModal.jsx';
@@ -30,11 +35,20 @@ export default function ProfilePage() {
   const photoURL = user?.profile?.photoURL || user?.photoURL;
   const userEmail = user?.email;
 
+  const [theme, setTheme] = useState(getStoredTheme());
   const easterEgg = useEasterEggTrigger();
   const [showSignOutConfirm, setShowSignOutConfirm] = useState(false);
   const [showResetPasswordConfirm, setShowResetPasswordConfirm] = useState(false);
+  const [showBackupInfoModal, setShowBackupInfoModal] = useState(false);
+  const [showBackupActionModal, setShowBackupActionModal] = useState(false);
   const [copiedSuccess, setCopiedSuccess] = useState(false);
   const [alertMessage, setAlertMessage] = useState(null);
+
+  const toggleTheme = () => {
+    const next = theme === 'dark' ? 'light' : 'dark';
+    setTheme(next);
+    setStoredTheme(next);
+  };
 
   const handleShare = async () => {
     const text = `J-Planning'de bana arkadaş ekle! Kullanıcı ID'm: ${userCode}`;
@@ -66,6 +80,40 @@ export default function ProfilePage() {
         body: e.message || 'Şifre sıfırlama e-postası gönderilemedi.',
       });
     }
+  };
+
+  const handleExport = () => {
+    try {
+      exportAllUserData();
+      setAlertMessage({
+        title: 'Başarılı 📦',
+        body: 'Verileriniz .json yedek dosyası olarak indirildi.',
+      });
+    } catch (e) {
+      setAlertMessage({ title: 'Hata', body: 'Veri dışa aktarılamadı.' });
+    }
+  };
+
+  const handleFileImport = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = async (evt) => {
+      try {
+        await importUserData(evt.target.result);
+        setShowBackupActionModal(false);
+        setAlertMessage({
+          title: 'Yedek Yüklendi 🎉',
+          body: 'Tüm verileriniz başarıyla içe aktarıldı. Görevleriniz ve geçmişiniz güncellendi.',
+        });
+      } catch (err) {
+        setAlertMessage({
+          title: 'Yükleme Hatası',
+          body: err.message || 'Yedek dosyası içe aktarılamadı.',
+        });
+      }
+    };
+    reader.readAsText(file);
   };
 
   return (
@@ -138,9 +186,19 @@ export default function ProfilePage() {
           onClick={() => navigate('/profile/edit')}
         />
         <MenuRow
+          Icon={Database}
+          label="Veri Yedekleme ve Transfer"
+          onClick={() => setShowBackupInfoModal(true)}
+        />
+        <MenuRow
           Icon={Lock}
           label="Şifre Değiştir"
           onClick={() => setShowResetPasswordConfirm(true)}
+        />
+        <MenuRow
+          Icon={theme === 'dark' ? Sun : Moon}
+          label={theme === 'dark' ? 'Açık Temaya Geç ☀️' : 'Koyu Temaya Geç 🌙'}
+          onClick={toggleTheme}
         />
       </div>
 
@@ -159,6 +217,78 @@ export default function ProfilePage() {
         message={easterEgg.message}
         onClose={easterEgg.close}
       />
+
+      {/* Veri Yedekleme Bilgilendirme Modalı */}
+      {showBackupInfoModal && (
+        <AppModal
+          open={showBackupInfoModal}
+          onClose={() => setShowBackupInfoModal(false)}
+          title="Veri Yedekleme Hakkında 💾"
+        >
+          <div className="profile-page__modal-body">
+            <Database size={40} color="var(--color-accent)" />
+            <p style={{ textAlign: 'left', fontSize: 'var(--font-caption-size)', lineHeight: 1.5 }}>
+              <strong>Bu özellik ne işe yarar?</strong><br />
+              Bu buton ile cihazınızda saklanan tüm görevlerinizi, alışkanlık geçmişinizi, kazandığınız puanları, odaklanma istatistiklerinizi ve bildirim ayarlarınızı <strong>.json</strong> formatında tek bir yedek dosyası olarak indirebilirsiniz.<br /><br />
+              <strong>Alınan veriler nasıl kullanılır?</strong><br />
+              İndirdiğiniz bu dosyayı verilerinizi başka bir cihaza/tarayıcıya aktarmak ya da verilerinizin çevrimdışı yedeğini saklamak için kullanabilirsiniz. Dilediğiniz zaman bu yedek dosyasını uygulamaya yükleyerek verilerinizi geri getirebilirsiniz.
+            </p>
+            <div className="profile-page__modal-actions">
+              <AppButton
+                title="Vazgeç"
+                variant="secondary"
+                onClick={() => setShowBackupInfoModal(false)}
+              />
+              <AppButton
+                title="Devam Et"
+                variant="primary"
+                onClick={() => {
+                  setShowBackupInfoModal(false);
+                  setShowBackupActionModal(true);
+                }}
+              />
+            </div>
+          </div>
+        </AppModal>
+      )}
+
+      {/* Veri Yedekleme ve Yükleme İşlem Modalı */}
+      {showBackupActionModal && (
+        <AppModal
+          open={showBackupActionModal}
+          onClose={() => setShowBackupActionModal(false)}
+          title="Yedekleme ve Geri Yükleme"
+        >
+          <div className="profile-page__modal-body" style={{ gap: 'var(--space-md)' }}>
+            <p className="caption">Lütfen yapmak istediğiniz işlemi seçin:</p>
+            
+            <AppButton
+              title="Yedek İndir (.json)"
+              variant="primary"
+              onClick={handleExport}
+              style={{ width: '100%' }}
+            />
+
+            <label className="profile-page__upload-label">
+              <Upload size={18} />
+              Yedek Yükle (.json)
+              <input
+                type="file"
+                accept=".json"
+                onChange={handleFileImport}
+                style={{ display: 'none' }}
+              />
+            </label>
+
+            <AppButton
+              title="Kapat"
+              variant="ghost"
+              onClick={() => setShowBackupActionModal(false)}
+              style={{ width: '100%', marginTop: 'var(--space-sm)' }}
+            />
+          </div>
+        </AppModal>
+      )}
 
       {/* Şifre Sıfırlama Onay Modalı */}
       {showResetPasswordConfirm && (

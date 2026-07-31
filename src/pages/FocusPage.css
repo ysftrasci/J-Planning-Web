@@ -211,7 +211,7 @@
   color: var(--color-accent);
 }
 
-/* Running Mode Overlay / Fullscreen UI */
+/* Running Mode Overlay / Fullscreen UI — her iki temada da dinlendirici karanlık ortam */
 .focus-page--running {
   position: fixed;
   top: 0;
@@ -219,7 +219,8 @@
   right: 0;
   bottom: 0;
   z-index: 100;
-  background-color: var(--color-text-primary);
+  background-color: #0F172A;
+  color: #FFFFFF;
   display: flex;
   flex-direction: column;
   padding: var(--space-xl);

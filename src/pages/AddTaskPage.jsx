@@ -35,6 +35,7 @@ export default function AddTaskPage() {
   const { user } = useAuth();
   const navigate = useNavigate();
   const [title, setTitle] = useState('');
+  const [description, setDescription] = useState('');
   const [priority, setPriority] = useState('MEDIUM');
   const [period, setPeriod] = useState('DAILY');
   const [categoryId, setCategoryId] = useState(null);
@@ -80,8 +81,13 @@ export default function AddTaskPage() {
     const effectiveSubtaskLabels = isOnce ? [''] : subtaskLabels;
 
     if (assignTo === 'me') {
-      createTask({ title: title.trim(), categoryId, priority, period, subtaskCount, subtaskLabels: effectiveSubtaskLabels });
-      navigate('/');
+      try {
+        createTask({ title: title.trim(), description: description ? description.trim() : '', categoryId, priority, period, subtaskCount, subtaskLabels: effectiveSubtaskLabels });
+        navigate('/');
+      } catch (err) {
+        console.error('Görev kaydetme hatası:', err);
+        setErrorMessage(err.message || 'Görev kaydedilemedi.');
+      }
       return;
     }
 
@@ -129,6 +135,16 @@ export default function AddTaskPage() {
           value={title}
           onChange={(e) => setTitle(e.target.value)}
           autoFocus
+        />
+
+        <label className="add-task-page__label" htmlFor="task-description">Not / Açıklama (opsiyonel)</label>
+        <input
+          id="task-description"
+          className="add-task-page__input"
+          type="text"
+          placeholder="örn. Sayfa 45-60 arası okunacak"
+          value={description}
+          onChange={(e) => setDescription(e.target.value)}
         />
 
         <span className="add-task-page__label">Kime atanacak?</span>

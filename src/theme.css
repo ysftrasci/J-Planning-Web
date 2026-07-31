@@ -3,40 +3,40 @@
    Sadelik önceliklidir: az renk, tutarlı boşluk, sistem fontu. */
 
 :root {
-  /* Zemin */
-  --color-background: #FAF9F6;   /* hafif sıcak beyaz — steril hastane beyazı değil */
+  /* Zemin — dinlendirici pudra toz pembe & ferah bebek mavisi dokunuşlu sıcak zemin */
+  --color-background: #FAF5F7;
   --color-surface: #FFFFFF;
-  --color-surface-alt: #F1EFE9;
+  --color-surface-alt: #F4ECEF;
 
   /* Metin */
-  --color-text-primary: #211F1A;
-  --color-text-secondary: #6B675E;
-  --color-text-muted: #A8A399;
+  --color-text-primary: #2D1E24;
+  --color-text-secondary: #6B525D;
+  --color-text-muted: #A38B95;
 
-  /* Marka / vurgu — JP (ödül) temasını yansıtan sıcak amber */
-  --color-accent: #C98A2C;
-  --color-accent-soft: #F3E2C2;
-  --color-accent-dark: #9C6B1E;
+  /* Marka / vurgu — şık Toz Pembe (Powder Pink / Rose) */
+  --color-accent: #E06D8C;
+  --color-accent-soft: #FDE8EF;
+  --color-accent-dark: #B83256;
 
   /* Öncelik renkleri (görev kartlarında kullanılacak) */
-  --color-priority-high: #C4512E;
-  --color-priority-medium: #C98A2C;
-  --color-priority-low: #5B8A6B;
+  --color-priority-high: #E11D48;
+  --color-priority-medium: #38BDF8;   /* Bebek Mavisi (Baby Blue) */
+  --color-priority-low: #6B7280;
 
   /* Durum */
-  --color-success: #3E8259;
-  --color-success-soft: #E1EEE5;
-  --color-danger: #B3452F;
-  --color-danger-soft: #F5E3DE;
+  --color-success: #10B981;
+  --color-success-soft: #E6F4EA;
+  --color-danger: #E11D48;
+  --color-danger-soft: #FDE8EF;
 
-  --color-border: #E6E2D8;
-  --color-overlay: rgba(33, 31, 26, 0.45);
+  --color-border: #EEDEE4;
+  --color-overlay: rgba(45, 30, 36, 0.45);
 
-  /* Arkadaş görevleri: kendi görevlerinden görsel olarak ayırt edici tonlar */
-  --color-friend-received: #5B7A9C;      /* bana atanan görev (mavi ton) */
-  --color-friend-received-soft: #E1E8F0;
-  --color-friend-sent: #8A6BA8;          /* arkadaşıma attığım görev (mor ton) */
-  --color-friend-sent-soft: #ECE3F2;
+  /* Arkadaş görevleri — Bebek Mavisi (Baby Blue) & Pastel Lavanta */
+  --color-friend-received: #0EA5E9;      /* Bebek Mavisi (Baby Blue) */
+  --color-friend-received-soft: #E0F2FE; /* Açık Bebek Mavisi Arkaplan */
+  --color-friend-sent: #A855F7;          /* Pastel Mor */
+  --color-friend-sent-soft: #F3E8FF;
 
   /* Spacing */
   --space-xs: 4px;
@@ -54,9 +54,6 @@
   --radius-xl: 24px;
   --radius-pill: 999px;
 
-  /* Typography — sistem fontu: web'de mobildeki San Francisco / Roboto
-     karşılığı olarak platformun kendi sistem fontu yığını kullanılır,
-     böylece ekstra font yükü olmaz ve her işletim sisteminde "native" hisseder. */
   --font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
     Helvetica, Arial, sans-serif;
 
@@ -83,8 +80,35 @@
   --font-small-size: 11px;
   --font-small-weight: 500;
 
-  /* Shadow — mobildeki "card" gölgesinin web karşılığı */
-  --shadow-card: 0 1px 4px rgba(0, 0, 0, 0.06);
+  --shadow-card: 0 1px 4px rgba(15, 23, 42, 0.06);
+}
+
+[data-theme="dark"] {
+  --color-background: #0F172A;
+  --color-surface: #1E293B;
+  --color-surface-alt: #334155;
+
+  --color-text-primary: #F8FAFC;
+  --color-text-secondary: #94A3B8;
+  --color-text-muted: #64748B;
+
+  --color-accent: #34D399;
+  --color-accent-soft: #064E3B;
+  --color-accent-dark: #A7F3D0;
+
+  --color-priority-high: #F87171;
+  --color-priority-medium: #34D399;
+  --color-priority-low: #64748B;
+
+  --color-border: #334155;
+  --color-overlay: rgba(0, 0, 0, 0.75);
+
+  --color-friend-received: #38BDF8;
+  --color-friend-received-soft: #0C4A6E;
+  --color-friend-sent: #A78BFA;
+  --color-friend-sent-soft: #3B0764;
+
+  --shadow-card: 0 4px 12px rgba(0, 0, 0, 0.25);
 }
 
 /* Reset & base */

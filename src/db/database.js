@@ -77,6 +77,7 @@ export async function initDatabase(uid) {
     CREATE TABLE IF NOT EXISTS tasks (
       id TEXT PRIMARY KEY,
       title TEXT NOT NULL,
+      description TEXT,
       categoryId TEXT,
       priority TEXT NOT NULL DEFAULT 'MEDIUM',       -- HIGH | MEDIUM | LOW
       period TEXT NOT NULL DEFAULT 'DAILY',          -- DAILY | WEEKLY | MONTHLY
@@ -172,6 +173,9 @@ export async function initDatabase(uid) {
 
   runMigrations(db);
 
+  // Var olan tüm veritabanlarında description sütununun varlığından emin ol
+  tryAddColumn(db, 'tasks', 'description TEXT');
+
   // "me" için cüzdan kaydı yoksa oluştur
   const existing = db.getFirstSync('SELECT userId FROM wallet WHERE userId = ?', ['me']);
   if (!existing) {
@@ -202,8 +206,8 @@ function runMigrations(db) {
     tryAddColumn(db, 'task_records', 'completedSubtasks INTEGER NOT NULL DEFAULT 0');
   }
 
-  if (currentVersion < 3) {
-    tryAddColumn(db, 'tasks', 'firestoreAssignmentId TEXT');
+  if (currentVersion < 4) {
+    tryAddColumn(db, 'tasks', 'description TEXT');
   }
 
   db.runSync(
