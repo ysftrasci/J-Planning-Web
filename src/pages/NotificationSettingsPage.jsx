@@ -69,7 +69,7 @@ export default function NotificationSettingsPage() {
       }
     }
 
-    const success = sendWebNotification(
+    const success = await sendWebNotification(
       'J-Planning Test Bildirimi 🔔',
       'Tebrikler! Tarayıcı bildirim sistemi sorunsuz çalışıyor.'
     );

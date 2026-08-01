@@ -18,6 +18,7 @@ import ProfilePage from '../pages/ProfilePage.jsx';
 import EditProfilePage from '../pages/EditProfilePage.jsx';
 import NotificationSettingsPage from '../pages/NotificationSettingsPage.jsx';
 import DangerZonePage from '../pages/DangerZonePage.jsx';
+import VerifyEmailPage from '../pages/VerifyEmailPage.jsx';
 import { useAuth } from '../context/AuthContext.jsx';
 
 // Aşama 0 kapsamında kurulan temel yönlendirme (routing) iskeleti,
@@ -69,16 +70,35 @@ function LoadingScreen() {
   );
 }
 
+// Güvenlik: giriş yapmış olsa bile e-postasını doğrulamayan kullanıcı
+// (bkz. services/emailAuth.js -> registerWithEmail) uygulamanın hiçbir
+// ekranını göremez, sadece VerifyEmailPage ile karşılaşır. Bu sayede
+// başka birinin e-postasıyla hesap açılsa bile o hesap gerçek kullanıma
+// asla geçemez (doğrulama linki her zaman e-postanın gerçek sahibine gider).
 function RequireAuth({ children }) {
   const { user, initializing } = useAuth();
   if (initializing) return <LoadingScreen />;
   if (!user) return <Navigate to="/login" replace />;
+  if (!user.emailVerified) return <Navigate to="/verify-email" replace />;
+  return children;
+}
+
+// Doğrulama bekleyen kullanıcı /verify-email dışındaki bir rotaya gitmeye
+// çalışırsa zaten yukarıdaki RequireAuth onu buraya geri yönlendirir.
+// Bu bileşen de tam tersini yapar: doğrulanmış (veya hiç giriş yapmamış)
+// kullanıcı /verify-email'i doğrudan ziyaret ederse uygun yere yönlendirilir.
+function RequireUnverified({ children }) {
+  const { user, initializing } = useAuth();
+  if (initializing) return <LoadingScreen />;
+  if (!user) return <Navigate to="/login" replace />;
+  if (user.emailVerified) return <Navigate to="/" replace />;
   return children;
 }
 
 function RedirectIfAuthed({ children }) {
   const { user, initializing } = useAuth();
   if (initializing) return <LoadingScreen />;
+  if (user && !user.emailVerified) return <Navigate to="/verify-email" replace />;
   if (user) return <Navigate to="/" replace />;
   return children;
 }
@@ -92,6 +112,14 @@ export default function AppRouter() {
           <RedirectIfAuthed>
             <LoginPage />
           </RedirectIfAuthed>
+        }
+      />
+      <Route
+        path="verify-email"
+        element={
+          <RequireUnverified>
+            <VerifyEmailPage />
+          </RequireUnverified>
         }
       />
       <Route

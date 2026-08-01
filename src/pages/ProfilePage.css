@@ -234,3 +234,26 @@
 .profile-page__modal-actions button {
   flex: 1;
 }
+
+.profile-page__delete-password-input {
+  width: 100%;
+  background-color: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: var(--space-md);
+  font-family: var(--font-family);
+  font-size: var(--font-body-size);
+  color: var(--color-text-primary);
+}
+
+.profile-page__delete-password-input:focus {
+  outline: none;
+  border-color: var(--color-danger);
+}
+
+.profile-page__delete-error {
+  margin: 0;
+  font-size: var(--font-caption-size);
+  color: var(--color-danger);
+  text-align: center;
+}

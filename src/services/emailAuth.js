@@ -8,6 +8,7 @@ import {
   signInWithEmailAndPassword,
   updateProfile,
   sendPasswordResetEmail,
+  sendEmailVerification,
 } from 'firebase/auth';
 import { auth } from './firebase';
 
@@ -29,7 +30,38 @@ export async function registerWithEmail(name, email, password) {
     if (name?.trim()) {
       await updateProfile(result.user, { displayName: name.trim() });
     }
+    // Güvenlik: hesap oluşur oluşmaz doğrulama e-postası gönderilir.
+    // Kullanıcı bu e-postayı doğrulamadan uygulamayı kullanamaz
+    // (bkz. router/AppRouter.jsx -> RequireAuth kontrolü).
+    try {
+      await sendEmailVerification(result.user);
+    } catch (verificationError) {
+      // Doğrulama e-postası gönderilemese bile kayıt işlemini iptal etmeyelim;
+      // kullanıcı "doğrulama bekleniyor" ekranındaki "tekrar gönder" ile deneyebilir.
+      console.warn('Doğrulama e-postası gönderilemedi:', verificationError);
+    }
     return result.user;
+  } catch (error) {
+    throw new Error(friendlyErrorMessage(error));
+  }
+}
+
+// Kullanıcı "doğrulama bekleniyor" ekranındayken doğrulama e-postasını
+// tekrar göndermek istediğinde kullanılır.
+//
+// ÖNEMLİ: Buraya AuthContext'ten gelen "user" nesnesi DEĞİL, mutlaka
+// auth.currentUser (gerçek Firebase User sınıfı örneği) verilmelidir.
+// AuthContext'teki user, { ...firebaseUser, profile } şeklinde spread
+// edilmiş sıradan bir objedir — sendEmailVerification gibi Firebase
+// fonksiyonları gerçek User instance'ı beklediği için spread edilmiş
+// objeyle çağrıldığında sessizce (hata fırlatmadan) işe yaramaz.
+export async function resendVerificationEmail() {
+  const currentUser = auth.currentUser;
+  if (!currentUser) {
+    throw new Error('Giriş yapılmış bir hesap bulunamadı, lütfen tekrar giriş yap.');
+  }
+  try {
+    await sendEmailVerification(currentUser);
   } catch (error) {
     throw new Error(friendlyErrorMessage(error));
   }

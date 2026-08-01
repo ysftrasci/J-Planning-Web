@@ -37,19 +37,41 @@ export async function getNotificationPermissionStatus() {
   return Notification.permission;
 }
 
-export function sendWebNotification(title, body) {
+// Not: Android/mobil Chrome (PWA dahil) new Notification() çağrısını
+// desteklemez — bu ortamlarda bildirim sadece Service Worker üzerinden
+// (registration.showNotification) gösterilebilir. Bu yüzden önce Service
+// Worker'ı deniyoruz, o yoksa/başarısız olursa masaüstü için new Notification()'a düşüyoruz.
+export async function sendWebNotification(title, body) {
   if (!('Notification' in window)) return false;
-  if (Notification.permission === 'granted') {
+  if (Notification.permission !== 'granted') return false;
+
+  const payload = {
+    title,
+    body: body || 'Görevlerine göz atmayı unutma!',
+    icon: '/favicon.svg',
+  };
+
+  // 1. Yöntem: Service Worker üzerinden göster (mobil dahil her yerde çalışır)
+  if ('serviceWorker' in navigator) {
     try {
-      new Notification(title, {
-        body: body || 'Görevlerine göz atmayı unutma!',
-        icon: '/favicon.svg',
-      });
-      return true;
+      const registration = await navigator.serviceWorker.ready;
+      if (registration && registration.active) {
+        registration.active.postMessage({ type: 'SHOW_NOTIFICATION', payload });
+        return true;
+      }
     } catch (e) {
-      console.warn('Web bildirim hatası:', e);
+      console.warn('Service Worker bildirim hatası:', e);
     }
   }
+
+  // 2. Yöntem (yedek): Doğrudan new Notification() — çoğunlukla masaüstünde çalışır
+  try {
+    new Notification(payload.title, { body: payload.body, icon: payload.icon });
+    return true;
+  } catch (e) {
+    console.warn('Web bildirim hatası:', e);
+  }
+
   return false;
 }
 
@@ -115,7 +137,7 @@ export async function checkAndTriggerSchedules() {
       schedule.minute === currentMinute
     ) {
       lastTriggeredMinuteKey = minuteKey;
-      sendWebNotification(
+      await sendWebNotification(
         'J-Planning Hatırlatması 🔔',
         schedule.label || schedule.body || 'Görevlerine göz atmayı unutma!'
       );

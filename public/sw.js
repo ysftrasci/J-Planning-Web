@@ -22,6 +22,35 @@ self.addEventListener('activate', (event) => {
   );
 });
 
+// Bildirim Gösterimi (Android/mobil Chrome: new Notification() çalışmadığı için
+// sayfa tarafından postMessage ile buraya istek gönderilir, showNotification burada tetiklenir)
+self.addEventListener('message', (event) => {
+  if (event.data && event.data.type === 'SHOW_NOTIFICATION') {
+    const { title, body, icon } = event.data.payload || {};
+    event.waitUntil(
+      self.registration.showNotification(title || 'J-Planning', {
+        body: body || 'Görevlerine göz atmayı unutma!',
+        icon: icon || '/favicon.svg',
+        badge: '/favicon.svg',
+        tag: 'j-planning-notification',
+      })
+    );
+  }
+});
+
+// Bildirime tıklanınca uygulamayı öne getir / aç
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  event.waitUntil(
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientList) => {
+      for (const client of clientList) {
+        if ('focus' in client) return client.focus();
+      }
+      if (self.clients.openWindow) return self.clients.openWindow('/');
+    })
+  );
+});
+
 // İstek Yönetimi (Network First — Her zaman öncelikle güncel sunucu dosyasını çek)
 self.addEventListener('fetch', (event) => {
   if (event.request.method !== 'GET') return;

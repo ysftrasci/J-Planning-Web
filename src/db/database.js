@@ -17,7 +17,7 @@
 // dışında (execSync/runSync/getFirstSync/getAllSync) tüm çağrılar senkron
 // kalmaya devam eder — repository dosyaları neredeyse değişmeden taşınabildi.
 
-import { openSqliteConnection } from './sqliteEngine';
+import { openSqliteConnection, deleteDatabaseBytes } from './sqliteEngine';
 
 let dbInstance = null;
 let currentUid = null;
@@ -53,6 +53,23 @@ export async function switchToUserDatabase(uid) {
   dbInstance = await openSqliteConnection(dbNameForUser(uid));
   currentUid = uid;
   return dbInstance;
+}
+
+// Hesap silme akışında (services/deleteAccountService.js) kullanılır.
+// Kullanıcının yerel SQLite veritabanını (görevler, kategoriler, ödüller,
+// odaklanma geçmişi) IndexedDB'den tamamen kaldırır. Önce açık bağlantı
+// varsa kapatılır, aksi halde IndexedDB üzerinde kilit/tutarsızlık oluşabilir.
+export async function deleteUserDatabase(uid) {
+  if (currentUid === uid && dbInstance) {
+    try {
+      dbInstance.closeSync();
+    } catch (e) {
+      // Bağlantı zaten kapalıysa görmezden gel.
+    }
+    dbInstance = null;
+    currentUid = null;
+  }
+  await deleteDatabaseBytes(dbNameForUser(uid));
 }
 
 // Görev periyodu: DAILY | WEEKLY | MONTHLY

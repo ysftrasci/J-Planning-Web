@@ -370,7 +370,13 @@ export function consumeStreakFreeze() {
 // Eğer kullanıcının Seri Dondurma Hakkı (streak freeze) varsa, 1 dondurma hakkı
 // harcanarak seri korunur ('FROZEN' durumu).
 export function processExpiredPeriods() {
-  const db = getDb();
+  let db;
+  try {
+    db = getDb();
+  } catch (e) {
+    return;
+  }
+  if (!db) return;
   const tasks = db.getAllSync(
     `SELECT * FROM tasks WHERE isArchived = 0 AND assignmentStatus != 'PENDING_ACCEPT' AND (assignmentDirection IS NULL OR assignmentDirection != 'SENT') AND period != 'ONCE'`
   );

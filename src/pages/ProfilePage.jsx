@@ -17,9 +17,12 @@ import {
   Database,
   Download,
   Upload,
+  Trash2,
+  AlertTriangle,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext.jsx';
 import { sendResetPasswordEmail } from '../services/emailAuth.js';
+import { deleteAccountCompletely } from '../services/deleteAccountService.js';
 import { getStoredTheme, setStoredTheme } from '../utils/theme.js';
 import { exportAllUserData, importUserData } from '../services/dataBackupService.js';
 import { useEasterEggTrigger, BudgieEasterEggModal } from '../components/BudgieEasterEgg.jsx';
@@ -43,6 +46,15 @@ export default function ProfilePage() {
   const [showBackupActionModal, setShowBackupActionModal] = useState(false);
   const [copiedSuccess, setCopiedSuccess] = useState(false);
   const [alertMessage, setAlertMessage] = useState(null);
+
+  // Hesap Silme akışı: önce genel uyarı modalı, "Devam Et" ile şifre
+  // isteyen ikinci modal açılır (Firebase, hassas işlemler için yakın
+  // zamanda giriş yapılmış olmasını şart koşar — bkz. deleteAccountService.js).
+  const [showDeleteWarningModal, setShowDeleteWarningModal] = useState(false);
+  const [showDeletePasswordModal, setShowDeletePasswordModal] = useState(false);
+  const [deletePassword, setDeletePassword] = useState('');
+  const [deleteError, setDeleteError] = useState('');
+  const [deleteLoading, setDeleteLoading] = useState(false);
 
   const toggleTheme = () => {
     const next = theme === 'dark' ? 'light' : 'dark';
@@ -79,6 +91,39 @@ export default function ProfilePage() {
         title: 'Hata',
         body: e.message || 'Şifre sıfırlama e-postası gönderilemedi.',
       });
+    }
+  };
+
+  // Kalıcı hesap silme: Firestore verileri + yerel görev verisi + Firebase
+  // Authentication hesabı sırayla silinir (bkz. services/deleteAccountService.js).
+  // Bu işlem GERİ ALINAMAZ, bu yüzden önce ayrı bir uyarı modalı gösteriliyor,
+  // burada da işlemi onaylamak için şifre isteniyor.
+  const handleConfirmDeleteAccount = async () => {
+    if (!deletePassword) {
+      setDeleteError('Devam etmek için şifreni girmen gerekiyor.');
+      return;
+    }
+    setDeleteLoading(true);
+    setDeleteError('');
+    try {
+      await deleteAccountCompletely({
+        uid: user.uid,
+        password: deletePassword,
+      });
+      // Hesap silindiğinde Firebase onAuthStateChanged tetiklenir ve
+      // AuthContext kullanıcıyı otomatik olarak /login'e yönlendirir —
+      // burada ayrıca navigate çağırmaya gerek yok.
+    } catch (e) {
+      const code = e?.code || '';
+      if (code.includes('wrong-password') || code.includes('invalid-credential')) {
+        setDeleteError('Şifre hatalı, tekrar dene.');
+      } else if (code.includes('too-many-requests')) {
+        setDeleteError('Çok fazla deneme yapıldı, lütfen birkaç dakika sonra tekrar dene.');
+      } else {
+        setDeleteError(e.message || 'Hesap silinirken bir sorun oluştu, tekrar dene.');
+      }
+    } finally {
+      setDeleteLoading(false);
     }
   };
 
@@ -199,6 +244,12 @@ export default function ProfilePage() {
           Icon={theme === 'dark' ? Sun : Moon}
           label={theme === 'dark' ? 'Açık Temaya Geç ☀️' : 'Koyu Temaya Geç 🌙'}
           onClick={toggleTheme}
+        />
+        <MenuRow
+          Icon={Trash2}
+          label="Hesabımı Sil"
+          onClick={() => setShowDeleteWarningModal(true)}
+          danger
         />
       </div>
 
@@ -338,6 +389,89 @@ export default function ProfilePage() {
                 title="Çıkış Yap"
                 variant="danger"
                 onClick={signOut}
+              />
+            </div>
+          </div>
+        </AppModal>
+      )}
+
+      {/* Hesap Silme — 1. Adım: Genel Uyarı */}
+      {showDeleteWarningModal && (
+        <AppModal
+          open={showDeleteWarningModal}
+          onClose={() => setShowDeleteWarningModal(false)}
+          title="Hesabımı Sil"
+        >
+          <div className="profile-page__modal-body">
+            <AlertTriangle size={36} color="var(--color-danger)" />
+            <p>
+              Bu işlem <strong>geri alınamaz</strong>. Hesabın silindiğinde şunlar kalıcı olarak kaybolur:
+            </p>
+            <p style={{ textAlign: 'left', fontSize: 'var(--font-caption-size)', lineHeight: 1.6 }}>
+              • Tüm görevlerin, kategorilerin ve geçmişin<br />
+              • Kazandığın JP puanların ve ödül hedeflerin<br />
+              • Arkadaşlıkların ve karşılıklı atanan görev/ödüller<br />
+              • Odaklanma seansı geçmişin<br />
+              • Giriş bilgilerin (bu e-posta ile tekrar kayıt olabilirsin, ama eski verilerin geri gelmez)
+            </p>
+            <div className="profile-page__modal-actions">
+              <AppButton
+                title="Vazgeç"
+                variant="secondary"
+                onClick={() => setShowDeleteWarningModal(false)}
+              />
+              <AppButton
+                title="Devam Et"
+                variant="danger"
+                onClick={() => {
+                  setShowDeleteWarningModal(false);
+                  setDeleteError('');
+                  setDeletePassword('');
+                  setShowDeletePasswordModal(true);
+                }}
+              />
+            </div>
+          </div>
+        </AppModal>
+      )}
+
+      {/* Hesap Silme — 2. Adım: Şifre ile Onay */}
+      {showDeletePasswordModal && (
+        <AppModal
+          open={showDeletePasswordModal}
+          onClose={() => !deleteLoading && setShowDeletePasswordModal(false)}
+          title="Şifreni Onayla"
+        >
+          <div className="profile-page__modal-body">
+            <Lock size={36} color="var(--color-danger)" />
+            <p>
+              Hesabını kalıcı olarak silmek üzeresin. Devam etmek için şifreni tekrar gir.
+            </p>
+            <input
+              type="password"
+              className="profile-page__delete-password-input"
+              placeholder="Şifren"
+              value={deletePassword}
+              onChange={(e) => setDeletePassword(e.target.value)}
+              autoComplete="current-password"
+              disabled={deleteLoading}
+            />
+            {deleteError && (
+              <p className="profile-page__delete-error">{deleteError}</p>
+            )}
+            <div className="profile-page__modal-actions">
+              <AppButton
+                title="Vazgeç"
+                variant="secondary"
+                onClick={() => setShowDeletePasswordModal(false)}
+                disabled={deleteLoading}
+              />
+              <AppButton
+                title={deleteLoading ? 'Siliniyor...' : 'Hesabımı Kalıcı Olarak Sil'}
+                variant="danger"
+                onClick={handleConfirmDeleteAccount}
+                disabled={deleteLoading}
+                loading={deleteLoading}
               />
             </div>
           </div>

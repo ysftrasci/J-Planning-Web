@@ -171,3 +171,10 @@ export async function openSqliteConnection(dbName) {
   const sqlJsDb = existingBytes ? new sqlJs.Database(existingBytes) : new sqlJs.Database();
   return new SqliteConnection(sqlJsDb, dbName);
 }
+
+// Verilen isimdeki veritabanı kaydını IndexedDB'den tamamen kaldırır.
+// Hesap silme akışında (services/deleteAccountService.js) kullanılır.
+export async function deleteDatabaseBytes(dbName) {
+  const idb = await getIdb();
+  await idb.delete(IDB_STORE, dbName);
+}

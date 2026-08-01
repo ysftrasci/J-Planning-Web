@@ -55,8 +55,25 @@ export function AuthProvider({ children }) {
     setUser({ ...auth.currentUser, profile });
   };
 
+  // VerifyEmailPage'de "Doğruladım, devam et" butonuna basıldığında çağrılır.
+  // Firebase'den en güncel emailVerified durumunu çekip state'i günceller,
+  // sonucu (doğrulanmış mı) boolean olarak döner.
+  const refreshAuthUser = async () => {
+    if (!auth.currentUser) return false;
+    await auth.currentUser.reload();
+    if (auth.currentUser.emailVerified) {
+      const profile = await getUserProfile(auth.currentUser.uid);
+      setUser({ ...auth.currentUser, profile });
+      return true;
+    }
+    // Doğrulanmadıysa yine de en güncel firebaseUser referansını state'e
+    // yansıtalım (emailVerified: false olarak kalır).
+    setUser((prev) => (prev ? { ...prev, ...auth.currentUser } : prev));
+    return false;
+  };
+
   return (
-    <AuthContext.Provider value={{ user, initializing, signOut, refreshProfile }}>
+    <AuthContext.Provider value={{ user, initializing, signOut, refreshProfile, refreshAuthUser }}>
       {children}
     </AuthContext.Provider>
   );
