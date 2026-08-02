@@ -19,6 +19,7 @@ import {
   browserLocalPersistence,
 } from 'firebase/auth';
 import { getFirestore } from 'firebase/firestore';
+import { getMessaging, isSupported } from 'firebase/messaging';
 
 const DEFAULT_KEY = typeof window !== 'undefined' && typeof atob === 'function'
   ? atob('QUl6YVN5QnRWT0xvZ2FuNTlqeExrcjVVOVFOUzJnQ0xDeE1CS29N')
@@ -46,4 +47,13 @@ setPersistence(auth, browserLocalPersistence).catch((error) => {
 
 const db = getFirestore(app);
 
-export { app, auth, db };
+let messaging = null;
+if (typeof window !== 'undefined') {
+  isSupported().then((supported) => {
+    if (supported) {
+      messaging = getMessaging(app);
+    }
+  }).catch(() => {});
+}
+
+export { app, auth, db, messaging };

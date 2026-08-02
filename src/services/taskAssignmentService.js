@@ -24,17 +24,27 @@ import { getUserProfile } from '../db/userProfileRepository';
 
 const assignedTasksRef = collection(db, 'assignedTasks');
 
+const VALID_PRIORITIES = ['HIGH', 'MEDIUM', 'LOW', 'ZERO'];
+const VALID_PERIODS = ['DAILY', 'WEEKLY', 'MONTHLY', 'ONCE'];
+
 export async function assignTaskToFriend({ assignedByUid, assignedByName, assignedToUid, assignedToName, title, priority, period, subtaskCount, subtaskLabels }) {
+  const cleanTitle = (title || '').trim().slice(0, 300);
+  if (!cleanTitle) throw new Error('Görev adı boş olamaz.');
+
+  const cleanPriority = typeof priority === 'string' && VALID_PRIORITIES.includes(priority.toUpperCase()) ? priority.toUpperCase() : 'MEDIUM';
+  const cleanPeriod = typeof period === 'string' && VALID_PERIODS.includes(period.toUpperCase()) ? period.toUpperCase() : 'DAILY';
+  const count = Math.max(1, Math.min(100, parseInt(subtaskCount, 10) || 1));
+
   await addDoc(assignedTasksRef, {
     assignedByUid,
-    assignedByName,
+    assignedByName: (assignedByName || 'Kullanıcı').slice(0, 100),
     assignedToUid,
-    assignedToName,
-    title,
-    priority,
-    period,
-    subtaskCount: subtaskCount || 1,
-    subtaskLabels: subtaskLabels || null,
+    assignedToName: (assignedToName || 'Arkadaşın').slice(0, 100),
+    title: cleanTitle,
+    priority: cleanPriority,
+    period: cleanPeriod,
+    subtaskCount: count,
+    subtaskLabels: Array.isArray(subtaskLabels) ? subtaskLabels.map((l) => String(l || '').slice(0, 200)) : null,
     status: 'PENDING',
     createdAt: serverTimestamp(),
   });

@@ -20,7 +20,9 @@ import {
   sendWebNotification,
   weekdayLabel,
   formatTime,
+  registerFCMPushToken,
 } from '../services/notificationService.js';
+import { useAuth } from '../context/AuthContext.jsx';
 import AppButton from '../components/AppButton.jsx';
 import AppModal from '../components/AppModal.jsx';
 import EmptyState from '../components/EmptyState.jsx';
@@ -28,6 +30,7 @@ import './NotificationSettingsPage.css';
 
 export default function NotificationSettingsPage() {
   const navigate = useNavigate();
+  const { user } = useAuth();
   const [schedules, setSchedules] = useState([]);
   const [showAddForm, setShowAddForm] = useState(false);
   const [editingSchedule, setEditingSchedule] = useState(null);
@@ -40,18 +43,24 @@ export default function NotificationSettingsPage() {
     setSchedules(data);
     const status = await getNotificationPermissionStatus();
     setPermStatus(status);
+    if (status === 'granted' && user?.uid) {
+      registerFCMPushToken(user.uid);
+    }
   };
 
   useEffect(() => {
     loadSchedules();
-  }, []);
+  }, [user]);
 
   const handleRequestPerm = async () => {
     const granted = await requestNotificationPermission();
     const status = await getNotificationPermissionStatus();
     setPermStatus(status);
     if (granted) {
-      setToastMessage('Bildirim izni başarıyla verildi! 🎉');
+      if (user?.uid) {
+        await registerFCMPushToken(user.uid);
+      }
+      setToastMessage('Bildirim ve Arka Plan Push izni başarıyla verildi! 🎉');
     } else {
       setToastMessage('Bildirim izni reddedildi veya engellendi.');
     }

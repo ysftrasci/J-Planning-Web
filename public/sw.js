@@ -38,6 +38,29 @@ self.addEventListener('message', (event) => {
   }
 });
 
+// Arka Plan Web Push (Push API) Dinleyicisi — Tarayıcı/Sekme kapalıyken işletim sistemine bildirim düşmesini sağlar
+self.addEventListener('push', (event) => {
+  let payload = {};
+  try {
+    if (event.data) {
+      payload = event.data.json();
+    }
+  } catch (e) {
+    payload = { title: 'J-Planning 🔔', body: event.data ? event.data.text() : 'Görevlerinizi kontrol edin!' };
+  }
+
+  const notificationTitle = payload.notification?.title || payload.title || 'J-Planning 🔔';
+  const notificationOptions = {
+    body: payload.notification?.body || payload.body || 'Görevlerinize göz atmayı unutmayın!',
+    icon: payload.notification?.icon || payload.icon || '/favicon.svg',
+    badge: '/favicon.svg',
+    tag: 'j-planning-push-notification',
+    data: payload.data || {},
+  };
+
+  event.waitUntil(self.registration.showNotification(notificationTitle, notificationOptions));
+});
+
 // Bildirime tıklanınca uygulamayı öne getir / aç
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();

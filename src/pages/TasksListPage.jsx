@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Send, Plus, CheckCircle2, ChevronRight, Tags, Bell, Search, X, SlidersHorizontal, Filter, BookOpen } from 'lucide-react';
+import { Send, Plus, CheckCircle2, ChevronRight, Bell, Search, X, SlidersHorizontal, Filter, BookOpen } from 'lucide-react';
 import {
   getActiveTasks,
   getCurrentPeriodStatus,
@@ -223,24 +223,6 @@ export default function TasksListPage() {
           </button>
           <button
             type="button"
-            className={`tasks-list-page__icon-button ${isFilterActive ? 'tasks-list-page__icon-button--active' : ''}`}
-            onClick={() => setShowFilterModal(true)}
-            aria-label="Filtrele"
-            title="Filtrele"
-          >
-            <SlidersHorizontal size={18} />
-          </button>
-          <button
-            type="button"
-            className="tasks-list-page__icon-button"
-            onClick={() => navigate('/categories')}
-            aria-label="Kategoriler"
-            title="Kategoriler"
-          >
-            <Tags size={18} />
-          </button>
-          <button
-            type="button"
             className="tasks-list-page__icon-button"
             onClick={() => navigate('/assigned-by-me')}
             aria-label="Attıklarım"
@@ -319,6 +301,17 @@ export default function TasksListPage() {
             onClick={() => setSourceFilter((prev) => (prev === 'RECEIVED' ? 'ALL' : 'RECEIVED'))}
           >
             Arkadaşımdan
+          </button>
+          <button
+            type="button"
+            className={`tasks-list-page__chip ${isFilterActive ? 'tasks-list-page__chip--active' : ''}`}
+            onClick={() => setShowFilterModal(true)}
+            aria-label="Filtrele"
+            title="Tüm Filtreler"
+            style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}
+          >
+            <SlidersHorizontal size={14} />
+            <span>Filtrele</span>
           </button>
         </div>
       </div>

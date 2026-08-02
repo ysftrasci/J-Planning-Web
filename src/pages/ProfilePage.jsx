@@ -127,9 +127,9 @@ export default function ProfilePage() {
     }
   };
 
-  const handleExport = () => {
+  const handleExport = async () => {
     try {
-      exportAllUserData();
+      await exportAllUserData();
       setAlertMessage({
         title: 'Başarılı 📦',
         body: 'Verileriniz .json yedek dosyası olarak indirildi.',

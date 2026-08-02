@@ -1,95 +1,47 @@
 import { NavLink, Outlet } from 'react-router-dom';
-import { useAuth } from '../context/AuthContext.jsx';
+import { CheckSquare, Gift, Users, Timer, User } from 'lucide-react';
 import PWAInstallPrompt from '../components/PWAInstallPrompt.jsx';
+import './AppLayout.css';
 
 // J-Planning — Temel Sayfa Yönlendirme İskeleti (Web)
-//
-// Mobildeki alt sekme (bottom tab) navigasyonunun (RootNavigator.js)
-// web karşılığıdır.
 
 const TABS = [
-  { to: '/', label: 'Görevler', end: true },
-  { to: '/rewards', label: 'Ödüller' },
-  { to: '/friends', label: 'Arkadaşlar' },
-  { to: '/focus', label: 'Odaklanma' },
-  { to: '/profile', label: 'Profil' },
+  { to: '/', label: 'Görevler', icon: CheckSquare, end: true },
+  { to: '/rewards', label: 'Ödüller', icon: Gift },
+  { to: '/friends', label: 'Arkadaşlar', icon: Users },
+  { to: '/focus', label: 'Odaklanma', icon: Timer },
+  { to: '/profile', label: 'Profil', icon: User },
 ];
 
 export default function AppLayout() {
-  const { user, signOut } = useAuth();
-
   return (
-    <div
-      style={{
-        display: 'flex',
-        flexDirection: 'column',
-        minHeight: '100%',
-      }}
-    >
-      <header
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          padding: 'var(--space-md) var(--space-lg)',
-          borderBottom: '1px solid var(--color-border)',
-        }}
-      >
-        <span className="caption">
-          {user?.profile?.displayName || user?.displayName || 'Kullanıcı'}
-          {user?.profile?.userCode ? ` · ${user.profile.userCode}` : ''}
-        </span>
-        <button
-          type="button"
-          onClick={signOut}
-          className="caption"
-          style={{
-            background: 'none',
-            border: 'none',
-            cursor: 'pointer',
-            color: 'var(--color-accent-dark)',
-          }}
-        >
-          Çıkış yap
-        </button>
-      </header>
-
-      <main style={{ flex: 1, padding: 'var(--space-lg)' }}>
+    <div className="app-layout">
+      <main className="app-layout__main">
         <Outlet />
       </main>
 
       <PWAInstallPrompt />
 
-      <nav
-        style={{
-          display: 'flex',
-          borderTop: '1px solid var(--color-border)',
-          backgroundColor: 'var(--color-surface)',
-          position: 'sticky',
-          bottom: 0,
-        }}
-      >
-        {TABS.map((tab) => (
-          <NavLink
-            key={tab.to}
-            to={tab.to}
-            end={tab.end}
-            style={({ isActive }) => ({
-              flex: 1,
-              textAlign: 'center',
-              padding: 'var(--space-sm) 0',
-              textDecoration: 'none',
-              fontSize: 'var(--font-small-size)',
-              fontWeight: 'var(--font-small-weight)',
-              color: isActive
-                ? 'var(--color-accent)'
-                : 'var(--color-text-secondary)',
-            })}
-          >
-            {tab.label}
-          </NavLink>
-        ))}
-      </nav>
+      <div className="app-layout__nav-wrapper">
+        <nav className="app-layout__nav">
+          {TABS.map((tab) => {
+            const Icon = tab.icon;
+            return (
+              <NavLink
+                key={tab.to}
+                to={tab.to}
+                end={tab.end}
+                className={({ isActive }) =>
+                  `app-layout__tab ${isActive ? 'app-layout__tab--active' : ''}`
+                }
+              >
+                <Icon size={20} className="app-layout__tab-icon" />
+                <span className="app-layout__tab-label">{tab.label}</span>
+              </NavLink>
+            );
+          })}
+        </nav>
+      </div>
     </div>
   );
 }

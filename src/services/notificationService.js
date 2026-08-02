@@ -1,11 +1,46 @@
-// J-Planning — Bildirim Servisi (Web)
-//
-// Web ortamında zamanlamalar localStorage üzerinde saklanır.
-// Web Notification API ile tarayıcı bildirimi gönderilmesi ve arka plan
-// kontrol döngüsü sağlanır.
+import { getToken, onMessage } from 'firebase/messaging';
+import { doc, updateDoc, arrayUnion } from 'firebase/firestore';
+import { db, messaging } from './firebase';
 
 const STORAGE_KEY = 'jplanning:notification_schedules';
 let lastTriggeredMinuteKey = '';
+
+export async function registerFCMPushToken(userUid) {
+  if (!('Notification' in window) || Notification.permission !== 'granted') return null;
+  if (!messaging) return null;
+
+  try {
+    let serviceWorkerRegistration;
+    if ('serviceWorker' in navigator) {
+      serviceWorkerRegistration = await navigator.serviceWorker.ready;
+    }
+
+    const vapidKey = import.meta.env.VITE_FIREBASE_VAPID_KEY || undefined;
+    const token = await getToken(messaging, {
+      vapidKey,
+      serviceWorkerRegistration,
+    });
+
+    if (token && userUid) {
+      const userRef = doc(db, 'users', userUid);
+      await updateDoc(userRef, {
+        fcmTokens: arrayUnion(token),
+        lastPushTokenAt: Date.now(),
+      }).catch(() => {});
+    }
+    return token;
+  } catch (err) {
+    console.warn('FCM Push Token alınamadı:', err);
+    return null;
+  }
+}
+
+export function listenForegroundFCM(callback) {
+  if (!messaging) return () => {};
+  return onMessage(messaging, (payload) => {
+    if (callback) callback(payload);
+  });
+}
 
 export const WEEKDAYS = [
   { value: 1, label: 'Pazar', short: 'Paz' },

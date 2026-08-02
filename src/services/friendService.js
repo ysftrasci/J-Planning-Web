@@ -23,10 +23,26 @@ import { findUserByCode, getUserProfile } from '../db/userProfileRepository';
 
 const friendshipsRef = collection(db, 'friendships');
 
+const searchAttempts = [];
+const MAX_SEARCHES_PER_MINUTE = 5;
+
+function checkRateLimit() {
+  const now = Date.now();
+  while (searchAttempts.length > 0 && now - searchAttempts[0] > 60000) {
+    searchAttempts.shift();
+  }
+  if (searchAttempts.length >= MAX_SEARCHES_PER_MINUTE) {
+    throw new Error('Çok fazla arama yaptınız. Güvenlik nedeniyle lütfen 1 dakika sonra tekrar deneyin.');
+  }
+  searchAttempts.push(now);
+}
+
 // Kullanıcı kodu ile arkadaş isteği gönderir.
 export async function sendFriendRequest(currentUser, targetCode) {
   const code = targetCode.trim().toUpperCase();
   if (!code) throw new Error('Lütfen bir Kullanıcı ID gir.');
+
+  checkRateLimit();
 
   const targetProfile = await findUserByCode(code);
   if (!targetProfile) {

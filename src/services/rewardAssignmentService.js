@@ -23,14 +23,19 @@ import { db } from './firebase';
 const assignedRewardsRef = collection(db, 'assignedRewards');
 
 export async function assignRewardToFriend({ assignedByUid, assignedByName, assignedToUid, assignedToName, title, description, cost }) {
+  const cleanTitle = (title || '').trim().slice(0, 300);
+  if (!cleanTitle) throw new Error('Ödül adı boş olamaz.');
+
+  const cleanCost = Math.max(0, Math.min(100000, parseInt(cost, 10) || 0));
+
   await addDoc(assignedRewardsRef, {
     assignedByUid,
-    assignedByName,
+    assignedByName: (assignedByName || 'Kullanıcı').slice(0, 100),
     assignedToUid,
-    assignedToName,
-    title,
-    description: description || '',
-    cost,
+    assignedToName: (assignedToName || 'Arkadaşın').slice(0, 100),
+    title: cleanTitle,
+    description: (description || '').slice(0, 1000),
+    cost: cleanCost,
     status: 'PENDING',
     createdAt: serverTimestamp(),
   });

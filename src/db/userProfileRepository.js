@@ -6,22 +6,30 @@ import { doc, getDoc, setDoc, updateDoc, serverTimestamp } from 'firebase/firest
 import { db } from '../services/firebase';
 
 function generateUserCode() {
-  const num = Math.floor(1000 + Math.random() * 9000); // 4 haneli
-  return `JP-${num}`;
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  let result = '';
+  for (let i = 0; i < 6; i++) {
+    result += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return `JP-${result}`;
 }
 
 // Aynı kodun başka bir kullanıcıda olma ihtimaline karşı birkaç deneme yapar.
 async function generateUniqueUserCode() {
-  for (let i = 0; i < 10; i++) {
+  for (let i = 0; i < 15; i++) {
     const code = generateUserCode();
     const codeDoc = await getDoc(doc(db, 'userCodes', code));
     if (!codeDoc.exists()) {
       return code;
     }
   }
-  // 10 denemede de çakışma çıkarsa (çok düşük ihtimal), 6 haneliye geç
-  const code = `JP-${Math.floor(100000 + Math.random() * 900000)}`;
-  return code;
+  // Yüksek çakışma ihtimaline karşı yedek 8 haneli üret
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  let fallback = '';
+  for (let i = 0; i < 8; i++) {
+    fallback += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return `JP-${fallback}`;
 }
 
 // Kullanıcı ilk giriş yaptığında profil oluşturur, sonraki girişlerde mevcut
@@ -38,7 +46,6 @@ export async function ensureUserProfile(firebaseUser) {
   const profile = {
     uid: firebaseUser.uid,
     displayName: firebaseUser.displayName || 'Kullanıcı',
-    email: firebaseUser.email || null,
     photoURL: firebaseUser.photoURL || null,
     userCode,
     createdAt: serverTimestamp(),
@@ -57,12 +64,22 @@ export async function getUserProfile(uid) {
   return snap.exists() ? snap.data() : null;
 }
 
-// Kullanıcı koduna göre uid bulur (arkadaş ekleme akışında kullanılacak).
+// Kullanıcı koduna göre kamuya açık profili bulur (arkadaş ekleme akışında kullanılır).
+// Güvenlik (Data Minimization): Sadece kamuya açık 4 alanı döndürür.
 export async function findUserByCode(userCode) {
-  const codeDoc = await getDoc(doc(db, 'userCodes', userCode.toUpperCase()));
+  const cleanCode = (userCode || '').trim().toUpperCase();
+  if (!cleanCode) return null;
+  const codeDoc = await getDoc(doc(db, 'userCodes', cleanCode));
   if (!codeDoc.exists()) return null;
   const { uid } = codeDoc.data();
-  return getUserProfile(uid);
+  const fullProfile = await getUserProfile(uid);
+  if (!fullProfile) return null;
+  return {
+    uid: fullProfile.uid,
+    displayName: fullProfile.displayName || 'Kullanıcı',
+    photoURL: fullProfile.photoURL || null,
+    userCode: fullProfile.userCode,
+  };
 }
 
 // Profil düzenleme (isim ve/veya fotoğraf) — Firestore'daki profil dokümanını günceller.

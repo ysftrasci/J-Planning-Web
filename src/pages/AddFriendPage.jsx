@@ -48,7 +48,7 @@ export default function AddFriendPage() {
           id="friend-code"
           className="add-friend-page__input"
           type="text"
-          placeholder="örn. JP-4821"
+          placeholder="örn. JP-K89X42"
           value={code}
           onChange={(e) => setCode(e.target.value.toUpperCase())}
           autoFocus

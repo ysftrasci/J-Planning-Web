@@ -1,0 +1,83 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Kimlik doğrulaması yapılmış kullanıcı denetimi
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    // Doküman sahibinin uid denetimi
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    // 1. Kullanıcı Profilleri (users/{userId})
+    match /users/{userId} {
+      // Arkadaşlar ve etkileşimdekiler kamu verilerini (isim, foto, kod) okuyabilir
+      allow read: if isAuthenticated();
+      // Yalnızca kullanıcının kendisi kendi profilini oluşturabilir, güncelleyebilir veya silebilir
+      allow create, update, delete: if isOwner(userId);
+    }
+
+    // 2. Kullanıcı Kodları Eşleşmesi (userCodes/{code})
+    match /userCodes/{code} {
+      // Arkadaş araması için oturum açmış kullanıcılar kodu sorgulayabilir
+      allow read: if isAuthenticated();
+      // Kullanıcı yalnızca kendi UID'si için yeni bir kod kaydı oluşturabilir
+      allow create: if isAuthenticated() && request.resource.data.uid == request.auth.uid;
+      // Kod kayıtları silinemez ve değiştirilemez (kod çalınması/silinmesini önlemek için)
+      allow update, delete: if false;
+    }
+
+    // 3. Arkadaşlık İstekleri ve İlişkileri (friendships/{friendshipId})
+    match /friendships/{friendshipId} {
+      // Sadece isteği gönderen veya alan kişi arkadaşlık dokümanını okuyabilir
+      allow read: if isAuthenticated() && (
+        resource.data.fromUid == request.auth.uid || resource.data.toUid == request.auth.uid
+      );
+      // İstek gönderen kullanıcı yeni bir arkadaşlık dokümanı oluşturabilir
+      allow create: if isAuthenticated() && request.resource.data.fromUid == request.auth.uid;
+      // İsteği gönderen veya alan kullanıcı kabul edebilir/reddedebilir veya arkadaşlığı silebilir
+      allow update, delete: if isAuthenticated() && (
+        resource.data.fromUid == request.auth.uid || resource.data.toUid == request.auth.uid
+      );
+    }
+
+    // 4. Arkadaş Görev Atamaları (assignedTasks/{taskId})
+    match /assignedTasks/{taskId} {
+      // Sadece görevi atayan veya görevin atandığı kişi görevi okuyabilir
+      allow read: if isAuthenticated() && (
+        resource.data.assignedByUid == request.auth.uid || resource.data.assignedToUid == request.auth.uid
+      );
+      // Görevi atayan kullanıcı yeni görev oluşturabilir (subtaskCount 1-100 arasında olmalı)
+      allow create: if isAuthenticated()
+        && request.resource.data.assignedByUid == request.auth.uid
+        && request.resource.data.subtaskCount is number
+        && request.resource.data.subtaskCount >= 1
+        && request.resource.data.subtaskCount <= 100;
+      // Görevi atan veya alan durumunu (tamamlandı/kabul) güncelleyebilir veya silebilir
+      allow update, delete: if isAuthenticated() && (
+        resource.data.assignedByUid == request.auth.uid || resource.data.assignedToUid == request.auth.uid
+      );
+    }
+
+    // 5. Arkadaş Ödül Atamaları (assignedRewards/{rewardId})
+    match /assignedRewards/{rewardId} {
+      // Sadece ödülü oluşturan veya ödül atanmış kişi okuyabilir
+      allow read: if isAuthenticated() && (
+        resource.data.assignedByUid == request.auth.uid || resource.data.assignedToUid == request.auth.uid
+      );
+      // Ödülü oluşturan kişi yeni kayıt açabilir (cost 0-100000 JP arasında olmalı)
+      allow create: if isAuthenticated()
+        && request.resource.data.assignedByUid == request.auth.uid
+        && request.resource.data.cost is number
+        && request.resource.data.cost >= 0
+        && request.resource.data.cost <= 100000;
+      // Ödülü oluşturan veya alan taraf durumunu güncelleyebilir veya silebilir
+      allow update, delete: if isAuthenticated() && (
+        resource.data.assignedByUid == request.auth.uid || resource.data.assignedToUid == request.auth.uid
+      );
+    }
+  }
+}
