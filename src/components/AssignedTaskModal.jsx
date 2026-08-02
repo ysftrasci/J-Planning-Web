@@ -7,8 +7,8 @@ import { periodLabel } from '../utils/period';
 import AppButton from './AppButton.jsx';
 import './AssignedTaskModal.css';
 
-const PRIORITY_LABEL = { HIGH: 'Yüksek', MEDIUM: 'Orta', LOW: 'Düşük', EASY: 'Kolay', HARD: 'Zor' };
-const PRIORITY_JP = { HIGH: 5, MEDIUM: 3, LOW: 1, EASY: 1, HARD: 3 };
+const PRIORITY_LABEL = { HIGH: 'Yüksek', MEDIUM: 'Orta', LOW: 'Düşük', EASY: 'Kolay', HARD: 'Zor', ZERO: '0 JP' };
+const PRIORITY_JP = { HIGH: 5, MEDIUM: 3, LOW: 1, EASY: 1, HARD: 3, ZERO: 0 };
 
 export default function AssignedTaskModal({ open, task, onClose, onAccept, onReject }) {
   if (!open || !task) return null;

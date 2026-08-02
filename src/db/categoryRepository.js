@@ -26,11 +26,20 @@ export function deleteCategory(id) {
 
 export function ensureDefaultCategories() {
   const existing = getCategories();
-  if (existing.length > 0) return;
-  const defaults = [
-    { name: 'Kişisel', color: '#C98A2C' },
-    { name: 'İş', color: '#5B8A6B' },
-    { name: 'Sağlık', color: '#C4512E' },
-  ];
-  defaults.forEach((c) => createCategory(c.name, c.color));
+  if (existing.length === 0) {
+    const defaults = [
+      { name: 'Kişisel', color: '#C98A2C' },
+      { name: 'İş', color: '#5B8A6B' },
+      { name: 'Sağlık', color: '#C4512E' },
+      { name: 'YKS', color: '#8B5CF6' },
+    ];
+    defaults.forEach((c) => createCategory(c.name, c.color));
+    return;
+  }
+
+  // Eğer var olan bir veritabanıysa ve YKS henüz yoksa, YKS kategorisini otomatik ekle
+  const hasYKS = existing.some((c) => c.name.toUpperCase() === 'YKS');
+  if (!hasYKS) {
+    createCategory('YKS', '#8B5CF6');
+  }
 }

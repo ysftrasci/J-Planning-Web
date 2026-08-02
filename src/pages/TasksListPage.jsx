@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Send, Plus, CheckCircle2, ChevronRight, Tags, Bell, Search, X, SlidersHorizontal, Filter } from 'lucide-react';
+import { Send, Plus, CheckCircle2, ChevronRight, Tags, Bell, Search, X, SlidersHorizontal, Filter, BookOpen } from 'lucide-react';
 import {
   getActiveTasks,
   getCurrentPeriodStatus,
@@ -188,6 +188,22 @@ export default function TasksListPage() {
       .filter((sec) => sec.data.length > 0);
   }, [sections, searchQuery, periodFilter, priorityFilter, sourceFilter]);
 
+  const pendingBannerText = useMemo(() => {
+    if (!pendingAssigned || pendingAssigned.length === 0) return '';
+    const sendersMap = new Map();
+    pendingAssigned.forEach((t) => {
+      const name = t.assignedByName || 'Bir arkadaşın';
+      sendersMap.set(name, (sendersMap.get(name) || 0) + 1);
+    });
+
+    const senders = Array.from(sendersMap.entries());
+    if (senders.length === 1) {
+      const [name, count] = senders[0];
+      return `${name} sana ${count} görev atadı, onay bekliyor`;
+    }
+    return `${pendingAssigned.length} görev isteğin var (${senders.length} arkadaşından), onay bekliyor`;
+  }, [pendingAssigned]);
+
   const hasTasks = sections.length > 0;
 
   return (
@@ -195,6 +211,16 @@ export default function TasksListPage() {
       <div className="tasks-list-page__header">
         <h1>Görevlerim</h1>
         <div className="tasks-list-page__header-buttons">
+          <button
+            type="button"
+            className="tasks-list-page__note-button"
+            onClick={() => navigate('/daily-notes')}
+            aria-label="Günün Notu"
+            title="Günün Notu"
+          >
+            <BookOpen size={16} />
+            <span>Günün Notu</span>
+          </button>
           <button
             type="button"
             className={`tasks-list-page__icon-button ${isFilterActive ? 'tasks-list-page__icon-button--active' : ''}`}
@@ -236,7 +262,7 @@ export default function TasksListPage() {
       {pendingAssigned.length > 0 && (
         <button type="button" className="tasks-list-page__pending-banner" onClick={() => setModalTask(pendingAssigned[0])}>
           <Bell size={18} />
-          <span>{pendingAssigned.length} arkadaşın sana görev atadı, onay bekliyor</span>
+          <span>{pendingBannerText}</span>
           <ChevronRight size={16} />
         </button>
       )}

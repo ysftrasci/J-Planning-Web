@@ -18,6 +18,7 @@
 // kalmaya devam eder — repository dosyaları neredeyse değişmeden taşınabildi.
 
 import { openSqliteConnection, deleteDatabaseBytes } from './sqliteEngine';
+import { ensureDefaultCategories } from './categoryRepository';
 
 let dbInstance = null;
 let currentUid = null;
@@ -182,6 +183,24 @@ export async function initDatabase(uid) {
       completedAt INTEGER NOT NULL
     );
 
+    CREATE TABLE IF NOT EXISTS task_study_logs (
+      id TEXT PRIMARY KEY,
+      taskId TEXT NOT NULL,
+      periodKey TEXT NOT NULL,
+      studyTimeText TEXT NOT NULL,
+      createdAt INTEGER NOT NULL,
+      updatedAt INTEGER NOT NULL,
+      FOREIGN KEY (taskId) REFERENCES tasks(id)
+    );
+
+    CREATE TABLE IF NOT EXISTS daily_notes (
+      id TEXT PRIMARY KEY,
+      dateKey TEXT UNIQUE NOT NULL,
+      content TEXT NOT NULL,
+      createdAt INTEGER NOT NULL,
+      updatedAt INTEGER NOT NULL
+    );
+
     CREATE TABLE IF NOT EXISTS app_meta (
       key TEXT PRIMARY KEY,
       value TEXT
@@ -190,8 +209,12 @@ export async function initDatabase(uid) {
 
   runMigrations(db);
 
-  // Var olan tüm veritabanlarında description sütununun varlığından emin ol
+  // Var olan tüm veritabanlarında description ve notes sütunlarının varlığından emin ol
   tryAddColumn(db, 'tasks', 'description TEXT');
+  tryAddColumn(db, 'tasks', 'notes TEXT');
+
+  // Varsayılan kategorilerin (YKS dahil) var olduğundan emin ol
+  ensureDefaultCategories();
 
   // "me" için cüzdan kaydı yoksa oluştur
   const existing = db.getFirstSync('SELECT userId FROM wallet WHERE userId = ?', ['me']);

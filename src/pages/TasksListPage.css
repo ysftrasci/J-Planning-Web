@@ -11,6 +11,25 @@
   gap: var(--space-sm);
 }
 
+.tasks-list-page__note-button {
+  height: 40px;
+  padding: 0 14px;
+  border-radius: var(--radius-pill);
+  background-color: var(--color-surface-alt, #f3f4f6);
+  color: var(--color-accent-dark, #be185d);
+  border: 1px solid var(--color-accent-soft, #fbcfe8);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+.tasks-list-page__note-button:hover {
+  background-color: var(--color-accent-soft, #fbcfe8);
+}
+
 .tasks-list-page__icon-button {
   width: 40px;
   height: 40px;

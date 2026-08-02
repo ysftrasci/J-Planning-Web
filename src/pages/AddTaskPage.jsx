@@ -15,6 +15,7 @@ const PRIORITIES = [
   { key: 'HIGH', label: 'Yüksek', jp: 5 },
   { key: 'MEDIUM', label: 'Orta', jp: 3 },
   { key: 'LOW', label: 'Düşük', jp: 1 },
+  { key: 'ZERO', label: '0 JP', jp: 0 },
 ];
 
 // Tek seferlik (ONCE) görevlerde "öncelik" yerine "zorluk" seçilir.
@@ -22,6 +23,7 @@ const DIFFICULTIES = [
   { key: 'EASY', label: 'Kolay', jp: 1 },
   { key: 'MEDIUM', label: 'Orta', jp: 2 },
   { key: 'HARD', label: 'Zor', jp: 3 },
+  { key: 'ZERO', label: '0 JP', jp: 0 },
 ];
 
 const PERIODS = [

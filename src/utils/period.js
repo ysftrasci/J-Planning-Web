@@ -5,34 +5,45 @@
 // - MONTHLY: o ayın 1'i
 // - ONCE: görevin oluşturulduğu tarih (tek seferlik, hiç tekrarlanmaz)
 
-function toDateStr(date) {
-  return date.toISOString().split('T')[0];
+export function toDateStr(date) {
+  const d = date instanceof Date ? date : new Date(date);
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+export function parseLocalDate(dateStr) {
+  if (typeof dateStr === 'string' && dateStr.length >= 10) {
+    const [y, m, d] = dateStr.slice(0, 10).split('-').map(Number);
+    return new Date(y, m - 1, d);
+  }
+  return new Date(dateStr);
 }
 
 function getMonday(date) {
-  const d = new Date(date);
+  const d = date instanceof Date ? date : new Date(date);
   const day = d.getDay();
   const diff = d.getDate() - day + (day === 0 ? -6 : 1);
-  const monday = new Date(d);
-  monday.setDate(diff);
+  const monday = new Date(d.getFullYear(), d.getMonth(), diff);
   monday.setHours(0, 0, 0, 0);
   return monday;
 }
 
 export function getPeriodKey(period, date = new Date()) {
-  const d = new Date(date);
+  const d = date instanceof Date ? date : parseLocalDate(date);
   if (period === 'WEEKLY') {
     return toDateStr(getMonday(d));
   }
   if (period === 'MONTHLY') {
-    d.setDate(1);
-    return toDateStr(d);
+    const monthlyDate = new Date(d.getFullYear(), d.getMonth(), 1);
+    return toDateStr(monthlyDate);
   }
   return toDateStr(d);
 }
 
 export function getPreviousPeriodKey(period, currentPeriodKey) {
-  const d = new Date(currentPeriodKey);
+  const d = parseLocalDate(currentPeriodKey);
   if (period === 'DAILY') {
     d.setDate(d.getDate() - 1);
   } else if (period === 'WEEKLY') {
@@ -51,7 +62,7 @@ export function getPeriodEndTimestamp(period, periodKey) {
   if (period === 'ONCE') {
     return Number.MAX_SAFE_INTEGER;
   }
-  const d = new Date(periodKey);
+  const d = parseLocalDate(periodKey);
   if (period === 'DAILY') {
     d.setDate(d.getDate() + 1);
   } else if (period === 'WEEKLY') {

@@ -12,10 +12,22 @@ import {
   Wallet,
   CalendarDays,
   Check,
+  Clock,
+  FileText,
 } from 'lucide-react';
 import { getDb } from '../db/database';
-import { getTaskRecords, deleteTask, lateMarkTaskComplete, lateMarkTaskUncomplete, getSubtaskLabels, getTotalJPEarnedForTask } from '../db/taskRepository';
-import { getPeriodEndTimestamp, isWithinLateMarkWindow, periodLabel } from '../utils/period';
+import {
+  getTaskRecords,
+  deleteTask,
+  lateMarkTaskComplete,
+  lateMarkTaskUncomplete,
+  getSubtaskLabels,
+  getTotalJPEarnedForTask,
+  updateTaskNotes,
+  getTaskStudyLog,
+  saveTaskStudyLog,
+} from '../db/taskRepository';
+import { getPeriodEndTimestamp, isWithinLateMarkWindow, periodLabel, getPeriodKey } from '../utils/period';
 import {
   calculateCurrentStreak,
   calculateMaxStreak,
@@ -50,6 +62,11 @@ export default function TaskDetailPage() {
   const [task, setTask] = useState(null);
   const [records, setRecords] = useState([]);
   const [totalJP, setTotalJP] = useState(0);
+  const [categoryName, setCategoryName] = useState('');
+  const [taskNotes, setTaskNotes] = useState('');
+  const [studyTimeText, setStudyTimeText] = useState('');
+  const [notesSaved, setNotesSaved] = useState(false);
+  const [studyLogSaved, setStudyLogSaved] = useState(false);
   const [selectedMonthKey, setSelectedMonthKey] = useState(null);
   const [recordToLateMark, setRecordToLateMark] = useState(null); // { record, action: 'COMPLETE' | 'UNCOMPLETE' }
   const [showDeleteModal, setShowDeleteModal] = useState(false);
@@ -59,11 +76,39 @@ export default function TaskDetailPage() {
     const db = getDb();
     const t = db.getFirstSync('SELECT * FROM tasks WHERE id = ?', [taskId]);
     setTask(t);
+    if (t) {
+      setTaskNotes(t.notes || '');
+      if (t.categoryId) {
+        const cat = db.getFirstSync('SELECT name FROM categories WHERE id = ?', [t.categoryId]);
+        setCategoryName(cat ? cat.name : '');
+      } else {
+        setCategoryName('');
+      }
+      const todayKey = getPeriodKey(t.period, new Date());
+      const studyLog = getTaskStudyLog(taskId, todayKey);
+      setStudyTimeText(studyLog?.studyTimeText || '');
+    }
     setRecords(getTaskRecords(taskId));
     setTotalJP(getTotalJPEarnedForTask(taskId));
   }, [taskId]);
 
   useEffect(load, [load]);
+
+  const handleSaveNotes = (e) => {
+    e?.preventDefault();
+    updateTaskNotes(taskId, taskNotes);
+    setNotesSaved(true);
+    setTimeout(() => setNotesSaved(false), 2000);
+  };
+
+  const handleSaveStudyLog = (e) => {
+    e?.preventDefault();
+    if (!task) return;
+    const todayKey = getPeriodKey(task.period, new Date());
+    saveTaskStudyLog(taskId, todayKey, studyTimeText);
+    setStudyLogSaved(true);
+    setTimeout(() => setStudyLogSaved(false), 2000);
+  };
 
   const availableMonths = useMemo(() => {
     const months = new Set(records.map((r) => monthKeyOf(r.periodKey)));
@@ -207,6 +252,64 @@ export default function TaskDetailPage() {
           </span>
         </div>
       )}
+
+      {/* YKS Etiketli Görevlerde: Bugün Kaç Saat Çalıştınız? */}
+      {categoryName.toUpperCase() === 'YKS' && (
+        <div className="task-detail-page__card task-detail-page__card--study">
+          <div className="task-detail-page__card-header">
+            <Clock size={18} className="task-detail-page__card-icon" />
+            <div>
+              <h3 className="task-detail-page__card-title">Bugün Kaç Saat Çalıştınız?</h3>
+              <span className="caption">Süre bilgisini klavyeden serbestçe yazabilirsiniz (ör. 2 saat 30 dk, 45 dk)</span>
+            </div>
+          </div>
+          <form onSubmit={handleSaveStudyLog} className="task-detail-page__card-form">
+            <input
+              type="text"
+              className="task-detail-page__text-input"
+              placeholder="ör. 2 saat 30 dakika"
+              value={studyTimeText}
+              onChange={(e) => setStudyTimeText(e.target.value)}
+            />
+            <div className="task-detail-page__card-footer">
+              {studyLogSaved && (
+                <span className="task-detail-page__saved-badge">
+                  <Check size={14} /> Kaydedildi
+                </span>
+              )}
+              <AppButton type="submit" title="Kaydet" />
+            </div>
+          </form>
+        </div>
+      )}
+
+      {/* Her Görev İçin Not Yazma Kısmı */}
+      <div className="task-detail-page__card task-detail-page__card--notes">
+        <div className="task-detail-page__card-header">
+          <FileText size={18} className="task-detail-page__card-icon" />
+          <div>
+            <h3 className="task-detail-page__card-title">Görev Notları & Düşünceler</h3>
+            <span className="caption">Aklınızdan geçenleri veya göreve özel notları buraya yazabilirsiniz.</span>
+          </div>
+        </div>
+        <form onSubmit={handleSaveNotes} className="task-detail-page__card-form">
+          <textarea
+            className="task-detail-page__textarea"
+            placeholder="Görevle ilgili not veya düşünce yazın..."
+            rows={3}
+            value={taskNotes}
+            onChange={(e) => setTaskNotes(e.target.value)}
+          />
+          <div className="task-detail-page__card-footer">
+            {notesSaved && (
+              <span className="task-detail-page__saved-badge">
+                <Check size={14} /> Kaydedildi
+              </span>
+            )}
+            <AppButton type="submit" title="Notu Kaydet" />
+          </div>
+        </form>
+      </div>
 
       {availableMonths.length > 0 && (
         <div className="task-detail-page__month-selector">

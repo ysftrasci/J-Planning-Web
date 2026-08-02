@@ -19,6 +19,7 @@ import EditProfilePage from '../pages/EditProfilePage.jsx';
 import NotificationSettingsPage from '../pages/NotificationSettingsPage.jsx';
 import DangerZonePage from '../pages/DangerZonePage.jsx';
 import VerifyEmailPage from '../pages/VerifyEmailPage.jsx';
+import DailyNotesPage from '../pages/DailyNotesPage.jsx';
 import { useAuth } from '../context/AuthContext.jsx';
 
 // Aşama 0 kapsamında kurulan temel yönlendirme (routing) iskeleti,
@@ -131,6 +132,7 @@ export default function AppRouter() {
       >
         <Route index element={<TasksListPage />} />
         <Route path="add-task" element={<AddTaskPage />} />
+        <Route path="daily-notes" element={<DailyNotesPage />} />
         <Route path="task/:taskId" element={<TaskDetailPage />} />
         <Route path="categories" element={<CategoriesPage />} />
         <Route path="rewards" element={<RewardsPage />} />

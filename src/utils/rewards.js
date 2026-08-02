@@ -1,9 +1,8 @@
-// J-Planning — Ödül & JP Hesaplama Mantığı (Doküman bölüm 6)
-
 export const PRIORITY_JP = {
   HIGH: 5,
   MEDIUM: 3,
   LOW: 1,
+  ZERO: 0,
 };
 
 // Tek seferlik (ONCE) görevler için ayrı bir "zorluk" ölçeği kullanılır —
@@ -14,6 +13,7 @@ export const ONCE_DIFFICULTY_JP = {
   EASY: 1,
   MEDIUM: 2,
   HARD: 3,
+  ZERO: 0,
 };
 
 export const STREAK_BONUS_JP = 2;
@@ -30,6 +30,9 @@ export function calculateStreakBonus(currentStreakAfterCompletion) {
 
 export function calculateTaskJP(priority, currentStreakAfterCompletion) {
   const baseJp = PRIORITY_JP[priority] ?? PRIORITY_JP.MEDIUM;
+  if (baseJp === 0) {
+    return { baseJp: 0, bonus: 0, total: 0 };
+  }
   const bonus = calculateStreakBonus(currentStreakAfterCompletion);
   return { baseJp, bonus, total: baseJp + bonus };
 }

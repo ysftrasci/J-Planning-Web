@@ -366,6 +366,26 @@ export function consumeStreakFreeze() {
   return true;
 }
 
+export function cleanupInvalidPastRecords() {
+  let db;
+  try {
+    db = getDb();
+  } catch (e) {
+    return;
+  }
+  if (!db) return;
+
+  const tasks = db.getAllSync(`SELECT id, period, createdAt FROM tasks`);
+  for (const task of tasks) {
+    if (!task.createdAt) continue;
+    const startPeriodKey = getPeriodKey(task.period, new Date(task.createdAt));
+    db.runSync(
+      `DELETE FROM task_records WHERE taskId = ? AND periodKey < ?`,
+      [task.id, startPeriodKey]
+    );
+  }
+}
+
 // Süresi dolan ama işaretlenmemiş periyotları otomatik FAILED yapar.
 // Eğer kullanıcının Seri Dondurma Hakkı (streak freeze) varsa, 1 dondurma hakkı
 // harcanarak seri korunur ('FROZEN' durumu).
@@ -377,17 +397,29 @@ export function processExpiredPeriods() {
     return;
   }
   if (!db) return;
+
+  // Önce geçmişteki hatalı kayıtları temizle
+  cleanupInvalidPastRecords();
+
   const tasks = db.getAllSync(
     `SELECT * FROM tasks WHERE isArchived = 0 AND assignmentStatus != 'PENDING_ACCEPT' AND (assignmentDirection IS NULL OR assignmentDirection != 'SENT') AND period != 'ONCE'`
   );
   const now = Date.now();
 
   for (const task of tasks) {
+    const startPeriodKey = getPeriodKey(task.period, new Date(task.createdAt || Date.now()));
     const periodKey = getPeriodKey(task.period, new Date());
     let checkKey = periodKey;
+
     for (let i = 0; i < 60; i++) {
+      // Görevin oluşturulma periyodundan daha eski zamanlar için kayıt oluşturma
+      if (checkKey < startPeriodKey) break;
+
       const endTs = getPeriodEndTimestamp(task.period, checkKey);
-      if (endTs > now) break;
+      if (endTs > now) {
+        checkKey = getPreviousPeriodKey(task.period, checkKey);
+        continue;
+      }
 
       const existing = db.getFirstSync(
         'SELECT * FROM task_records WHERE taskId = ? AND periodKey = ?',
@@ -457,6 +489,36 @@ export function getWalletHistory(userId = 'me') {
     'SELECT * FROM wallet_transactions WHERE userId = ? ORDER BY createdAt DESC',
     [userId]
   );
+}
+
+export function updateTaskNotes(taskId, notes) {
+  const db = getDb();
+  db.runSync('UPDATE tasks SET notes = ? WHERE id = ?', [notes ?? '', taskId]);
+}
+
+export function getTaskStudyLog(taskId, periodKey) {
+  const db = getDb();
+  return db.getFirstSync(
+    'SELECT * FROM task_study_logs WHERE taskId = ? AND periodKey = ?',
+    [taskId, periodKey]
+  );
+}
+
+export function saveTaskStudyLog(taskId, periodKey, studyTimeText) {
+  const db = getDb();
+  const existing = getTaskStudyLog(taskId, periodKey);
+  const now = Date.now();
+  if (existing) {
+    db.runSync(
+      'UPDATE task_study_logs SET studyTimeText = ?, updatedAt = ? WHERE id = ?',
+      [studyTimeText ?? '', now, existing.id]
+    );
+  } else {
+    db.runSync(
+      'INSERT INTO task_study_logs (id, taskId, periodKey, studyTimeText, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?)',
+      [uuid(), taskId, periodKey, studyTimeText ?? '', now, now]
+    );
+  }
 }
 
 export { uuid };
