@@ -2,7 +2,17 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: var(--space-md);
+  gap: var(--space-md, 14px);
+  flex-wrap: wrap;
+  margin-bottom: var(--space-lg);
+}
+
+.tasks-list-page__header h1 {
+  font-size: 26px;
+  font-weight: 800;
+  letter-spacing: -0.5px;
+  color: var(--color-text-primary);
+  margin-right: var(--space-xs, 4px);
 }
 
 .tasks-list-page__header-buttons {
@@ -15,26 +25,29 @@
   height: 40px;
   padding: 0 14px;
   border-radius: var(--radius-pill);
-  background-color: var(--color-surface-alt, #f3f4f6);
-  color: var(--color-accent-dark, #be185d);
-  border: 1px solid var(--color-accent-soft, #fbcfe8);
+  background-color: var(--color-accent-soft);
+  color: var(--color-accent-dark);
+  border: 1px solid var(--color-border);
   display: flex;
   align-items: center;
   gap: 6px;
   font-size: 13px;
   font-weight: 600;
   cursor: pointer;
-  transition: all 0.2s ease;
+  box-shadow: var(--shadow-card);
+  transition: all 0.22s cubic-bezier(0.4, 0, 0.2, 1);
 }
 .tasks-list-page__note-button:hover {
-  background-color: var(--color-accent-soft, #fbcfe8);
+  transform: translateY(-1px);
+  border-color: var(--color-accent);
+  box-shadow: var(--shadow-card-hover);
 }
 
 .tasks-list-page__icon-button {
   width: 40px;
   height: 40px;
   border-radius: var(--radius-pill);
-  background-color: var(--color-surface-alt);
+  background-color: var(--color-surface);
   color: var(--color-text-secondary);
   border: 1px solid var(--color-border);
   display: flex;
@@ -42,7 +55,14 @@
   justify-content: center;
   cursor: pointer;
   position: relative;
-  transition: all 0.2s ease;
+  box-shadow: var(--shadow-card);
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.tasks-list-page__icon-button:hover {
+  transform: translateY(-1px);
+  color: var(--color-accent-dark);
+  border-color: var(--color-accent);
 }
 
 .tasks-list-page__icon-button--active {
@@ -52,16 +72,23 @@
 }
 
 .tasks-list-page__add-button {
-  width: 40px;
-  height: 40px;
+  width: 42px;
+  height: 42px;
   border-radius: var(--radius-pill);
-  background-color: var(--color-accent);
+  background: linear-gradient(135deg, #e06d8c 0%, #b83256 100%);
   color: #ffffff;
   border: none;
   display: flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
+  box-shadow: 0 4px 14px rgba(184, 50, 86, 0.35);
+  transition: all 0.22s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.tasks-list-page__add-button:hover {
+  transform: translateY(-2px) scale(1.05);
+  box-shadow: 0 6px 20px rgba(184, 50, 86, 0.45);
 }
 
 .tasks-list-page__pending-banner {
@@ -69,16 +96,23 @@
   align-items: center;
   gap: var(--space-sm);
   width: 100%;
-  background-color: var(--color-accent-soft);
+  background: linear-gradient(135deg, #fde8ef 0%, #fbcfe8 100%);
   color: var(--color-accent-dark);
-  border: none;
-  padding: var(--space-md);
-  border-radius: var(--radius-md);
-  margin-bottom: var(--space-sm);
-  font-size: var(--font-caption-size);
+  border: 1px solid rgba(224, 109, 140, 0.3);
+  padding: 14px 16px;
+  border-radius: var(--radius-lg);
+  margin-bottom: var(--space-md);
+  font-size: 14px;
+  font-weight: 600;
   cursor: pointer;
   text-align: left;
   font-family: inherit;
+  box-shadow: var(--shadow-card);
+  transition: transform 0.2s ease;
+}
+
+.tasks-list-page__pending-banner:hover {
+  transform: translateY(-1px);
 }
 
 .tasks-list-page__pending-banner span {
@@ -92,14 +126,15 @@
   border-radius: var(--radius-md);
   margin-bottom: var(--space-md);
   font-size: var(--font-caption-size);
+  border: 1px solid var(--color-accent-soft);
 }
 
 /* Arama Bölümü */
 .tasks-list-page__filter-bar {
   display: flex;
   flex-direction: column;
-  gap: var(--space-sm);
-  margin-bottom: var(--space-md);
+  gap: var(--space-md);
+  margin-bottom: var(--space-lg);
 }
 
 .tasks-list-page__search-wrap {
@@ -109,7 +144,14 @@
   background-color: var(--color-surface);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-pill);
-  padding: var(--space-sm) var(--space-md);
+  padding: 10px 16px;
+  box-shadow: var(--shadow-card);
+  transition: all 0.2s ease;
+}
+
+.tasks-list-page__search-wrap:focus-within {
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 3px rgba(224, 109, 140, 0.15);
 }
 
 .tasks-list-page__search-input {
@@ -117,7 +159,7 @@
   border: none;
   background: transparent;
   outline: none;
-  font-size: var(--font-body-size);
+  font-size: 14.5px;
   color: var(--color-text-primary);
   font-family: inherit;
 }
@@ -134,27 +176,37 @@
 
 .tasks-list-page__chips-row {
   display: flex;
-  gap: var(--space-xs);
+  gap: 8px;
   flex-wrap: wrap;
+  align-items: center;
 }
 
 .tasks-list-page__chip {
-  padding: var(--space-xs) var(--space-md);
+  padding: 6px 14px;
   border-radius: var(--radius-pill);
-  background-color: var(--color-surface-alt);
+  background-color: var(--color-surface);
   border: 1px solid var(--color-border);
-  font-size: var(--font-caption-size);
+  font-size: 13px;
+  font-weight: 500;
   color: var(--color-text-secondary);
   cursor: pointer;
   white-space: nowrap;
-  transition: all 0.2s ease;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.03);
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.tasks-list-page__chip:hover {
+  color: var(--color-text-primary);
+  border-color: var(--color-text-muted);
+  transform: translateY(-1px);
 }
 
 .tasks-list-page__chip--active {
-  background-color: var(--color-accent);
-  border-color: var(--color-accent);
-  color: #ffffff;
+  background: linear-gradient(135deg, #e06d8c 0%, #b83256 100%);
+  border-color: transparent;
+  color: #ffffff !important;
   font-weight: 600;
+  box-shadow: 0 3px 10px rgba(184, 50, 86, 0.25);
 }
 
 /* Modal Filtreleme İçeriği */

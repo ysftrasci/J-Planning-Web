@@ -54,8 +54,7 @@
   --radius-xl: 24px;
   --radius-pill: 999px;
 
-  --font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
-    Helvetica, Arial, sans-serif;
+  --font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
 
   --font-h1-size: 28px;
   --font-h1-weight: 700;
@@ -80,7 +79,9 @@
   --font-small-size: 11px;
   --font-small-weight: 500;
 
-  --shadow-card: 0 1px 4px rgba(15, 23, 42, 0.06);
+  --shadow-card: 0 4px 20px -2px rgba(45, 30, 36, 0.05), 0 2px 6px -1px rgba(45, 30, 36, 0.03);
+  --shadow-card-hover: 0 10px 30px -4px rgba(224, 109, 140, 0.15), 0 4px 12px -2px rgba(45, 30, 36, 0.06);
+  --shadow-glow: 0 0 20px rgba(224, 109, 140, 0.3);
 }
 
 [data-theme="dark"] {
