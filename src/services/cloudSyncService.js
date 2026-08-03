@@ -2,7 +2,7 @@
 // Cihazlar (Laptop, Telefon vb.) arası veri uyumluluğu ve anlık senkronizasyon.
 
 import { doc, getDoc, setDoc, onSnapshot, serverTimestamp } from 'firebase/firestore';
-import { db } from './firebase';
+import { db, auth } from './firebase';
 import { getDb } from '../db/database';
 import { uuid } from '../db/taskRepository';
 
@@ -293,6 +293,68 @@ export async function applyRemoteTablesToLocal(tables) {
     throw err;
   } finally {
     isApplyingRemoteData = false;
+  }
+}
+
+function countTableItems(tables) {
+  if (!tables) return 0;
+  let count = 0;
+  for (const key of Object.keys(tables)) {
+    if (Array.isArray(tables[key])) {
+      count += tables[key].length;
+    }
+  }
+  return count;
+}
+
+export async function performInitialCloudSync(uid) {
+  if (!uid) return;
+  try {
+    const localTables = getLocalSnapshotPayload();
+    const localCount = countTableItems(localTables);
+
+    const docRef = doc(db, 'users', uid, 'user_backup', 'latest');
+    const snap = await getDoc(docRef);
+
+    if (!snap.exists()) {
+      // Bulutta henüz yedek yoksa ve yerelde veri varsa buluta yükle
+      await uploadCloudSync(uid);
+      return;
+    }
+
+    const cloudData = snap.data();
+    if (!cloudData.tablesJson || !cloudData.signature) {
+      await uploadCloudSync(uid);
+      return;
+    }
+
+    const remoteTables = JSON.parse(cloudData.tablesJson);
+    const expectedSig = await generateDataSignature(remoteTables);
+    if (cloudData.signature !== expectedSig) {
+      console.warn('Bulut senkronizasyon imza uyuşmazlığı, yerel veriler korundu.');
+      return;
+    }
+
+    const remoteCount = countTableItems(remoteTables);
+
+    // Eğer yerelde veri var ama bulut tamamen boşsa, yerel veriyi buluta yukle
+    if (localCount > 0 && remoteCount === 0) {
+      await uploadCloudSync(uid);
+      return;
+    }
+
+    // Eğer yerelde veri yoksa veya buluttaki veri daha güncel ise yerel veritabanına uygula
+    if (localCount === 0 || (cloudData.updatedAtMs && cloudData.updatedAtMs > lastSyncedVersionTs)) {
+      await applyRemoteTablesToLocal(remoteTables);
+      lastSyncedVersionTs = cloudData.updatedAtMs || Date.now();
+      window.dispatchEvent(new Event('jplanning:cloud-sync-update'));
+      return;
+    }
+
+    // Aksi halde en güncel halini buluta güncelle
+    await uploadCloudSync(uid);
+  } catch (err) {
+    console.warn('İlk senkronizasyon kontrolü uyarısı:', err);
   }
 }
 

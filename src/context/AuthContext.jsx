@@ -13,7 +13,7 @@ import { onAuthStateChanged, signOut as firebaseSignOut } from 'firebase/auth';
 import { auth } from '../services/firebase';
 import { ensureUserProfile, getUserProfile } from '../db/userProfileRepository';
 import { initDatabase } from '../db/database';
-import { downloadAndApplyCloudSync, listenCloudSync, uploadCloudSync } from '../services/cloudSyncService';
+import { downloadAndApplyCloudSync, listenCloudSync, uploadCloudSync, performInitialCloudSync } from '../services/cloudSyncService';
 
 const AuthContext = createContext(null);
 
@@ -40,10 +40,8 @@ export function AuthProvider({ children }) {
           const profile = await ensureUserProfile(firebaseUser);
           await initDatabase(firebaseUser.uid);
 
-          // Buluttan en güncel verileri indirip uygula
-          await downloadAndApplyCloudSync(firebaseUser.uid);
-          // Yükleme yapılmamışsa veya ilk defa giriliyorsa yerel verileri de buluta yedekle
-          uploadCloudSync(firebaseUser.uid);
+          // Akıllı ilk senkronizasyon kontrolü (mevcut hesap verileri vs. bulut yedek uzlaştırma)
+          await performInitialCloudSync(firebaseUser.uid);
 
           // Diğer cihazlardan gelen anlık değişiklikleri dinle
           cloudUnsub = listenCloudSync(firebaseUser.uid, () => {
