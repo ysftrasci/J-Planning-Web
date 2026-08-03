@@ -1,5 +1,6 @@
 import { getDb } from './database';
 import { uuid } from './taskRepository';
+import { triggerAutoCloudSyncForCurrentUser } from '../services/cloudSyncService';
 
 export function createCategory(name, color) {
   const db = getDb();
@@ -10,6 +11,7 @@ export function createCategory(name, color) {
     color ?? '#C98A2C',
     Date.now(),
   ]);
+  triggerAutoCloudSyncForCurrentUser();
   return id;
 }
 
@@ -22,6 +24,7 @@ export function deleteCategory(id) {
   const db = getDb();
   db.runSync('UPDATE tasks SET categoryId = NULL WHERE categoryId = ?', [id]);
   db.runSync('DELETE FROM categories WHERE id = ?', [id]);
+  triggerAutoCloudSyncForCurrentUser();
 }
 
 export function ensureDefaultCategories() {

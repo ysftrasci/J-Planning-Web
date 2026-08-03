@@ -85,6 +85,16 @@ export default function TasksListPage() {
   useEffect(load, [load]);
 
   useEffect(() => {
+    const handleCloudUpdate = () => {
+      load();
+    };
+    window.addEventListener('jplanning:cloud-sync-update', handleCloudUpdate);
+    return () => {
+      window.removeEventListener('jplanning:cloud-sync-update', handleCloudUpdate);
+    };
+  }, [load]);
+
+  useEffect(() => {
     if (!user) return;
     const unsub = listenPendingTasksAssignedToMe(user.uid, setPendingAssigned);
     return unsub;
@@ -215,11 +225,11 @@ export default function TasksListPage() {
             type="button"
             className="tasks-list-page__note-button"
             onClick={() => navigate('/daily-notes')}
-            aria-label="Günün Notu"
-            title="Günün Notu"
+            aria-label="Günün Özeti"
+            title="Günün Özeti"
           >
             <BookOpen size={16} />
-            <span>Günün Notu</span>
+            <span>Günün Özeti</span>
           </button>
           <button
             type="button"

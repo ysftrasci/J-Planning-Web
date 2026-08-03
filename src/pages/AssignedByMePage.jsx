@@ -6,7 +6,7 @@
 // cihazında oluşur, bizim veritabanımızda hiç yaşamaz.
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ChevronLeft, Send, Hourglass, CheckCircle2, Clock } from 'lucide-react';
+import { ChevronLeft, Send, Hourglass, CheckCircle2, Clock, Pencil } from 'lucide-react';
 import { useAuth } from '../context/AuthContext.jsx';
 import { listenTasksIAssigned } from '../services/taskAssignmentService';
 import { periodLabel } from '../utils/period';
@@ -63,10 +63,34 @@ export default function AssignedByMePage() {
               <div key={item.id} className="assigned-by-me-page__card">
                 <div className="assigned-by-me-page__card-header">
                   <span className="assigned-by-me-page__title">{item.title}</span>
-                  <span className={`assigned-by-me-page__status ${statusClass}`}>
-                    <StatusIcon size={14} />
-                    {isPending ? 'Onay Bekliyor' : isDone ? 'Tamamlandı' : 'Bekliyor'}
-                  </span>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span className={`assigned-by-me-page__status ${statusClass}`}>
+                      <StatusIcon size={14} />
+                      {isPending ? 'Onay Bekliyor' : isDone ? 'Tamamlandı' : 'Bekliyor'}
+                    </span>
+                    <button
+                      type="button"
+                      className="assigned-by-me-page__edit-btn"
+                      title="Görevi Düzenle"
+                      onClick={() => navigate(`/task/${item.id}/edit`)}
+                      style={{
+                        background: 'var(--color-surface-alt)',
+                        border: '1px solid var(--color-border)',
+                        borderRadius: 'var(--radius-pill)',
+                        cursor: 'pointer',
+                        color: 'var(--color-text-secondary)',
+                        padding: '4px 8px',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '4px',
+                        fontSize: '12px',
+                        fontWeight: 600,
+                      }}
+                    >
+                      <Pencil size={13} />
+                      <span>Düzenle</span>
+                    </button>
+                  </div>
                 </div>
                 <p className="assigned-by-me-page__meta">
                   {item.assignedToName} • {periodLabel(item.period)} • {PRIORITY_LABEL[item.priority]}

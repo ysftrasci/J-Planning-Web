@@ -35,7 +35,7 @@ export async function assignTaskToFriend({ assignedByUid, assignedByName, assign
   const cleanPeriod = typeof period === 'string' && VALID_PERIODS.includes(period.toUpperCase()) ? period.toUpperCase() : 'DAILY';
   const count = Math.max(1, Math.min(100, parseInt(subtaskCount, 10) || 1));
 
-  await addDoc(assignedTasksRef, {
+  const docRef = await addDoc(assignedTasksRef, {
     assignedByUid,
     assignedByName: (assignedByName || 'Kullanıcı').slice(0, 100),
     assignedToUid,
@@ -47,6 +47,26 @@ export async function assignTaskToFriend({ assignedByUid, assignedByName, assign
     subtaskLabels: Array.isArray(subtaskLabels) ? subtaskLabels.map((l) => String(l || '').slice(0, 200)) : null,
     status: 'PENDING',
     createdAt: serverTimestamp(),
+  });
+  return docRef.id;
+}
+
+export async function updateAssignedTaskInFirestore(firestoreAssignmentId, { title, priority, period, subtaskCount, subtaskLabels }) {
+  if (!firestoreAssignmentId) return;
+  const cleanTitle = (title || '').trim().slice(0, 300);
+  if (!cleanTitle) throw new Error('Görev adı boş olamaz.');
+
+  const cleanPriority = typeof priority === 'string' && VALID_PRIORITIES.includes(priority.toUpperCase()) ? priority.toUpperCase() : 'MEDIUM';
+  const cleanPeriod = typeof period === 'string' && VALID_PERIODS.includes(period.toUpperCase()) ? period.toUpperCase() : 'DAILY';
+  const count = Math.max(1, Math.min(100, parseInt(subtaskCount, 10) || 1));
+
+  await updateDoc(doc(db, 'assignedTasks', firestoreAssignmentId), {
+    title: cleanTitle,
+    priority: cleanPriority,
+    period: cleanPeriod,
+    subtaskCount: count,
+    subtaskLabels: Array.isArray(subtaskLabels) ? subtaskLabels.map((l) => String(l || '').slice(0, 200)) : null,
+    updatedAt: serverTimestamp(),
   });
 }
 

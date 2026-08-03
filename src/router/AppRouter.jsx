@@ -5,6 +5,7 @@ import LoginPage from '../pages/LoginPage.jsx';
 import TasksListPage from '../pages/TasksListPage.jsx';
 import AddTaskPage from '../pages/AddTaskPage.jsx';
 import TaskDetailPage from '../pages/TaskDetailPage.jsx';
+import EditTaskPage from '../pages/EditTaskPage.jsx';
 import CategoriesPage from '../pages/CategoriesPage.jsx';
 import RewardsPage from '../pages/RewardsPage.jsx';
 import RewardHistoryPage from '../pages/RewardHistoryPage.jsx';
@@ -134,6 +135,7 @@ export default function AppRouter() {
         <Route path="add-task" element={<AddTaskPage />} />
         <Route path="daily-notes" element={<DailyNotesPage />} />
         <Route path="task/:taskId" element={<TaskDetailPage />} />
+        <Route path="task/:taskId/edit" element={<EditTaskPage />} />
         <Route path="categories" element={<CategoriesPage />} />
         <Route path="rewards" element={<RewardsPage />} />
         <Route path="rewards/history" element={<RewardHistoryPage />} />

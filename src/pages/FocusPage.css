@@ -218,12 +218,13 @@
   left: 0;
   right: 0;
   bottom: 0;
-  z-index: 100;
+  z-index: 2000;
   background-color: #0F172A;
   color: #FFFFFF;
   display: flex;
   flex-direction: column;
   padding: var(--space-xl);
+  padding-bottom: max(var(--space-xl), env(safe-area-inset-bottom, 24px));
   max-width: 100%;
 }
 
@@ -252,6 +253,17 @@
   color: #ffffff;
   font-variant-numeric: tabular-nums;
   font-family: inherit;
+  transition: opacity 0.3s ease;
+}
+
+.focus-page__timer--paused {
+  opacity: 0.5;
+  animation: pulse-paused 2s infinite;
+}
+
+@keyframes pulse-paused {
+  0%, 100% { opacity: 0.5; }
+  50% { opacity: 0.8; }
 }
 
 .focus-page__progress-track {
@@ -290,6 +302,7 @@
   max-width: 500px;
   width: 100%;
   margin: 0 auto;
+  padding-bottom: var(--space-md);
 }
 
 .focus-page__confirm-body {
@@ -326,7 +339,7 @@
   left: 0;
   right: 0;
   bottom: 0;
-  z-index: 100;
+  z-index: 2000;
   background-color: var(--color-background);
   display: flex;
   align-items: center;

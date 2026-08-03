@@ -96,7 +96,7 @@ export default function AddTaskPage() {
     const friend = friends.find((f) => f.friendUid === assignTo);
     setSaving(true);
     try {
-      await assignTaskToFriend({
+      const firestoreAssignmentId = await assignTaskToFriend({
         assignedByUid: user.uid,
         assignedByName: user.profile?.displayName || user.displayName || 'Kullanıcı',
         assignedToUid: assignTo,
@@ -116,6 +116,7 @@ export default function AddTaskPage() {
         subtaskLabels: effectiveSubtaskLabels,
         assignedToUserId: assignTo,
         assignedToName: friend?.friendName ?? 'Arkadaşın',
+        firestoreAssignmentId,
       });
       navigate('/');
     } catch (e2) {

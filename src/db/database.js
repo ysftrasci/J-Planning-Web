@@ -209,9 +209,10 @@ export async function initDatabase(uid) {
 
   runMigrations(db);
 
-  // Var olan tüm veritabanlarında description ve notes sütunlarının varlığından emin ol
+  // Var olan tüm veritabanlarında description, notes ve daily_notes.studyTimeText sütunlarının varlığından emin ol
   tryAddColumn(db, 'tasks', 'description TEXT');
   tryAddColumn(db, 'tasks', 'notes TEXT');
+  tryAddColumn(db, 'daily_notes', 'studyTimeText TEXT');
 
   // Varsayılan kategorilerin (YKS dahil) var olduğundan emin ol
   ensureDefaultCategories();

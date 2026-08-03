@@ -61,6 +61,50 @@
   color: var(--color-text-secondary);
 }
 
+.daily-notes-page__label-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: var(--space-sm);
+  margin-bottom: var(--space-xs);
+}
+
+.daily-notes-page__input-label {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+  margin: 0;
+}
+
+.daily-notes-page__char-count {
+  font-size: 12px;
+  color: var(--color-text-muted, #9ca3af);
+  font-weight: 500;
+}
+
+.daily-notes-page__input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: var(--space-sm);
+  border: 1px solid var(--color-border, #d1d5db);
+  border-radius: var(--radius-md, 8px);
+  background: var(--color-background, #fafafa);
+  color: var(--color-text-primary);
+  font-family: inherit;
+  font-size: 14px;
+  margin-top: var(--space-xs);
+  margin-bottom: var(--space-sm);
+}
+
+.daily-notes-page__input:focus {
+  outline: none;
+  border-color: var(--color-accent, #E06D8C);
+  box-shadow: 0 0 0 3px rgba(224, 109, 140, 0.15);
+}
+
 .daily-notes-page__textarea {
   width: 100%;
   box-sizing: border-box;
@@ -73,6 +117,7 @@
   font-size: 14px;
   line-height: 1.5;
   resize: vertical;
+  margin-top: var(--space-xs);
   margin-bottom: var(--space-sm);
 }
 .daily-notes-page__textarea:focus {
@@ -157,31 +202,103 @@
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
   padding: var(--space-md);
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  transition: border-color var(--transition-fast);
+}
+
+.daily-notes-page__note-item--expanded {
+  border-color: var(--color-accent);
 }
 
 .daily-notes-page__note-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: var(--space-xs);
+  user-select: none;
 }
 
 .daily-notes-page__note-date {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: var(--space-xs);
   font-size: 13px;
   font-weight: 600;
   color: var(--color-accent, #E06D8C);
 }
 
-.daily-notes-page__edit-btn {
-  background: none;
-  border: none;
+.daily-notes-page__header-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+}
+
+.daily-notes-page__edit-icon-btn {
+  background: var(--color-surface-alt, #F3F4F6);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-pill);
   color: var(--color-text-secondary);
-  font-size: 12px;
+  padding: 4px 8px;
   cursor: pointer;
-  text-decoration: underline;
+  display: inline-flex;
+  align-items: center;
+  transition: color var(--transition-fast);
+}
+
+.daily-notes-page__edit-icon-btn:hover {
+  color: var(--color-text-primary);
+}
+
+.daily-notes-page__delete-icon-btn {
+  background: var(--color-surface-alt, #F3F4F6);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-pill);
+  color: var(--color-text-muted);
+  padding: 4px 8px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  transition: all var(--transition-fast);
+}
+
+.daily-notes-page__delete-icon-btn:hover {
+  color: var(--color-danger, #E53935);
+  border-color: var(--color-danger, #E53935);
+}
+
+.daily-notes-page__expand-icon {
+  color: var(--color-text-muted);
+  display: inline-flex;
+  align-items: center;
+}
+
+.daily-notes-page__study-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: var(--color-surface-alt, #F3F4F6);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-pill);
+  padding: 2px 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-accent-dark, #C24D6D);
+}
+
+.daily-notes-page__note-preview {
+  margin: var(--space-xs) 0 0 0;
+  font-size: 13px;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.daily-notes-page__expanded-body {
+  margin-top: var(--space-sm);
+  padding-top: var(--space-sm);
+  border-top: 1px dashed var(--color-border);
 }
 
 .daily-notes-page__note-content {
@@ -189,7 +306,23 @@
   font-size: 14px;
   line-height: 1.6;
   white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  max-width: 100%;
   color: var(--color-text-primary);
+}
+
+.daily-notes-page__empty-body-text {
+  margin: 0;
+  font-size: 13px;
+  color: var(--color-text-muted);
+  font-style: italic;
+}
+
+.daily-notes-page__edit-box {
+  margin-top: var(--space-sm);
+  padding-top: var(--space-sm);
+  border-top: 1px solid var(--color-border);
 }
 
 .daily-notes-page__edit-actions {
@@ -197,6 +330,7 @@
   align-items: center;
   justify-content: flex-end;
   gap: var(--space-sm);
+  margin-top: var(--space-sm);
 }
 
 .daily-notes-page__cancel-btn {

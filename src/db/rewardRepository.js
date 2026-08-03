@@ -2,6 +2,7 @@
 
 import { getDb } from './database';
 import { uuid, getWalletBalance, addWalletTransaction } from './taskRepository';
+import { triggerAutoCloudSyncForCurrentUser } from '../services/cloudSyncService';
 
 export function createReward({ title, description, cost, assignedByUserId, assignedByName }) {
   const db = getDb();
@@ -20,6 +21,7 @@ export function createReward({ title, description, cost, assignedByUserId, assig
       Date.now(),
     ]
   );
+  triggerAutoCloudSyncForCurrentUser();
   return id;
 }
 
@@ -40,6 +42,7 @@ export function getRedeemedRewards() {
 export function deleteReward(rewardId) {
   const db = getDb();
   db.runSync('DELETE FROM rewards WHERE id = ?', [rewardId]);
+  triggerAutoCloudSyncForCurrentUser();
 }
 
 export function redeemReward(rewardId) {
@@ -55,4 +58,5 @@ export function redeemReward(rewardId) {
 
   db.runSync('UPDATE rewards SET isRedeemed = 1, redeemedAt = ? WHERE id = ?', [Date.now(), rewardId]);
   addWalletTransaction('me', -reward.cost, 'REWARD_REDEEM', null, rewardId);
+  triggerAutoCloudSyncForCurrentUser();
 }

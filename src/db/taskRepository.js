@@ -18,6 +18,7 @@ import {
 } from '../utils/period';
 import { calculateStreakUpTo } from '../utils/streak';
 import { calculateTaskJP, calculateOnceTaskJP } from '../utils/rewards';
+import { triggerAutoCloudSyncForCurrentUser } from '../services/cloudSyncService';
 
 function uuid() {
   return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
@@ -56,6 +57,7 @@ export function createTask({ title, description, categoryId, priority, period, s
       now,
     ]
   );
+  triggerAutoCloudSyncForCurrentUser();
   return id;
 }
 
@@ -97,7 +99,7 @@ export function createTaskFromAssignment(assignedTask) {
 // Ben bir arkadaşıma görev attığımda, kendi tarafımda da (takip edebilmem için)
 // bir kayıt oluşturulur — direction: 'SENT'. Bu görev BENİM tarafımdan
 // tamamlanamaz (sadece izleme amaçlı), UI'da bunu ayırt etmemiz gerekir.
-export function createSentTaskRecord({ title, priority, period, subtaskCount, subtaskLabels, assignedToUserId, assignedToName }) {
+export function createSentTaskRecord({ title, priority, period, subtaskCount, subtaskLabels, assignedToUserId, assignedToName, firestoreAssignmentId }) {
   const db = getDb();
   const id = uuid();
   const now = Date.now();
@@ -107,11 +109,47 @@ export function createSentTaskRecord({ title, priority, period, subtaskCount, su
     : null;
 
   db.runSync(
-    `INSERT INTO tasks (id, title, categoryId, priority, period, ownerUserId, assignedToUserId, assignedToName, assignmentDirection, assignmentStatus, subtaskCount, subtaskLabels, createdAt)
-     VALUES (?, ?, NULL, ?, ?, 'me', ?, ?, 'SENT', 'ACCEPTED', ?, ?, ?)`,
-    [id, title, priority, period, assignedToUserId, assignedToName, count, labelsJson, now]
+    `INSERT INTO tasks (id, title, categoryId, priority, period, ownerUserId, assignedToUserId, assignedToName, assignmentDirection, assignmentStatus, subtaskCount, subtaskLabels, firestoreAssignmentId, createdAt)
+     VALUES (?, ?, NULL, ?, ?, 'me', ?, ?, 'SENT', 'ACCEPTED', ?, ?, ?, ?)`,
+    [id, title, priority, period, assignedToUserId, assignedToName, count, labelsJson, firestoreAssignmentId ?? null, now]
   );
   return id;
+}
+
+export function updateTask(taskId, { title, description, categoryId, priority, period, subtaskCount, subtaskLabels }) {
+  const db = getDb();
+  const task = db.getFirstSync('SELECT * FROM tasks WHERE id = ?', [taskId]);
+  if (!task) throw new Error('Görev bulunamadı.');
+
+  if (task.assignmentDirection === 'RECEIVED') {
+    throw new Error('Bu görevi bir arkadaşın sana atadığı için sadece görevi atan kişi düzenleyebilir.');
+  }
+
+  const cleanTitle = (title || '').trim();
+  if (!cleanTitle) throw new Error('Lütfen görev adı girin.');
+
+  const descText = typeof description === 'string' && description.trim() ? description.trim() : null;
+  const count = Math.max(1, parseInt(subtaskCount, 10) || 1);
+  const labelsJson = subtaskLabels && subtaskLabels.some((l) => l && l.trim())
+    ? JSON.stringify(subtaskLabels.map((l) => (l || '').trim()))
+    : null;
+
+  db.runSync(
+    `UPDATE tasks
+     SET title = ?, description = ?, categoryId = ?, priority = ?, period = ?, subtaskCount = ?, subtaskLabels = ?
+     WHERE id = ?`,
+    [
+      cleanTitle,
+      descText,
+      categoryId ?? null,
+      priority ?? 'MEDIUM',
+      period ?? 'DAILY',
+      count,
+      labelsJson,
+      taskId,
+    ]
+  );
+  triggerAutoCloudSyncForCurrentUser();
 }
 
 // Not: Kabul edilmiş, arkadaştan atanan görevler bu fonksiyonla silinemez (kural: kabul sonrası silinemez).
@@ -123,6 +161,7 @@ export function deleteTask(taskId) {
   }
   db.runSync('DELETE FROM tasks WHERE id = ?', [taskId]);
   db.runSync('DELETE FROM task_records WHERE taskId = ?', [taskId]);
+  triggerAutoCloudSyncForCurrentUser();
 }
 
 export function getTaskRecords(taskId) {
@@ -205,6 +244,7 @@ export function completeSubtask(taskId) {
         [uuid(), taskId, periodKey, newCompleted]
       );
     }
+    triggerAutoCloudSyncForCurrentUser();
     return { alreadyComplete: false, completedSubtasks: newCompleted, subtaskCount: task.subtaskCount, fullyCompleted: false, firestoreAssignmentId: task.firestoreAssignmentId };
   }
 
@@ -225,6 +265,7 @@ export function completeSubtask(taskId) {
   }
 
   addWalletTransaction('me', total, 'TASK_COMPLETE', taskId);
+  triggerAutoCloudSyncForCurrentUser();
   return { alreadyComplete: false, completedSubtasks: newCompleted, subtaskCount: task.subtaskCount, fullyCompleted: true, bonus, total, newStreak, firestoreAssignmentId: task.firestoreAssignmentId };
 }
 
@@ -263,6 +304,7 @@ export function uncompleteSubtask(taskId) {
     );
   }
 
+  triggerAutoCloudSyncForCurrentUser();
   return { completedSubtasks: Math.max(0, newCompleted), subtaskCount: task.subtaskCount, firestoreAssignmentId: task.firestoreAssignmentId };
 }
 

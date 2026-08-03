@@ -18,6 +18,11 @@ service cloud.firestore {
       allow read: if isAuthenticated();
       // Yalnızca kullanıcının kendisi kendi profilini oluşturabilir, güncelleyebilir veya silebilir
       allow create, update, delete: if isOwner(userId);
+
+      // Kullanıcının özel bulut senkronizasyon alanı (sadece hesabın kendisi erişebilir)
+      match /user_backup/{document=**} {
+        allow read, write: if isOwner(userId);
+      }
     }
 
     // 2. Kullanıcı Kodları Eşleşmesi (userCodes/{code})

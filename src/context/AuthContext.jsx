@@ -13,6 +13,7 @@ import { onAuthStateChanged, signOut as firebaseSignOut } from 'firebase/auth';
 import { auth } from '../services/firebase';
 import { ensureUserProfile, getUserProfile } from '../db/userProfileRepository';
 import { initDatabase } from '../db/database';
+import { downloadAndApplyCloudSync, listenCloudSync, uploadCloudSync } from '../services/cloudSyncService';
 
 const AuthContext = createContext(null);
 
@@ -21,7 +22,14 @@ export function AuthProvider({ children }) {
   const [initializing, setInitializing] = useState(true);
 
   useEffect(() => {
+    let cloudUnsub = null;
+
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
+      if (cloudUnsub) {
+        cloudUnsub();
+        cloudUnsub = null;
+      }
+
       if (firebaseUser) {
         try {
           try {
@@ -31,6 +39,17 @@ export function AuthProvider({ children }) {
           }
           const profile = await ensureUserProfile(firebaseUser);
           await initDatabase(firebaseUser.uid);
+
+          // Buluttan en güncel verileri indirip uygula
+          await downloadAndApplyCloudSync(firebaseUser.uid);
+          // Yükleme yapılmamışsa veya ilk defa giriliyorsa yerel verileri de buluta yedekle
+          uploadCloudSync(firebaseUser.uid);
+
+          // Diğer cihazlardan gelen anlık değişiklikleri dinle
+          cloudUnsub = listenCloudSync(firebaseUser.uid, () => {
+            window.dispatchEvent(new Event('jplanning:cloud-sync-update'));
+          });
+
           setUser({ ...firebaseUser, profile });
         } catch (error) {
           console.error('Giriş sonrası hazırlık başarısız:', error);
@@ -41,7 +60,11 @@ export function AuthProvider({ children }) {
       }
       setInitializing(false);
     });
-    return unsubscribe;
+
+    return () => {
+      if (cloudUnsub) cloudUnsub();
+      unsubscribe();
+    };
   }, []);
 
   const signOut = () => firebaseSignOut(auth);

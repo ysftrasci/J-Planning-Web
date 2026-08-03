@@ -4,6 +4,7 @@
 // Ay bazlı geçmiş görüntüleme için monthKey (YYYY-MM) kullanılır.
 
 import { getDb } from './database';
+import { triggerAutoCloudSyncForCurrentUser } from '../services/cloudSyncService';
 
 function uuid() {
   return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
@@ -25,6 +26,7 @@ export function recordFocusSession({ durationMinutes, soundKey, jpEarned }) {
      VALUES (?, ?, ?, ?, ?, ?)`,
     [uuid(), durationMinutes, soundKey || null, jpEarned || 0, monthKeyOf(now), now.getTime()]
   );
+  triggerAutoCloudSyncForCurrentUser();
 }
 
 export function getFocusSessions() {

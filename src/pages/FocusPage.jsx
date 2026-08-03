@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Clock,
@@ -16,6 +16,8 @@ import {
   AlertTriangle,
   Trophy,
   PartyPopper,
+  Pause,
+  Play,
 } from 'lucide-react';
 import AppButton from '../components/AppButton.jsx';
 import AppModal from '../components/AppModal.jsx';
@@ -57,19 +59,67 @@ export default function FocusPage() {
   const [showStopConfirm, setShowStopConfirm] = useState(false);
 
   const [isRunning, setIsRunning] = useState(false);
+  const [isPaused, setIsPaused] = useState(false);
   const [isCompleted, setIsCompleted] = useState(false);
   const [completedJp, setCompletedJp] = useState(0);
   const [remainingSeconds, setRemainingSeconds] = useState(30 * 60);
 
   const intervalRef = useRef(null);
   const totalSecondsRef = useRef(30 * 60);
+  const endTimeRef = useRef(null);
+  const remainingSecondsRef = useRef(30 * 60);
+
+  const handleSessionComplete = useCallback(async () => {
+    endTimeRef.current = null;
+    await stopFocusSound();
+    triggerConfetti();
+    const jp = calculateFocusSessionJP(selectedMinutes);
+    if (jp > 0) {
+      addWalletTransaction('me', jp, 'FOCUS_SESSION');
+    }
+    recordFocusSession({
+      durationMinutes: selectedMinutes,
+      soundKey: selectedSound,
+      jpEarned: jp,
+    });
+    setCompletedJp(jp);
+    setIsCompleted(true);
+    setIsPaused(false);
+  }, [selectedMinutes, selectedSound]);
+
+  const updateTimerFromTimestamp = useCallback(() => {
+    if (!endTimeRef.current) return;
+    const now = Date.now();
+    const diffSec = Math.ceil((endTimeRef.current - now) / 1000);
+
+    if (diffSec <= 0) {
+      if (intervalRef.current) clearInterval(intervalRef.current);
+      setRemainingSeconds(0);
+      remainingSecondsRef.current = 0;
+      handleSessionComplete();
+    } else {
+      setRemainingSeconds(diffSec);
+      remainingSecondsRef.current = diffSec;
+    }
+  }, [handleSessionComplete]);
 
   useEffect(() => {
+    const handleVisibilityOrFocusChange = () => {
+      if (document.visibilityState === 'visible' && endTimeRef.current) {
+        updateTimerFromTimestamp();
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityOrFocusChange);
+    window.addEventListener('focus', handleVisibilityOrFocusChange);
+
     return () => {
       if (intervalRef.current) clearInterval(intervalRef.current);
       stopFocusSound();
+      document.removeEventListener('visibilitychange', handleVisibilityOrFocusChange);
+      window.removeEventListener('focus', handleVisibilityOrFocusChange);
     };
-  }, []);
+  }, [updateTimerFromTimestamp]);
 
   const handleSelectDuration = (minutes) => {
     setSelectedMinutes(minutes);
@@ -89,53 +139,58 @@ export default function FocusPage() {
   const handleSelectSound = async (key) => {
     setSelectedSound(key);
     setShowSoundPicker(false);
-    if (isRunning) {
+    if (isRunning && !isPaused) {
       await playFocusSound(key);
     }
+  };
+
+  const startTimer = (seconds) => {
+    const now = Date.now();
+    endTimeRef.current = now + seconds * 1000;
+    setRemainingSeconds(seconds);
+    remainingSecondsRef.current = seconds;
+
+    if (intervalRef.current) clearInterval(intervalRef.current);
+    intervalRef.current = setInterval(() => {
+      updateTimerFromTimestamp();
+    }, 1000);
   };
 
   const handleStart = async () => {
     const total = selectedMinutes * 60;
     totalSecondsRef.current = total;
-    setRemainingSeconds(total);
     setIsRunning(true);
+    setIsPaused(false);
     setIsCompleted(false);
     await playFocusSound(selectedSound);
-
-    if (intervalRef.current) clearInterval(intervalRef.current);
-
-    intervalRef.current = setInterval(() => {
-      setRemainingSeconds((prev) => {
-        if (prev <= 1) {
-          clearInterval(intervalRef.current);
-          handleSessionComplete();
-          return 0;
-        }
-        return prev - 1;
-      });
-    }, 1000);
+    startTimer(total);
   };
 
-  const handleSessionComplete = async () => {
-    await stopFocusSound();
-    triggerConfetti();
-    const jp = calculateFocusSessionJP(selectedMinutes);
-    if (jp > 0) {
-      addWalletTransaction('me', jp, 'FOCUS_SESSION');
+  const handlePause = async () => {
+    if (intervalRef.current) clearInterval(intervalRef.current);
+    if (endTimeRef.current) {
+      const now = Date.now();
+      const rem = Math.max(0, Math.ceil((endTimeRef.current - now) / 1000));
+      remainingSecondsRef.current = rem;
+      setRemainingSeconds(rem);
     }
-    recordFocusSession({
-      durationMinutes: selectedMinutes,
-      soundKey: selectedSound,
-      jpEarned: jp,
-    });
-    setCompletedJp(jp);
-    setIsCompleted(true);
+    endTimeRef.current = null;
+    await stopFocusSound();
+    setIsPaused(true);
+  };
+
+  const handleResume = async () => {
+    setIsPaused(false);
+    await playFocusSound(selectedSound);
+    startTimer(remainingSecondsRef.current);
   };
 
   const confirmStop = async () => {
     if (intervalRef.current) clearInterval(intervalRef.current);
+    endTimeRef.current = null;
     await stopFocusSound();
     setIsRunning(false);
+    setIsPaused(false);
     setIsCompleted(false);
     setShowStopConfirm(false);
   };
@@ -143,6 +198,7 @@ export default function FocusPage() {
   const handleFinishCompletion = () => {
     setIsCompleted(false);
     setIsRunning(false);
+    setIsPaused(false);
   };
 
   const activeSoundObj = SOUND_OPTIONS.find((s) => s.key === selectedSound) || SOUND_OPTIONS[0];
@@ -191,8 +247,12 @@ export default function FocusPage() {
     return (
       <div className="focus-page focus-page--running">
         <div className="focus-page__running-content">
-          <span className="focus-page__running-label">Odaklanma Modu</span>
-          <div className="focus-page__timer">{formatTime(remainingSeconds)}</div>
+          <span className="focus-page__running-label">
+            {isPaused ? '⏸ Odaklanma Duraklatıldı' : 'Odaklanma Modu'}
+          </span>
+          <div className={`focus-page__timer ${isPaused ? 'focus-page__timer--paused' : ''}`}>
+            {formatTime(remainingSeconds)}
+          </div>
 
           <div className="focus-page__progress-track">
             <div className="focus-page__progress-fill" style={{ width: `${progress}%` }} />
@@ -205,16 +265,33 @@ export default function FocusPage() {
             title="Arka Plan Sesini Değiştir"
           >
             <ActiveSoundIcon size={18} />
-            <span>Ses: {activeSoundObj.label}</span>
+            <span>Ses: {activeSoundObj.label} {isPaused ? '(Sessiz)' : ''}</span>
           </button>
         </div>
 
-        <div className="focus-page__running-footer">
+        <div className="focus-page__running-footer" style={{ display: 'flex', gap: 'var(--space-md)' }}>
+          {isPaused ? (
+            <AppButton
+              title="Devam Et"
+              icon={Play}
+              variant="primary"
+              onClick={handleResume}
+              style={{ flex: 1 }}
+            />
+          ) : (
+            <AppButton
+              title="Duraklat"
+              icon={Pause}
+              variant="secondary"
+              onClick={handlePause}
+              style={{ flex: 1 }}
+            />
+          )}
           <AppButton
             title="Seansı Bitir"
             variant="danger"
             onClick={() => setShowStopConfirm(true)}
-            style={{ width: '100%' }}
+            style={{ flex: 1 }}
           />
         </div>
 

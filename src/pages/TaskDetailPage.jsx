@@ -14,6 +14,7 @@ import {
   Check,
   Clock,
   FileText,
+  Pencil,
 } from 'lucide-react';
 import { getDb } from '../db/database';
 import {
@@ -177,10 +178,36 @@ export default function TaskDetailPage() {
 
   return (
     <div className="task-detail-page">
-      <button type="button" className="task-detail-page__back" onClick={() => navigate('/')}>
-        <ChevronLeft size={18} />
-        Görevlerim
-      </button>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 'var(--space-md)' }}>
+        <button type="button" className="task-detail-page__back" style={{ marginBottom: 0 }} onClick={() => navigate('/')}>
+          <ChevronLeft size={18} />
+          Görevlerim
+        </button>
+        {!isFriendAssigned && (
+          <button
+            type="button"
+            className="task-detail-page__edit-btn"
+            onClick={() => navigate(`/task/${taskId}/edit`)}
+            title="Görevi Düzenle"
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '6px',
+              background: 'var(--color-surface-alt)',
+              border: '1px solid var(--color-border)',
+              borderRadius: 'var(--radius-pill)',
+              padding: '6px 14px',
+              fontSize: '14px',
+              fontWeight: 600,
+              color: 'var(--color-text-primary)',
+              cursor: 'pointer',
+            }}
+          >
+            <Pencil size={15} />
+            <span>Düzenle</span>
+          </button>
+        )}
+      </div>
 
       {errorMessage && <p className="task-detail-page__banner-error">{errorMessage}</p>}
 
@@ -253,36 +280,6 @@ export default function TaskDetailPage() {
         </div>
       )}
 
-      {/* YKS Etiketli Görevlerde: Bugün Kaç Saat Çalıştınız? */}
-      {categoryName.toUpperCase() === 'YKS' && (
-        <div className="task-detail-page__card task-detail-page__card--study">
-          <div className="task-detail-page__card-header">
-            <Clock size={18} className="task-detail-page__card-icon" />
-            <div>
-              <h3 className="task-detail-page__card-title">Bugün Kaç Saat Çalıştınız?</h3>
-              <span className="caption">Süre bilgisini klavyeden serbestçe yazabilirsiniz (ör. 2 saat 30 dk, 45 dk)</span>
-            </div>
-          </div>
-          <form onSubmit={handleSaveStudyLog} className="task-detail-page__card-form">
-            <input
-              type="text"
-              className="task-detail-page__text-input"
-              placeholder="ör. 2 saat 30 dakika"
-              value={studyTimeText}
-              onChange={(e) => setStudyTimeText(e.target.value)}
-            />
-            <div className="task-detail-page__card-footer">
-              {studyLogSaved && (
-                <span className="task-detail-page__saved-badge">
-                  <Check size={14} /> Kaydedildi
-                </span>
-              )}
-              <AppButton type="submit" title="Kaydet" />
-            </div>
-          </form>
-        </div>
-      )}
-
       {/* Her Görev İçin Not Yazma Kısmı */}
       <div className="task-detail-page__card task-detail-page__card--notes">
         <div className="task-detail-page__card-header">
@@ -339,7 +336,8 @@ export default function TaskDetailPage() {
       )}
 
       {!isFriendAssigned && (
-        <div className="task-detail-page__footer">
+        <div className="task-detail-page__footer" style={{ display: 'flex', gap: 'var(--space-md)' }}>
+          <AppButton title="Görevi Düzenle" variant="secondary" onClick={() => navigate(`/task/${taskId}/edit`)} />
           <AppButton title="Görevi Sil" variant="danger" onClick={() => setShowDeleteModal(true)} />
         </div>
       )}
