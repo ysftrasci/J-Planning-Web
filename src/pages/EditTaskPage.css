@@ -25,7 +25,7 @@
   display: flex;
   align-items: center;
   gap: var(--space-sm);
-  background-color: var(--color-accent-subtle, #FFF5F7);
+  background-color: var(--color-surface-alt);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
   padding: var(--space-md);
@@ -34,8 +34,12 @@
   margin-bottom: var(--space-md);
 }
 
+.edit-task-page__hint-banner strong {
+  color: var(--color-primary);
+}
+
 .edit-task-page__hint-banner svg {
-  color: var(--color-accent);
+  color: var(--color-primary);
   flex-shrink: 0;
 }
 

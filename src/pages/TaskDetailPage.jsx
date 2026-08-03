@@ -27,6 +27,7 @@ import {
   updateTaskNotes,
   getTaskStudyLog,
   saveTaskStudyLog,
+  findTaskByIdOrFirestoreId,
 } from '../db/taskRepository';
 import { getPeriodEndTimestamp, isWithinLateMarkWindow, periodLabel, getPeriodKey } from '../utils/period';
 import {
@@ -75,9 +76,10 @@ export default function TaskDetailPage() {
 
   const load = useCallback(() => {
     const db = getDb();
-    const t = db.getFirstSync('SELECT * FROM tasks WHERE id = ?', [taskId]);
+    const t = findTaskByIdOrFirestoreId(taskId);
     setTask(t);
     if (t) {
+      const realId = t.id;
       setTaskNotes(t.notes || '');
       if (t.categoryId) {
         const cat = db.getFirstSync('SELECT name FROM categories WHERE id = ?', [t.categoryId]);
@@ -86,18 +88,22 @@ export default function TaskDetailPage() {
         setCategoryName('');
       }
       const todayKey = getPeriodKey(t.period, new Date());
-      const studyLog = getTaskStudyLog(taskId, todayKey);
+      const studyLog = getTaskStudyLog(realId, todayKey);
       setStudyTimeText(studyLog?.studyTimeText || '');
+      setRecords(getTaskRecords(realId));
+      setTotalJP(getTotalJPEarnedForTask(realId));
+    } else {
+      setRecords([]);
+      setTotalJP(0);
     }
-    setRecords(getTaskRecords(taskId));
-    setTotalJP(getTotalJPEarnedForTask(taskId));
   }, [taskId]);
 
   useEffect(load, [load]);
 
   const handleSaveNotes = (e) => {
     e?.preventDefault();
-    updateTaskNotes(taskId, taskNotes);
+    const realId = task ? task.id : taskId;
+    updateTaskNotes(realId, taskNotes);
     setNotesSaved(true);
     setTimeout(() => setNotesSaved(false), 2000);
   };
@@ -105,8 +111,9 @@ export default function TaskDetailPage() {
   const handleSaveStudyLog = (e) => {
     e?.preventDefault();
     if (!task) return;
+    const realId = task.id;
     const todayKey = getPeriodKey(task.period, new Date());
-    saveTaskStudyLog(taskId, todayKey, studyTimeText);
+    saveTaskStudyLog(realId, todayKey, studyTimeText);
     setStudyLogSaved(true);
     setTimeout(() => setStudyLogSaved(false), 2000);
   };

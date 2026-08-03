@@ -105,11 +105,10 @@ export async function applyRemoteTablesToLocal(tables) {
     sqliteDb.execSync('BEGIN TRANSACTION;');
 
     if (Array.isArray(tables.categories)) {
-      sqliteDb.runSync('DELETE FROM categories;');
       for (const row of tables.categories) {
         if (!row.id || !row.name) continue;
         sqliteDb.runSync(
-          'INSERT INTO categories (id, name, color, createdAt) VALUES (?, ?, ?, ?)',
+          'INSERT OR REPLACE INTO categories (id, name, color, createdAt) VALUES (?, ?, ?, ?)',
           [
             sanitizeString(row.id, 100),
             sanitizeString(row.name, 100),
@@ -121,11 +120,10 @@ export async function applyRemoteTablesToLocal(tables) {
     }
 
     if (Array.isArray(tables.tasks)) {
-      sqliteDb.runSync('DELETE FROM tasks;');
       for (const row of tables.tasks) {
         if (!row.id || !row.title) continue;
         sqliteDb.runSync(
-          `INSERT INTO tasks (id, title, description, notes, categoryId, priority, period, ownerUserId, assignedByUserId, assignedByName, assignedToUserId, assignedToName, assignmentDirection, firestoreAssignmentId, assignmentStatus, subtaskCount, subtaskLabels, isArchived, createdAt)
+          `INSERT OR REPLACE INTO tasks (id, title, description, notes, categoryId, priority, period, ownerUserId, assignedByUserId, assignedByName, assignedToUserId, assignedToName, assignmentDirection, firestoreAssignmentId, assignmentStatus, subtaskCount, subtaskLabels, isArchived, createdAt)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [
             sanitizeString(row.id, 100),
@@ -153,11 +151,10 @@ export async function applyRemoteTablesToLocal(tables) {
     }
 
     if (Array.isArray(tables.task_records)) {
-      sqliteDb.runSync('DELETE FROM task_records;');
       for (const row of tables.task_records) {
         if (!row.id || !row.taskId || !row.periodKey) continue;
         sqliteDb.runSync(
-          `INSERT INTO task_records (id, taskId, periodKey, status, completedSubtasks, completedAt, isLateMarked, lateMarkedAt, jpEarned, streakBonusEarned)
+          `INSERT OR REPLACE INTO task_records (id, taskId, periodKey, status, completedSubtasks, completedAt, isLateMarked, lateMarkedAt, jpEarned, streakBonusEarned)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [
             sanitizeString(row.id, 100),
@@ -176,9 +173,8 @@ export async function applyRemoteTablesToLocal(tables) {
     }
 
     if (Array.isArray(tables.wallet)) {
-      sqliteDb.runSync('DELETE FROM wallet;');
       for (const row of tables.wallet) {
-        sqliteDb.runSync('INSERT INTO wallet (userId, balance) VALUES (?, ?)', [
+        sqliteDb.runSync('INSERT OR REPLACE INTO wallet (userId, balance) VALUES (?, ?)', [
           sanitizeString(row.userId || 'me', 100),
           sanitizeInt(row.balance, 0, 1000000, 0),
         ]);
@@ -186,11 +182,10 @@ export async function applyRemoteTablesToLocal(tables) {
     }
 
     if (Array.isArray(tables.wallet_transactions)) {
-      sqliteDb.runSync('DELETE FROM wallet_transactions;');
       for (const row of tables.wallet_transactions) {
         if (!row.id) continue;
         sqliteDb.runSync(
-          `INSERT INTO wallet_transactions (id, userId, amount, reason, relatedTaskId, relatedRewardId, createdAt)
+          `INSERT OR REPLACE INTO wallet_transactions (id, userId, amount, reason, relatedTaskId, relatedRewardId, createdAt)
            VALUES (?, ?, ?, ?, ?, ?, ?)`,
           [
             sanitizeString(row.id, 100),
@@ -206,11 +201,10 @@ export async function applyRemoteTablesToLocal(tables) {
     }
 
     if (Array.isArray(tables.rewards)) {
-      sqliteDb.runSync('DELETE FROM rewards;');
       for (const row of tables.rewards) {
         if (!row.id || !row.title) continue;
         sqliteDb.runSync(
-          `INSERT INTO rewards (id, title, description, cost, ownerUserId, assignedByUserId, assignedByName, assignmentStatus, isRedeemed, redeemedAt, createdAt)
+          `INSERT OR REPLACE INTO rewards (id, title, description, cost, ownerUserId, assignedByUserId, assignedByName, assignmentStatus, isRedeemed, redeemedAt, createdAt)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [
             sanitizeString(row.id, 100),
@@ -230,11 +224,10 @@ export async function applyRemoteTablesToLocal(tables) {
     }
 
     if (Array.isArray(tables.focus_sessions)) {
-      sqliteDb.runSync('DELETE FROM focus_sessions;');
       for (const row of tables.focus_sessions) {
         if (!row.id) continue;
         sqliteDb.runSync(
-          `INSERT INTO focus_sessions (id, durationMinutes, soundKey, jpEarned, monthKey, completedAt)
+          `INSERT OR REPLACE INTO focus_sessions (id, durationMinutes, soundKey, jpEarned, monthKey, completedAt)
            VALUES (?, ?, ?, ?, ?, ?)`,
           [
             sanitizeString(row.id, 100),
@@ -249,11 +242,10 @@ export async function applyRemoteTablesToLocal(tables) {
     }
 
     if (Array.isArray(tables.daily_notes)) {
-      sqliteDb.runSync('DELETE FROM daily_notes;');
       for (const row of tables.daily_notes) {
         if (!row.id || !row.dateKey) continue;
         sqliteDb.runSync(
-          `INSERT INTO daily_notes (id, dateKey, content, studyTimeText, createdAt, updatedAt)
+          `INSERT OR REPLACE INTO daily_notes (id, dateKey, content, studyTimeText, createdAt, updatedAt)
            VALUES (?, ?, ?, ?, ?, ?)`,
           [
             sanitizeString(row.id, 100),
@@ -268,11 +260,10 @@ export async function applyRemoteTablesToLocal(tables) {
     }
 
     if (Array.isArray(tables.task_study_logs)) {
-      sqliteDb.runSync('DELETE FROM task_study_logs;');
       for (const row of tables.task_study_logs) {
         if (!row.id || !row.taskId || !row.periodKey) continue;
         sqliteDb.runSync(
-          `INSERT INTO task_study_logs (id, taskId, periodKey, studyTimeText, createdAt, updatedAt)
+          `INSERT OR REPLACE INTO task_study_logs (id, taskId, periodKey, studyTimeText, createdAt, updatedAt)
            VALUES (?, ?, ?, ?, ?, ?)`,
           [
             sanitizeString(row.id, 100),
@@ -318,13 +309,17 @@ export async function performInitialCloudSync(uid) {
 
     if (!snap.exists()) {
       // Bulutta henüz yedek yoksa ve yerelde veri varsa buluta yükle
-      await uploadCloudSync(uid);
+      if (localCount > 0) {
+        await uploadCloudSync(uid);
+      }
       return;
     }
 
     const cloudData = snap.data();
     if (!cloudData.tablesJson || !cloudData.signature) {
-      await uploadCloudSync(uid);
+      if (localCount > 0) {
+        await uploadCloudSync(uid);
+      }
       return;
     }
 
@@ -337,21 +332,30 @@ export async function performInitialCloudSync(uid) {
 
     const remoteCount = countTableItems(remoteTables);
 
-    // Eğer yerelde veri var ama bulut tamamen boşsa, yerel veriyi buluta yukle
-    if (localCount > 0 && remoteCount === 0) {
+    // EĞER yerelde daha çok öge varsa (ör. telefonda 5 eski görev var ama bulutta az/hiç yok):
+    // Yereldeki verileri buluta aktar!
+    if (localCount > remoteCount) {
       await uploadCloudSync(uid);
       return;
     }
 
-    // Eğer yerelde veri yoksa veya buluttaki veri daha güncel ise yerel veritabanına uygula
-    if (localCount === 0 || (cloudData.updatedAtMs && cloudData.updatedAtMs > lastSyncedVersionTs)) {
+    // EĞER bulutta yerelden daha çok öge varsa (ör. tablet boş ama bulutta telefondan gelen 5 görev var):
+    // Buluttaki veriyi indirip yerel veritabanında güncelle!
+    if (remoteCount > localCount) {
       await applyRemoteTablesToLocal(remoteTables);
       lastSyncedVersionTs = cloudData.updatedAtMs || Date.now();
       window.dispatchEvent(new Event('jplanning:cloud-sync-update'));
       return;
     }
 
-    // Aksi halde en güncel halini buluta güncelle
+    // Öge sayıları eşitse zaman damgasına göre güncelle
+    if (cloudData.updatedAtMs && cloudData.updatedAtMs > lastSyncedVersionTs) {
+      await applyRemoteTablesToLocal(remoteTables);
+      lastSyncedVersionTs = cloudData.updatedAtMs || Date.now();
+      window.dispatchEvent(new Event('jplanning:cloud-sync-update'));
+      return;
+    }
+
     await uploadCloudSync(uid);
   } catch (err) {
     console.warn('İlk senkronizasyon kontrolü uyarısı:', err);

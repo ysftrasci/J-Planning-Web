@@ -87,6 +87,11 @@ export default function FocusPage() {
     setIsPaused(false);
   }, [selectedMinutes, selectedSound]);
 
+  const handleSessionCompleteRef = useRef(handleSessionComplete);
+  useEffect(() => {
+    handleSessionCompleteRef.current = handleSessionComplete;
+  }, [handleSessionComplete]);
+
   const updateTimerFromTimestamp = useCallback(() => {
     if (!endTimeRef.current) return;
     const now = Date.now();
@@ -96,13 +101,22 @@ export default function FocusPage() {
       if (intervalRef.current) clearInterval(intervalRef.current);
       setRemainingSeconds(0);
       remainingSecondsRef.current = 0;
-      handleSessionComplete();
+      handleSessionCompleteRef.current();
     } else {
       setRemainingSeconds(diffSec);
       remainingSecondsRef.current = diffSec;
     }
-  }, [handleSessionComplete]);
+  }, []);
 
+  // Sadece bileşen ekrandan tamamen ayrıldığında (unmount) sesi ve zamanlayıcıyı temizle
+  useEffect(() => {
+    return () => {
+      if (intervalRef.current) clearInterval(intervalRef.current);
+      stopFocusSound();
+    };
+  }, []);
+
+  // Sekme değiştirme / ekrana geri dönme dinleyicisi
   useEffect(() => {
     const handleVisibilityOrFocusChange = () => {
       if (document.visibilityState === 'visible' && endTimeRef.current) {
@@ -114,8 +128,6 @@ export default function FocusPage() {
     window.addEventListener('focus', handleVisibilityOrFocusChange);
 
     return () => {
-      if (intervalRef.current) clearInterval(intervalRef.current);
-      stopFocusSound();
       document.removeEventListener('visibilitychange', handleVisibilityOrFocusChange);
       window.removeEventListener('focus', handleVisibilityOrFocusChange);
     };

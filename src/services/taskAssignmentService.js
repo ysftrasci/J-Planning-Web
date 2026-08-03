@@ -27,13 +27,14 @@ const assignedTasksRef = collection(db, 'assignedTasks');
 const VALID_PRIORITIES = ['HIGH', 'MEDIUM', 'LOW', 'ZERO'];
 const VALID_PERIODS = ['DAILY', 'WEEKLY', 'MONTHLY', 'ONCE'];
 
-export async function assignTaskToFriend({ assignedByUid, assignedByName, assignedToUid, assignedToName, title, priority, period, subtaskCount, subtaskLabels }) {
+export async function assignTaskToFriend({ assignedByUid, assignedByName, assignedToUid, assignedToName, title, description, priority, period, subtaskCount, subtaskLabels }) {
   const cleanTitle = (title || '').trim().slice(0, 300);
   if (!cleanTitle) throw new Error('Görev adı boş olamaz.');
 
   const cleanPriority = typeof priority === 'string' && VALID_PRIORITIES.includes(priority.toUpperCase()) ? priority.toUpperCase() : 'MEDIUM';
   const cleanPeriod = typeof period === 'string' && VALID_PERIODS.includes(period.toUpperCase()) ? period.toUpperCase() : 'DAILY';
   const count = Math.max(1, Math.min(100, parseInt(subtaskCount, 10) || 1));
+  const descText = typeof description === 'string' && description.trim() ? description.trim().slice(0, 1000) : null;
 
   const docRef = await addDoc(assignedTasksRef, {
     assignedByUid,
@@ -41,6 +42,7 @@ export async function assignTaskToFriend({ assignedByUid, assignedByName, assign
     assignedToUid,
     assignedToName: (assignedToName || 'Arkadaşın').slice(0, 100),
     title: cleanTitle,
+    description: descText,
     priority: cleanPriority,
     period: cleanPeriod,
     subtaskCount: count,
@@ -51,7 +53,7 @@ export async function assignTaskToFriend({ assignedByUid, assignedByName, assign
   return docRef.id;
 }
 
-export async function updateAssignedTaskInFirestore(firestoreAssignmentId, { title, priority, period, subtaskCount, subtaskLabels }) {
+export async function updateAssignedTaskInFirestore(firestoreAssignmentId, { title, description, priority, period, subtaskCount, subtaskLabels }) {
   if (!firestoreAssignmentId) return;
   const cleanTitle = (title || '').trim().slice(0, 300);
   if (!cleanTitle) throw new Error('Görev adı boş olamaz.');
@@ -59,9 +61,11 @@ export async function updateAssignedTaskInFirestore(firestoreAssignmentId, { tit
   const cleanPriority = typeof priority === 'string' && VALID_PRIORITIES.includes(priority.toUpperCase()) ? priority.toUpperCase() : 'MEDIUM';
   const cleanPeriod = typeof period === 'string' && VALID_PERIODS.includes(period.toUpperCase()) ? period.toUpperCase() : 'DAILY';
   const count = Math.max(1, Math.min(100, parseInt(subtaskCount, 10) || 1));
+  const descText = typeof description === 'string' && description.trim() ? description.trim().slice(0, 1000) : null;
 
   await updateDoc(doc(db, 'assignedTasks', firestoreAssignmentId), {
     title: cleanTitle,
+    description: descText,
     priority: cleanPriority,
     period: cleanPeriod,
     subtaskCount: count,
@@ -76,6 +80,16 @@ export async function acceptAssignedTask(taskId) {
 
 export async function rejectAssignedTask(taskId) {
   await deleteDoc(doc(db, 'assignedTasks', taskId));
+}
+
+export async function deleteAssignedTaskInFirestore(firestoreAssignmentId) {
+  if (!firestoreAssignmentId) return;
+  await deleteDoc(doc(db, 'assignedTasks', firestoreAssignmentId));
+}
+
+export async function deleteAssignedTask(firestoreAssignmentId) {
+  if (!firestoreAssignmentId) return;
+  await deleteAssignedTaskInFirestore(firestoreAssignmentId);
 }
 
 // Atanan kişi: kendisine gelen, henüz kabul edilmemiş görevleri dinler.

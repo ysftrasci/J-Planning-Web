@@ -5,20 +5,28 @@
   display: flex;
   align-items: flex-end;
   justify-content: center;
-  z-index: 100;
+  z-index: 2000;
+  padding: 0 var(--space-sm) 90px var(--space-sm);
+}
+
+@media (min-width: 640px) {
+  .assigned-task-modal__overlay {
+    align-items: center;
+    padding: var(--space-lg);
+  }
 }
 
 .assigned-task-modal__card {
   width: 100%;
   max-width: 480px;
   background-color: var(--color-background);
-  border-top-left-radius: var(--radius-xl);
-  border-top-right-radius: var(--radius-xl);
+  border-radius: var(--radius-xl);
   padding: var(--space-xl);
   display: flex;
   flex-direction: column;
   gap: var(--space-sm);
   animation: assigned-task-modal-slide-up 0.2s ease-out;
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.25);
 }
 
 @keyframes assigned-task-modal-slide-up {

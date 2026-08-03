@@ -61,24 +61,40 @@ async function collectDocsByFields(collectionName, fieldNames, uid) {
 export async function deleteAllFirestoreData(uid) {
   const refsToDelete = [];
 
+  // users/{uid}/user_backup/latest
+  refsToDelete.push(doc(db, 'users', uid, 'user_backup', 'latest'));
   // users/{uid}
   refsToDelete.push(doc(db, 'users', uid));
 
-  // friendships, assignedTasks, assignedRewards: uid'in geçebileceği alanlar
-  const friendshipDocs = await collectDocsByFields('friendships', ['fromUid', 'toUid'], uid);
-  const taskDocs = await collectDocsByFields('assignedTasks', ['assignedByUid', 'assignedToUid'], uid);
-  const rewardDocs = await collectDocsByFields('assignedRewards', ['assignedByUid', 'assignedToUid'], uid);
+  // friendships, assignedTasks, assignedRewards
+  try {
+    const friendshipDocs = await collectDocsByFields('friendships', ['fromUid', 'toUid'], uid);
+    refsToDelete.push(...friendshipDocs);
+  } catch (e) {
+    console.warn('Friendship docs fetch note:', e);
+  }
 
-  refsToDelete.push(...friendshipDocs, ...taskDocs, ...rewardDocs);
+  try {
+    const taskDocs = await collectDocsByFields('assignedTasks', ['assignedByUid', 'assignedToUid'], uid);
+    refsToDelete.push(...taskDocs);
+  } catch (e) {
+    console.warn('Task docs fetch note:', e);
+  }
 
-  // Firestore'un tekli batch limiti 500 işlemdir; normal kullanımda bu sayıya
-  // ulaşılması beklenmez ama önlem olarak 400'lük gruplar halinde siliyoruz.
-  const CHUNK_SIZE = 400;
-  for (let i = 0; i < refsToDelete.length; i += CHUNK_SIZE) {
-    const chunk = refsToDelete.slice(i, i + CHUNK_SIZE);
-    const batch = writeBatch(db);
-    chunk.forEach((ref) => batch.delete(ref));
-    await batch.commit();
+  try {
+    const rewardDocs = await collectDocsByFields('assignedRewards', ['assignedByUid', 'assignedToUid'], uid);
+    refsToDelete.push(...rewardDocs);
+  } catch (e) {
+    console.warn('Reward docs fetch note:', e);
+  }
+
+  // Her dokümanı güvenle tek tek sil — biri olmasa bile diğerlerinin silinmesini ve hesap silmeyi engellemesin
+  for (const ref of refsToDelete) {
+    try {
+      await deleteDoc(ref);
+    } catch (e) {
+      console.warn(`Doc deletion warning (${ref.path}):`, e);
+    }
   }
 }
 

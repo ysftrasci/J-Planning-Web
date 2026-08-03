@@ -26,6 +26,11 @@ export default function AssignedTaskModal({ open, task, onClose, onAccept, onRej
 
         <p className="assigned-task-modal__sender-text">{task.assignedByName || 'Bir arkadaşın'} sana bir görev atadı:</p>
         <h3 className="assigned-task-modal__task-title">{task.title}</h3>
+        {task.description && (
+          <p style={{ margin: '4px 0 12px 0', fontSize: '14px', color: 'var(--color-text-secondary)', lineHeight: '1.4' }}>
+            📝 {task.description}
+          </p>
+        )}
 
         <div className="assigned-task-modal__detail-grid">
           <DetailRow icon={Calendar} label="Periyot" value={periodLabel(task.period)} />

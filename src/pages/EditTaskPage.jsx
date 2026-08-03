@@ -1,9 +1,11 @@
-// J-Planning — Görev Düzenle Sayfası (Web)
 import { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { ChevronLeft, X, Plus, Info, ShieldAlert } from 'lucide-react';
+import { doc, getDoc } from 'firebase/firestore';
+import { db } from '../services/firebase';
+import { useAuth } from '../context/AuthContext.jsx';
 import { getDb } from '../db/database';
-import { updateTask, getSubtaskLabels } from '../db/taskRepository';
+import { updateTask, getSubtaskLabels, createSentTaskRecord } from '../db/taskRepository';
 import { getCategories } from '../db/categoryRepository';
 import { updateAssignedTaskInFirestore } from '../services/taskAssignmentService';
 import AppButton from '../components/AppButton.jsx';
@@ -44,6 +46,7 @@ function Chip({ label, selected, onClick }) {
 
 export default function EditTaskPage() {
   const { taskId } = useParams();
+  const { user } = useAuth();
   const navigate = useNavigate();
 
   const [task, setTask] = useState(null);
@@ -59,34 +62,99 @@ export default function EditTaskPage() {
   const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {
-    try {
-      const db = getDb();
-      let t = db.getFirstSync('SELECT * FROM tasks WHERE id = ?', [taskId]);
-      if (!t) {
-        t = db.getFirstSync('SELECT * FROM tasks WHERE firestoreAssignmentId = ?', [taskId]);
-      }
-      if (t) {
-        setTask(t);
-        setTitle(t.title || '');
-        setDescription(t.description || '');
-        setPriority(t.priority || 'MEDIUM');
-        setPeriod(t.period || 'DAILY');
-        setCategoryId(t.categoryId || null);
+    let isMounted = true;
 
-        const labels = getSubtaskLabels(t);
-        if (labels && labels.length > 0) {
-          setSubtaskLabels(labels);
-        } else {
-          const count = t.subtaskCount || 1;
-          setSubtaskLabels(Array.from({ length: count }, () => ''));
+    async function loadTaskData() {
+      try {
+        const sqliteDb = getDb();
+        let t = sqliteDb.getFirstSync('SELECT * FROM tasks WHERE id = ?', [taskId]);
+        if (!t) {
+          t = sqliteDb.getFirstSync('SELECT * FROM tasks WHERE firestoreAssignmentId = ?', [taskId]);
         }
+
+        if (t) {
+          if (!isMounted) return;
+          setTask(t);
+          setTitle(t.title || '');
+          setDescription(t.description || '');
+          setPriority(t.priority || 'MEDIUM');
+          setPeriod(t.period || 'DAILY');
+          setCategoryId(t.categoryId || null);
+
+          const labels = getSubtaskLabels(t);
+          if (labels && labels.length > 0) {
+            setSubtaskLabels(labels);
+          } else {
+            const count = t.subtaskCount || 1;
+            setSubtaskLabels(Array.from({ length: count }, () => ''));
+          }
+          return;
+        }
+
+        // Yerelde yoksa doğrudan Firestore'dan çek (Attıklarım sayfasından açıldığında)
+        const docRef = doc(db, 'assignedTasks', taskId);
+        const snap = await getDoc(docRef);
+        if (snap.exists()) {
+          const data = snap.data();
+          const isSent = data.assignedByUid === user?.uid;
+          const isReceived = data.assignedToUid === user?.uid;
+
+          const count = Math.max(1, data.subtaskCount || 1);
+          const rawLabels = Array.isArray(data.subtaskLabels) && data.subtaskLabels.length > 0
+            ? data.subtaskLabels
+            : Array.from({ length: count }, () => '');
+
+          // Kendi SQLite kaydımızı oluşturalım ki yerelde de saklansın
+          let createdLocalId = null;
+          if (isSent) {
+            createdLocalId = createSentTaskRecord({
+              title: data.title,
+              description: data.description || '',
+              priority: data.priority,
+              period: data.period,
+              subtaskCount: count,
+              subtaskLabels: rawLabels,
+              assignedToUserId: data.assignedToUid,
+              assignedToName: data.assignedToName,
+              firestoreAssignmentId: snap.id,
+            });
+          }
+
+          const remoteTaskObj = {
+            id: createdLocalId || snap.id,
+            firestoreAssignmentId: snap.id,
+            title: data.title || '',
+            description: data.description || '',
+            priority: data.priority || 'MEDIUM',
+            period: data.period || 'DAILY',
+            assignedToUserId: data.assignedToUid,
+            assignedToName: data.assignedToName,
+            assignmentDirection: isSent ? 'SENT' : isReceived ? 'RECEIVED' : 'NONE',
+            subtaskCount: count,
+            subtaskLabels: rawLabels,
+          };
+
+          if (!isMounted) return;
+          setTask(remoteTaskObj);
+          setTitle(remoteTaskObj.title);
+          setDescription(remoteTaskObj.description);
+          setPriority(remoteTaskObj.priority);
+          setPeriod(remoteTaskObj.period);
+          setSubtaskLabels(rawLabels);
+        }
+      } catch (e) {
+        console.error('Görev yükleme hatası:', e);
+      } finally {
+        if (isMounted) setLoaded(true);
       }
-    } catch (e) {
-      console.error('Görev yükleme hatası:', e);
-    } finally {
-      setLoaded(true);
     }
-  }, [taskId]);
+
+    loadTaskData();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [taskId, user]);
 
   if (!loaded) return null;
 
@@ -155,7 +223,7 @@ export default function EditTaskPage() {
 
     setSaving(true);
     try {
-      updateTask(taskId, {
+      updateTask(task.id, {
         title: title.trim(),
         description: description ? description.trim() : '',
         categoryId,
@@ -165,9 +233,11 @@ export default function EditTaskPage() {
         subtaskLabels: effectiveSubtaskLabels,
       });
 
-      if (isSentToFriend && task.firestoreAssignmentId) {
-        await updateAssignedTaskInFirestore(task.firestoreAssignmentId, {
+      const firestoreDocId = task.firestoreAssignmentId || (taskId !== task.id ? taskId : null);
+      if (isSentToFriend && firestoreDocId) {
+        await updateAssignedTaskInFirestore(firestoreDocId, {
           title: title.trim(),
+          description: description ? description.trim() : '',
           priority,
           period,
           subtaskCount,
@@ -175,7 +245,11 @@ export default function EditTaskPage() {
         });
       }
 
-      navigate(`/task/${taskId}`);
+      if (isSentToFriend) {
+        navigate('/assigned-by-me');
+      } else {
+        navigate(`/task/${task.id}`);
+      }
     } catch (err) {
       console.error('Görev güncelleme hatası:', err);
       setErrorMessage(err.message || 'Görev güncellenemedi.');

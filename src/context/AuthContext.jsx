@@ -13,6 +13,8 @@ import { onAuthStateChanged, signOut as firebaseSignOut } from 'firebase/auth';
 import { auth } from '../services/firebase';
 import { ensureUserProfile, getUserProfile } from '../db/userProfileRepository';
 import { initDatabase } from '../db/database';
+import { updateTaskFromAssignment, syncReceivedTasksWithFirestore } from '../db/taskRepository';
+import { listenAcceptedTasksAssignedToMe } from '../services/taskAssignmentService';
 import { downloadAndApplyCloudSync, listenCloudSync, uploadCloudSync, performInitialCloudSync } from '../services/cloudSyncService';
 
 const AuthContext = createContext(null);
@@ -23,11 +25,16 @@ export function AuthProvider({ children }) {
 
   useEffect(() => {
     let cloudUnsub = null;
+    let assignedTasksUnsub = null;
 
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
       if (cloudUnsub) {
         cloudUnsub();
         cloudUnsub = null;
+      }
+      if (assignedTasksUnsub) {
+        assignedTasksUnsub();
+        assignedTasksUnsub = null;
       }
 
       if (firebaseUser) {
@@ -48,6 +55,17 @@ export function AuthProvider({ children }) {
             window.dispatchEvent(new Event('jplanning:cloud-sync-update'));
           });
 
+          // Arkadaşının düzenlediği/sildiği atanmış görevlerin güncellemelerini anlık dinle
+          assignedTasksUnsub = listenAcceptedTasksAssignedToMe(firebaseUser.uid, (tasks) => {
+            if (Array.isArray(tasks)) {
+              syncReceivedTasksWithFirestore(tasks);
+              for (const t of tasks) {
+                updateTaskFromAssignment(t);
+              }
+              window.dispatchEvent(new Event('jplanning:cloud-sync-update'));
+            }
+          });
+
           setUser({ ...firebaseUser, profile });
         } catch (error) {
           console.error('Giriş sonrası hazırlık başarısız:', error);
@@ -61,6 +79,7 @@ export function AuthProvider({ children }) {
 
     return () => {
       if (cloudUnsub) cloudUnsub();
+      if (assignedTasksUnsub) assignedTasksUnsub();
       unsubscribe();
     };
   }, []);

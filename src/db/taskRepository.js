@@ -19,6 +19,7 @@ import {
 import { calculateStreakUpTo } from '../utils/streak';
 import { calculateTaskJP, calculateOnceTaskJP } from '../utils/rewards';
 import { triggerAutoCloudSyncForCurrentUser } from '../services/cloudSyncService';
+import { deleteAssignedTaskInFirestore } from '../services/taskAssignmentService';
 
 function uuid() {
   return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
@@ -87,11 +88,14 @@ export function createTaskFromAssignment(assignedTask) {
   const labelsJson = assignedTask.subtaskLabels && assignedTask.subtaskLabels.length
     ? JSON.stringify(assignedTask.subtaskLabels)
     : null;
+  const descText = typeof assignedTask.description === 'string' && assignedTask.description.trim()
+    ? assignedTask.description.trim()
+    : null;
 
   db.runSync(
-    `INSERT INTO tasks (id, title, categoryId, priority, period, ownerUserId, assignedByUserId, assignedByName, assignmentDirection, assignmentStatus, subtaskCount, subtaskLabels, firestoreAssignmentId, createdAt)
-     VALUES (?, ?, NULL, ?, ?, 'me', ?, ?, 'RECEIVED', 'ACCEPTED', ?, ?, ?, ?)`,
-    [id, assignedTask.title, assignedTask.priority, assignedTask.period, assignedTask.assignedByUid, assignedTask.assignedByName, count, labelsJson, assignedTask.id, now]
+    `INSERT INTO tasks (id, title, description, categoryId, priority, period, ownerUserId, assignedByUserId, assignedByName, assignmentDirection, assignmentStatus, subtaskCount, subtaskLabels, firestoreAssignmentId, createdAt)
+     VALUES (?, ?, ?, NULL, ?, ?, 'me', ?, ?, 'RECEIVED', 'ACCEPTED', ?, ?, ?, ?)`,
+    [id, assignedTask.title, descText, assignedTask.priority, assignedTask.period, assignedTask.assignedByUid, assignedTask.assignedByName, count, labelsJson, assignedTask.id, now]
   );
   return id;
 }
@@ -99,7 +103,7 @@ export function createTaskFromAssignment(assignedTask) {
 // Ben bir arkadaşıma görev attığımda, kendi tarafımda da (takip edebilmem için)
 // bir kayıt oluşturulur — direction: 'SENT'. Bu görev BENİM tarafımdan
 // tamamlanamaz (sadece izleme amaçlı), UI'da bunu ayırt etmemiz gerekir.
-export function createSentTaskRecord({ title, priority, period, subtaskCount, subtaskLabels, assignedToUserId, assignedToName, firestoreAssignmentId }) {
+export function createSentTaskRecord({ title, description, priority, period, subtaskCount, subtaskLabels, assignedToUserId, assignedToName, firestoreAssignmentId }) {
   const db = getDb();
   const id = uuid();
   const now = Date.now();
@@ -107,18 +111,28 @@ export function createSentTaskRecord({ title, priority, period, subtaskCount, su
   const labelsJson = subtaskLabels && subtaskLabels.some((l) => l && l.trim())
     ? JSON.stringify(subtaskLabels.map((l) => (l || '').trim()))
     : null;
+  const descText = typeof description === 'string' && description.trim() ? description.trim() : null;
 
   db.runSync(
-    `INSERT INTO tasks (id, title, categoryId, priority, period, ownerUserId, assignedToUserId, assignedToName, assignmentDirection, assignmentStatus, subtaskCount, subtaskLabels, firestoreAssignmentId, createdAt)
-     VALUES (?, ?, NULL, ?, ?, 'me', ?, ?, 'SENT', 'ACCEPTED', ?, ?, ?, ?)`,
-    [id, title, priority, period, assignedToUserId, assignedToName, count, labelsJson, firestoreAssignmentId ?? null, now]
+    `INSERT INTO tasks (id, title, description, categoryId, priority, period, ownerUserId, assignedToUserId, assignedToName, assignmentDirection, assignmentStatus, subtaskCount, subtaskLabels, firestoreAssignmentId, createdAt)
+     VALUES (?, ?, ?, NULL, ?, ?, 'me', ?, ?, 'SENT', 'ACCEPTED', ?, ?, ?, ?)`,
+    [id, title, descText, priority, period, assignedToUserId, assignedToName, count, labelsJson, firestoreAssignmentId ?? null, now]
   );
   return id;
 }
 
+export function findTaskByIdOrFirestoreId(idOrFirestoreId) {
+  const db = getDb();
+  let task = db.getFirstSync('SELECT * FROM tasks WHERE id = ?', [idOrFirestoreId]);
+  if (!task) {
+    task = db.getFirstSync('SELECT * FROM tasks WHERE firestoreAssignmentId = ?', [idOrFirestoreId]);
+  }
+  return task;
+}
+
 export function updateTask(taskId, { title, description, categoryId, priority, period, subtaskCount, subtaskLabels }) {
   const db = getDb();
-  const task = db.getFirstSync('SELECT * FROM tasks WHERE id = ?', [taskId]);
+  const task = findTaskByIdOrFirestoreId(taskId);
   if (!task) throw new Error('Görev bulunamadı.');
 
   if (task.assignmentDirection === 'RECEIVED') {
@@ -146,27 +160,41 @@ export function updateTask(taskId, { title, description, categoryId, priority, p
       period ?? 'DAILY',
       count,
       labelsJson,
-      taskId,
+      task.id,
     ]
   );
   triggerAutoCloudSyncForCurrentUser();
 }
 
-// Not: Kabul edilmiş, arkadaştan atanan görevler bu fonksiyonla silinemez (kural: kabul sonrası silinemez).
 export function deleteTask(taskId) {
-  const db = getDb();
-  const task = db.getFirstSync('SELECT * FROM tasks WHERE id = ?', [taskId]);
-  if (task && task.assignmentDirection === 'RECEIVED' && task.assignmentStatus === 'ACCEPTED') {
-    throw new Error('Kabul edilen atanmış görevler silinemez.');
+  let db;
+  try {
+    db = getDb();
+  } catch (e) {
+    return;
   }
-  db.runSync('DELETE FROM tasks WHERE id = ?', [taskId]);
-  db.runSync('DELETE FROM task_records WHERE taskId = ?', [taskId]);
+  if (!db) return;
+
+  const task = findTaskByIdOrFirestoreId(taskId);
+  const realId = task ? task.id : taskId;
+  const firestoreId = task ? task.firestoreAssignmentId : taskId;
+
+  if (firestoreId) {
+    deleteAssignedTaskInFirestore(firestoreId).catch((e) => {
+      console.warn('Firestore assignment deletion note:', e);
+    });
+  }
+
+  db.runSync('DELETE FROM tasks WHERE id = ? OR firestoreAssignmentId = ?', [realId, realId]);
+  db.runSync('DELETE FROM task_records WHERE taskId = ?', [realId]);
   triggerAutoCloudSyncForCurrentUser();
 }
 
 export function getTaskRecords(taskId) {
   const db = getDb();
-  return db.getAllSync('SELECT * FROM task_records WHERE taskId = ? ORDER BY periodKey DESC', [taskId]);
+  const task = findTaskByIdOrFirestoreId(taskId);
+  const realId = task ? task.id : taskId;
+  return db.getAllSync('SELECT * FROM task_records WHERE taskId = ? ORDER BY periodKey DESC', [realId]);
 }
 
 export function getSubtaskLabels(task) {
@@ -535,7 +563,75 @@ export function getWalletHistory(userId = 'me') {
 
 export function updateTaskNotes(taskId, notes) {
   const db = getDb();
-  db.runSync('UPDATE tasks SET notes = ? WHERE id = ?', [notes ?? '', taskId]);
+  const task = findTaskByIdOrFirestoreId(taskId);
+  const realId = task ? task.id : taskId;
+  db.runSync('UPDATE tasks SET notes = ? WHERE id = ?', [notes ?? '', realId]);
+  triggerAutoCloudSyncForCurrentUser();
+}
+
+export function updateTaskFromAssignment(assignedTaskDoc) {
+  if (!assignedTaskDoc || !assignedTaskDoc.id) return;
+  const db = getDb();
+  const firestoreId = assignedTaskDoc.id;
+  const existing = db.getFirstSync('SELECT * FROM tasks WHERE firestoreAssignmentId = ?', [firestoreId]);
+  if (!existing) return;
+
+  const count = Math.max(1, assignedTaskDoc.subtaskCount || 1);
+  const rawLabels = Array.isArray(assignedTaskDoc.subtaskLabels)
+    ? JSON.stringify(assignedTaskDoc.subtaskLabels)
+    : null;
+  const descText = typeof assignedTaskDoc.description === 'string' && assignedTaskDoc.description.trim()
+    ? assignedTaskDoc.description.trim()
+    : null;
+
+  db.runSync(
+    `UPDATE tasks
+     SET title = ?, description = ?, priority = ?, period = ?, subtaskCount = ?, subtaskLabels = ?
+     WHERE id = ?`,
+    [
+      assignedTaskDoc.title,
+      descText,
+      assignedTaskDoc.priority || 'MEDIUM',
+      assignedTaskDoc.period || 'DAILY',
+      count,
+      rawLabels,
+      existing.id,
+    ]
+  );
+}
+
+// Atanan kişi: Firestore'da silinmiş veya artık aktif olmayan görevleri kendi SQLite veritabanından kaldırır
+export function syncReceivedTasksWithFirestore(activeFirestoreAssignedTasks) {
+  let db;
+  try {
+    db = getDb();
+  } catch (e) {
+    return;
+  }
+  if (!db) return;
+
+  const localReceived = db.getAllSync(
+    `SELECT id, firestoreAssignmentId FROM tasks WHERE assignmentDirection = 'RECEIVED' AND firestoreAssignmentId IS NOT NULL`
+  );
+  if (!localReceived || localReceived.length === 0) return;
+
+  const activeDocIds = new Set(
+    Array.isArray(activeFirestoreAssignedTasks)
+      ? activeFirestoreAssignedTasks.map((t) => t.id)
+      : []
+  );
+
+  let deletedAny = false;
+  for (const localTask of localReceived) {
+    if (!activeDocIds.has(localTask.firestoreAssignmentId)) {
+      db.runSync('DELETE FROM tasks WHERE id = ?', [localTask.id]);
+      db.runSync('DELETE FROM task_records WHERE taskId = ?', [localTask.id]);
+      deletedAny = true;
+    }
+  }
+  if (deletedAny) {
+    triggerAutoCloudSyncForCurrentUser();
+  }
 }
 
 export function getTaskStudyLog(taskId, periodKey) {

@@ -102,6 +102,7 @@ export default function AddTaskPage() {
         assignedToUid: assignTo,
         assignedToName: friend?.friendName ?? 'Arkadaşın',
         title: title.trim(),
+        description: description ? description.trim() : '',
         priority,
         period,
         subtaskCount,
@@ -110,6 +111,7 @@ export default function AddTaskPage() {
       // Kendi tarafımda da bu görevi "gönderdiklerim" olarak izleyebilmem için bir kayıt oluştur.
       createSentTaskRecord({
         title: title.trim(),
+        description: description ? description.trim() : '',
         priority,
         period,
         subtaskCount,
