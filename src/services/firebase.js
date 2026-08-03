@@ -21,9 +21,11 @@ import {
 import { getFirestore } from 'firebase/firestore';
 import { getMessaging, isSupported } from 'firebase/messaging';
 
-const DEFAULT_KEY = typeof window !== 'undefined' && typeof atob === 'function'
-  ? atob('QUl6YVN5QnRWT0xvZ2FuNTlqeExrcjVVOVFOUzJnQ0xDeE1CS29N')
-  : '';
+// Firebase web istemcisi yapılandırması.
+// NOT: Firebase İstemci API anahtarları uygulamayı Firebase servislerine tanımlar ve
+// doğası gereği istemci ortamında görünürdür. Gerçek güvenlik istemci gizlemeleriyle (obfuscation)
+// değil, Firestore Security Rules ve Firebase Auth yetkilendirmesiyle sağlanır.
+const DEFAULT_KEY = 'AIzaSyBtVOLogan59jxLkr5U9QNS2gCLCxMBKoM';
 
 const firebaseConfig = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY || DEFAULT_KEY,

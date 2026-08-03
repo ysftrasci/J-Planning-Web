@@ -6,6 +6,10 @@
 import { useState } from 'react';
 import AppButton from '../components/AppButton.jsx';
 import { registerWithEmail, loginWithEmail, sendResetPasswordEmail } from '../services/emailAuth';
+import { getUserProfile } from '../db/userProfileRepository';
+import AccountDeletionPendingModal from '../components/AccountDeletionPendingModal';
+import { signOut as firebaseSignOut } from 'firebase/auth';
+import { auth } from '../services/firebase';
 import './LoginPage.css';
 
 export default function LoginPage() {
@@ -16,6 +20,8 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false);
   const [resetLoading, setResetLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
+  const [pendingUid, setPendingUid] = useState(null);
+  const [showPendingModal, setShowPendingModal] = useState(false);
 
   const handleForgotPassword = async () => {
     if (!email.trim()) {
@@ -57,7 +63,16 @@ export default function LoginPage() {
       if (mode === 'register') {
         await registerWithEmail(name, email, password);
       } else {
-        await loginWithEmail(email, password);
+        const cred = await loginWithEmail(email, password);
+        if (cred?.user) {
+          const profile = await getUserProfile(cred.user.uid);
+          if (profile?.isDeleting === true) {
+            setPendingUid(cred.user.uid);
+            setShowPendingModal(true);
+            setLoading(false);
+            return;
+          }
+        }
       }
       // Başarılı girişte AuthContext otomatik olarak yakalayıp yönlendirecek.
     } catch (e) {
@@ -137,6 +152,23 @@ export default function LoginPage() {
           </button>
         </div>
       </form>
+
+      {showPendingModal && (
+        <AccountDeletionPendingModal
+          open={showPendingModal}
+          uid={pendingUid}
+          onSuccess={() => {
+            setShowPendingModal(false);
+            setPendingUid(null);
+            window.alert('Hesabınız kalıcı olarak silindi.');
+          }}
+          onSignOut={async () => {
+            await firebaseSignOut(auth);
+            setShowPendingModal(false);
+            setPendingUid(null);
+          }}
+        />
+      )}
     </div>
   );
 }

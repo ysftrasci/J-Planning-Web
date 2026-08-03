@@ -1,11 +1,19 @@
 import { getDb } from '../db/database';
+import { getSchedules, saveSchedules } from './notificationService';
 
 const VALID_PRIORITIES = ['HIGH', 'MEDIUM', 'LOW', 'ZERO'];
 const VALID_PERIODS = ['DAILY', 'WEEKLY', 'MONTHLY', 'ONCE'];
-const SECRET_SALT = 'J-PLANNING_BACKUP_INTEGRITY_SALT_v1_2026';
+// Veri Bütünlüğü Kontrolü (Checksum) için tuz değeri.
+// AMAÇ: Yedek dosyasının indirme/yükleme sırasında bozulup bozulmadığını tespit etmek.
+// ÖNEMLİ: Bu bir kriptografik dijital imza veya tamper-proof mekanizma DEĞİLDİR.
+//         Tuz değeri istemci JS bundle'ında açıkça görünür, kasıtlı manipülasyonu
+//         engellemez. Sadece kazara bozulmaları (eksik dosya, kırık JSON) yakalar.
+const CHECKSUM_SALT = 'J-PLANNING_BACKUP_INTEGRITY_SALT_v1_2026';
 
-async function generateDataSignature(tablesPayload) {
-  const jsonStr = JSON.stringify(tablesPayload) + SECRET_SALT;
+// Veri bütünlüğünü doğrulamak için SHA-256 kontrol toplamı (checksum) hesaplar.
+// Güvenlik amaçlı değildir — sadece aktarım sırasındaki bozulma tespiti içindir.
+async function calculateChecksum(tablesPayload) {
+  const jsonStr = JSON.stringify(tablesPayload) + CHECKSUM_SALT;
   const encoder = new TextEncoder();
   const data = encoder.encode(jsonStr);
   const hashBuffer = await crypto.subtle.digest('SHA-256', data);
@@ -47,15 +55,16 @@ export async function exportAllUserData() {
     task_study_logs: db.getAllSync('SELECT * FROM task_study_logs'),
   };
 
-  const signature = await generateDataSignature(tables);
+  const checksum = await calculateChecksum(tables);
 
   const backupData = {
     app: 'J-Planning',
     version: 1,
     exportedAt: new Date().toISOString(),
-    signature,
+    checksum,
+    signature: checksum, // Geriye dönük uyumluluk (eski sürüm "signature" alanını okuyordu)
     tables,
-    notificationSchedules: JSON.parse(localStorage.getItem('jplanning:notification_schedules') || '[]'),
+    notificationSchedules: await getSchedules(),
   };
 
   const jsonString = JSON.stringify(backupData, null, 2);
@@ -84,14 +93,16 @@ export async function importUserData(jsonText) {
     throw new Error('Geçersiz yedek dosyası formatı.');
   }
 
-  // Kriptografik İmza Doğrulaması (Tamper Proofing)
-  if (!data.signature) {
-    throw new Error('Yedek dosyasında güvenlik imzası bulunamadı! Dosya bütünlüğü doğrulanamadı.');
-  }
-
-  const expectedSignature = await generateDataSignature(data.tables);
-  if (data.signature !== expectedSignature) {
-    throw new Error('Yedek dosyası üzerinde elle değişiklik yapılmış veya dosya bütünlüğü bozulmuş! Güvenlik nedeniyle içe aktarma reddedildi.');
+  // Veri Bütünlüğü (Checksum) Kontrolü
+  // Dosyanın aktarım sırasında bozulup bozulmadığını kontrol eder.
+  // NOT: Bu kasıtlı manipülasyonu engellemez (bkz. CHECKSUM_SALT yorumu);
+  // sadece eksik indirme, ağ kesintisi gibi kazara bozulmaları tespit eder.
+  const fileChecksum = data.checksum || data.signature;
+  if (fileChecksum) {
+    const expectedChecksum = await calculateChecksum(data.tables);
+    if (fileChecksum !== expectedChecksum) {
+      throw new Error('Yedek dosyasının bütünlüğü doğrulanamadı (dosya içeriği bozulmuş veya eksik indirilmiş olabilir).');
+    }
   }
 
   const db = getDb();
@@ -282,7 +293,7 @@ export async function importUserData(jsonText) {
     }
 
     if (Array.isArray(data.notificationSchedules)) {
-      localStorage.setItem('jplanning:notification_schedules', JSON.stringify(data.notificationSchedules));
+      await saveSchedules(data.notificationSchedules);
     }
 
     db.execSync('COMMIT;');

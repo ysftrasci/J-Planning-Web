@@ -15,18 +15,22 @@ function generateUserCode() {
 }
 
 // Aynı kodun başka bir kullanıcıda olma ihtimaline karşı birkaç deneme yapar.
+// NOT: Hesap silindiğinde userCodes/{code} dokümanı da silinir (deleteAccountService.js),
+// böylece silinen hesapların kodları havuza geri döner ve tekrar kullanılabilir.
+// 6 haneli kod havuzu (31^6 ≈ 887M kombinasyon) pratikte tükenmez, ama yine de
+// çakışma durumunda 10 haneli yedek kod üretilir.
 async function generateUniqueUserCode() {
-  for (let i = 0; i < 15; i++) {
+  for (let i = 0; i < 30; i++) {
     const code = generateUserCode();
     const codeDoc = await getDoc(doc(db, 'userCodes', code));
     if (!codeDoc.exists()) {
       return code;
     }
   }
-  // Yüksek çakışma ihtimaline karşı yedek 8 haneli üret
+  // Yüksek çakışma ihtimaline karşı yedek 10 haneli üret
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
   let fallback = '';
-  for (let i = 0; i < 8; i++) {
+  for (let i = 0; i < 10; i++) {
     fallback += chars.charAt(Math.floor(Math.random() * chars.length));
   }
   return `JP-${fallback}`;
@@ -39,7 +43,20 @@ export async function ensureUserProfile(firebaseUser) {
   const existing = await getDoc(userRef);
 
   if (existing.exists()) {
-    return existing.data();
+    const data = existing.data();
+    if (data.userCode) {
+      await setDoc(
+        doc(db, 'userCodes', data.userCode),
+        {
+          uid: firebaseUser.uid,
+          displayName: data.displayName || firebaseUser.displayName || 'Kullanıcı',
+          photoURL: data.photoURL || firebaseUser.photoURL || null,
+          userCode: data.userCode,
+        },
+        { merge: true }
+      ).catch(() => {});
+    }
+    return data;
   }
 
   const userCode = await generateUniqueUserCode();
@@ -52,8 +69,13 @@ export async function ensureUserProfile(firebaseUser) {
   };
 
   await setDoc(userRef, profile);
-  // userCode -> uid eşlemesi, arkadaş eklerken hızlı arama için ayrı koleksiyonda tutulur.
-  await setDoc(doc(db, 'userCodes', userCode), { uid: firebaseUser.uid });
+  // userCode -> kamuya açık sınırlı profil bilgileri (arkadaş arama için)
+  await setDoc(doc(db, 'userCodes', userCode), {
+    uid: firebaseUser.uid,
+    displayName: profile.displayName,
+    photoURL: profile.photoURL,
+    userCode,
+  });
 
   return profile;
 }
@@ -65,27 +87,43 @@ export async function getUserProfile(uid) {
 }
 
 // Kullanıcı koduna göre kamuya açık profili bulur (arkadaş ekleme akışında kullanılır).
-// Güvenlik (Data Minimization): Sadece kamuya açık 4 alanı döndürür.
+// Güvenlik (Data Minimization): Sadece kamuya açık 4 alanı userCodes dokümanından doğrudan döndürür.
 export async function findUserByCode(userCode) {
   const cleanCode = (userCode || '').trim().toUpperCase();
   if (!cleanCode) return null;
   const codeDoc = await getDoc(doc(db, 'userCodes', cleanCode));
   if (!codeDoc.exists()) return null;
-  const { uid } = codeDoc.data();
-  const fullProfile = await getUserProfile(uid);
-  if (!fullProfile) return null;
+  const data = codeDoc.data();
   return {
-    uid: fullProfile.uid,
-    displayName: fullProfile.displayName || 'Kullanıcı',
-    photoURL: fullProfile.photoURL || null,
-    userCode: fullProfile.userCode,
+    uid: data.uid,
+    displayName: data.displayName || 'Kullanıcı',
+    photoURL: data.photoURL || null,
+    userCode: data.userCode || cleanCode,
   };
 }
 
 // Profil düzenleme (isim ve/veya fotoğraf) — Firestore'daki profil dokümanını günceller.
-// Firebase Auth tarafındaki displayName/photoURL güncellemesi ayrıca yapılmalı
-// (bkz. services/emailAuth.js: updateDisplayName, updatePhotoURL).
 export async function updateUserProfile(uid, updates) {
   const userRef = doc(db, 'users', uid);
   await updateDoc(userRef, updates);
+
+  try {
+    const userSnap = await getDoc(userRef);
+    const code = userSnap.data()?.userCode;
+    if (code) {
+      const publicUpdates = {};
+      if (updates.displayName !== undefined) publicUpdates.displayName = updates.displayName;
+      if (updates.photoURL !== undefined) publicUpdates.photoURL = updates.photoURL;
+      if (Object.keys(publicUpdates).length > 0) {
+        await updateDoc(doc(db, 'userCodes', code), publicUpdates).catch(() => {});
+      }
+    }
+  } catch (e) {
+    // Kamusal profil güncelleme uyarısını yut
+  }
+}
+
+export async function markUserProfileAsDeleting(uid) {
+  const userRef = doc(db, 'users', uid);
+  await updateDoc(userRef, { isDeleting: true, isDeletingAtMs: Date.now() });
 }

@@ -5,7 +5,7 @@ import { useAuth } from '../context/AuthContext.jsx';
 import { auth } from '../services/firebase.js';
 import { updateDisplayName } from '../services/emailAuth.js';
 import { updateUserProfile } from '../db/userProfileRepository.js';
-import { processProfilePhoto } from '../services/photoUploadService.js';
+import { processProfilePhoto, validatePhotoFile } from '../services/photoUploadService.js';
 import AppButton from '../components/AppButton.jsx';
 import './EditProfilePage.css';
 
@@ -29,6 +29,13 @@ export default function EditProfilePage() {
   const handleFileChange = (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    const validation = validatePhotoFile(file);
+    if (!validation.valid) {
+      setErrorMessage(validation.error);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+      return;
+    }
+    setErrorMessage('');
     setSelectedFile(file);
     const objectUrl = URL.createObjectURL(file);
     setPreviewUri(objectUrl);
@@ -87,7 +94,7 @@ export default function EditProfilePage() {
         <input
           type="file"
           ref={fileInputRef}
-          accept="image/*"
+          accept="image/jpeg,image/png,image/webp,image/gif,image/heic,image/heif"
           style={{ display: 'none' }}
           onChange={handleFileChange}
         />

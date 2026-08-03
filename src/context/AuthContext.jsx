@@ -16,6 +16,7 @@ import { initDatabase } from '../db/database';
 import { updateTaskFromAssignment, syncReceivedTasksWithFirestore } from '../db/taskRepository';
 import { listenAcceptedTasksAssignedToMe } from '../services/taskAssignmentService';
 import { downloadAndApplyCloudSync, listenCloudSync, uploadCloudSync, performInitialCloudSync } from '../services/cloudSyncService';
+import { unregisterFCMPushToken } from '../services/notificationService';
 
 const AuthContext = createContext(null);
 
@@ -84,7 +85,17 @@ export function AuthProvider({ children }) {
     };
   }, []);
 
-  const signOut = () => firebaseSignOut(auth);
+  const signOut = async () => {
+    const currentUid = auth.currentUser?.uid;
+    if (currentUid) {
+      try {
+        await unregisterFCMPushToken(currentUid);
+      } catch (e) {
+        console.warn('FCMPushToken unregister uyarısı:', e);
+      }
+    }
+    return firebaseSignOut(auth);
+  };
 
   // Profil düzenleme (isim/fotoğraf) sonrası, hem Firebase Auth hem Firestore
   // güncellendikten sonra bu çağrılarak ekrandaki bilgi tazelenir.

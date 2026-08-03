@@ -3,9 +3,24 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
+    function isValidAssignedTaskData(data) {
+      return data.title is string &&
+        data.title.size() > 0 && data.title.size() <= 300 &&
+        (!('description' in data) || data.description == null || (data.description is string && data.description.size() <= 1000)) &&
+        data.priority in ['HIGH', 'MEDIUM', 'LOW', 'ZERO'] &&
+        data.period in ['DAILY', 'WEEKLY', 'MONTHLY', 'ONCE'] &&
+        data.subtaskCount is int && data.subtaskCount >= 1 && data.subtaskCount <= 100;
+    }
+
+    function isValidAssignedRewardData(data) {
+      return data.title is string &&
+        data.title.size() > 0 && data.title.size() <= 300 &&
+        (!('description' in data) || data.description == null || (data.description is string && data.description.size() <= 1000)) &&
+        data.cost is int && data.cost >= 0 && data.cost <= 100000;
+    }
+
     match /users/{userId} {
-      allow read: if request.auth != null;
-      allow write: if request.auth != null && request.auth.uid == userId;
+      allow read, write: if request.auth != null && request.auth.uid == userId;
 
       // Cihazlar arası senkronizasyon alanı için eklenen tek kısım:
       match /user_backup/{document=**} {
@@ -16,15 +31,20 @@ service cloud.firestore {
     match /userCodes/{code} {
       allow read: if request.auth != null;
       allow create: if request.auth != null && request.resource.data.uid == request.auth.uid;
-      allow update, delete: if false;
+      allow update: if request.auth != null && resource.data.uid == request.auth.uid;
+      allow delete: if request.auth != null && resource.data.uid == request.auth.uid;
     }
 
     match /friendships/{friendshipId} {
       allow read: if request.auth != null &&
         (request.auth.uid == resource.data.fromUid || request.auth.uid == resource.data.toUid);
-      allow create: if request.auth != null && request.auth.uid == request.resource.data.fromUid;
+      allow create: if request.auth != null &&
+        request.auth.uid == request.resource.data.fromUid &&
+        request.resource.data.toUid != null;
       allow update: if request.auth != null &&
-        (request.auth.uid == resource.data.fromUid || request.auth.uid == resource.data.toUid);
+        (request.auth.uid == resource.data.fromUid || request.auth.uid == resource.data.toUid) &&
+        request.resource.data.fromUid == resource.data.fromUid &&
+        request.resource.data.toUid == resource.data.toUid;
       allow delete: if request.auth != null &&
         (request.auth.uid == resource.data.fromUid || request.auth.uid == resource.data.toUid);
     }
@@ -32,9 +52,15 @@ service cloud.firestore {
     match /assignedTasks/{taskId} {
       allow read: if request.auth != null &&
         (request.auth.uid == resource.data.assignedByUid || request.auth.uid == resource.data.assignedToUid);
-      allow create: if request.auth != null && request.auth.uid == request.resource.data.assignedByUid;
+      allow create: if request.auth != null &&
+        request.auth.uid == request.resource.data.assignedByUid &&
+        request.resource.data.assignedToUid != null &&
+        isValidAssignedTaskData(request.resource.data);
       allow update: if request.auth != null &&
-        (request.auth.uid == resource.data.assignedByUid || request.auth.uid == resource.data.assignedToUid);
+        (request.auth.uid == resource.data.assignedByUid || request.auth.uid == resource.data.assignedToUid) &&
+        request.resource.data.assignedByUid == resource.data.assignedByUid &&
+        request.resource.data.assignedToUid == resource.data.assignedToUid &&
+        isValidAssignedTaskData(request.resource.data);
       allow delete: if request.auth != null &&
         (request.auth.uid == resource.data.assignedByUid || request.auth.uid == resource.data.assignedToUid);
     }
@@ -42,9 +68,15 @@ service cloud.firestore {
     match /assignedRewards/{rewardId} {
       allow read: if request.auth != null &&
         (request.auth.uid == resource.data.assignedByUid || request.auth.uid == resource.data.assignedToUid);
-      allow create: if request.auth != null && request.auth.uid == request.resource.data.assignedByUid;
+      allow create: if request.auth != null &&
+        request.auth.uid == request.resource.data.assignedByUid &&
+        request.resource.data.assignedToUid != null &&
+        isValidAssignedRewardData(request.resource.data);
       allow update: if request.auth != null &&
-        (request.auth.uid == resource.data.assignedByUid || request.auth.uid == resource.data.assignedToUid);
+        (request.auth.uid == resource.data.assignedByUid || request.auth.uid == resource.data.assignedToUid) &&
+        request.resource.data.assignedByUid == resource.data.assignedByUid &&
+        request.resource.data.assignedToUid == resource.data.assignedToUid &&
+        isValidAssignedRewardData(request.resource.data);
       allow delete: if request.auth != null &&
         (request.auth.uid == resource.data.assignedByUid || request.auth.uid == resource.data.assignedToUid);
     }

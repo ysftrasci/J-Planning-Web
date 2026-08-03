@@ -23,18 +23,89 @@ import { findUserByCode, getUserProfile } from '../db/userProfileRepository';
 
 const friendshipsRef = collection(db, 'friendships');
 
-const searchAttempts = [];
+// ─── İstemci Tarafı Arama Kısıtlaması (Rate Limiting) ───
+//
+// Kullanıcı kodu arama isteklerini birden fazla katmanlı koruma ile sınırlar:
+//   1) Dakikalık limit: 60 saniye içinde en fazla 5 arama
+//   2) Günlük limit: 24 saat içinde en fazla 50 arama
+//   3) Üstel geri çekilme: Arka arkaya reddedilince bekleme süresi artar
+//
+// VERİ SAKLAMA: localStorage kullanılır — sayfa yenilense, sekme kapansa bile
+// kısıtlama devam eder. sessionStorage ek katman olarak tutulur.
+//
+// SINIRLILIK: Bu tamamen istemci tarafı bir korumadır. Tarayıcı DevTools ile
+// localStorage temizlenebilir veya Firestore SDK atlanıp doğrudan REST API
+// kullanılabilir. Üretim ortamında gerçek brute-force koruması için:
+//   - Firebase App Check entegrasyonu
+//   - Cloud Functions ile sunucu tarafı rate limiting
+//   - reCAPTCHA/hCaptcha doğrulaması
+// gibi sunucu tarafı çözümler uygulanmalıdır.
 const MAX_SEARCHES_PER_MINUTE = 5;
+const MAX_SEARCHES_PER_DAY = 50;
+const RATE_LIMIT_WINDOW_MS = 60000;
+const DAILY_WINDOW_MS = 24 * 60 * 60 * 1000;
 
-function checkRateLimit() {
+function checkRateLimit(uid) {
+  const userUid = uid || 'guest';
+  const minuteKey = `jplanning:${userUid}:friend_search_attempts`;
+  const dailyKey = `jplanning:${userUid}:friend_search_daily`;
+  const blockKey = `jplanning:${userUid}:friend_search_blocked_until`;
   const now = Date.now();
-  while (searchAttempts.length > 0 && now - searchAttempts[0] > 60000) {
-    searchAttempts.shift();
+
+  // Üstel geri çekilme: Önceden bloklanmışsa süre dolana kadar reddet
+  try {
+    const blockedUntil = Number(localStorage.getItem(blockKey)) || 0;
+    if (now < blockedUntil) {
+      const remainingSec = Math.ceil((blockedUntil - now) / 1000);
+      throw new Error(`Çok fazla arama yaptınız. Lütfen ${remainingSec} saniye sonra tekrar deneyin.`);
+    }
+  } catch (e) {
+    if (e.message.includes('Çok fazla')) throw e;
   }
-  if (searchAttempts.length >= MAX_SEARCHES_PER_MINUTE) {
+
+  // Dakikalık limit kontrolü (localStorage — sayfa yenilense bile kalır)
+  let minuteAttempts = [];
+  try {
+    const raw = localStorage.getItem(minuteKey);
+    if (raw) minuteAttempts = JSON.parse(raw);
+  } catch (e) {}
+
+  minuteAttempts = Array.isArray(minuteAttempts)
+    ? minuteAttempts.filter((ts) => typeof ts === 'number' && now - ts < RATE_LIMIT_WINDOW_MS)
+    : [];
+
+  if (minuteAttempts.length >= MAX_SEARCHES_PER_MINUTE) {
+    // Üstel geri çekilme uygula: her ihlalde bekleme süresi 2x artar (maks 5dk)
+    const violations = minuteAttempts.length - MAX_SEARCHES_PER_MINUTE + 1;
+    const backoffMs = Math.min(RATE_LIMIT_WINDOW_MS * Math.pow(2, violations), 5 * 60 * 1000);
+    try {
+      localStorage.setItem(blockKey, String(now + backoffMs));
+    } catch (e) {}
     throw new Error('Çok fazla arama yaptınız. Güvenlik nedeniyle lütfen 1 dakika sonra tekrar deneyin.');
   }
-  searchAttempts.push(now);
+
+  // Günlük limit kontrolü
+  let dailyAttempts = [];
+  try {
+    const raw = localStorage.getItem(dailyKey);
+    if (raw) dailyAttempts = JSON.parse(raw);
+  } catch (e) {}
+
+  dailyAttempts = Array.isArray(dailyAttempts)
+    ? dailyAttempts.filter((ts) => typeof ts === 'number' && now - ts < DAILY_WINDOW_MS)
+    : [];
+
+  if (dailyAttempts.length >= MAX_SEARCHES_PER_DAY) {
+    throw new Error('Günlük arama limitine ulaştınız. Güvenlik nedeniyle lütfen yarın tekrar deneyin.');
+  }
+
+  // Kaydet
+  minuteAttempts.push(now);
+  dailyAttempts.push(now);
+  try {
+    localStorage.setItem(minuteKey, JSON.stringify(minuteAttempts));
+    localStorage.setItem(dailyKey, JSON.stringify(dailyAttempts));
+  } catch (e) {}
 }
 
 // Kullanıcı kodu ile arkadaş isteği gönderir.
@@ -42,7 +113,7 @@ export async function sendFriendRequest(currentUser, targetCode) {
   const code = targetCode.trim().toUpperCase();
   if (!code) throw new Error('Lütfen bir Kullanıcı ID gir.');
 
-  checkRateLimit();
+  checkRateLimit(currentUser?.uid);
 
   const targetProfile = await findUserByCode(code);
   if (!targetProfile) {

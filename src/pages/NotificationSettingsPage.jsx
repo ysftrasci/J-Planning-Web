@@ -39,7 +39,7 @@ export default function NotificationSettingsPage() {
   const [toastMessage, setToastMessage] = useState('');
 
   const loadSchedules = async () => {
-    const data = await getSchedules();
+    const data = await getSchedules(user?.uid);
     setSchedules(data);
     const status = await getNotificationPermissionStatus();
     setPermStatus(status);
@@ -93,7 +93,7 @@ export default function NotificationSettingsPage() {
 
   const confirmDelete = async () => {
     if (deleteScheduleTarget) {
-      await removeSchedule(deleteScheduleTarget.id);
+      await removeSchedule(deleteScheduleTarget.id, user?.uid);
       setDeleteScheduleTarget(null);
       await loadSchedules();
     }
@@ -206,6 +206,7 @@ export default function NotificationSettingsPage() {
         <ScheduleFormModal
           open={showAddForm || !!editingSchedule}
           editingSchedule={editingSchedule}
+          userUid={user?.uid}
           onClose={() => {
             setShowAddForm(false);
             setEditingSchedule(null);
@@ -247,7 +248,7 @@ export default function NotificationSettingsPage() {
   );
 }
 
-function ScheduleFormModal({ open, editingSchedule, onClose, onSaved }) {
+function ScheduleFormModal({ open, editingSchedule, userUid, onClose, onSaved }) {
   const [selectedDays, setSelectedDays] = useState(editingSchedule?.weekdays || []);
   const [timeString, setTimeString] = useState(
     editingSchedule ? formatTime(editingSchedule.hour, editingSchedule.minute) : '09:00'
@@ -285,9 +286,9 @@ function ScheduleFormModal({ open, editingSchedule, onClose, onSaved }) {
       };
 
       if (editingSchedule) {
-        await updateSchedule(editingSchedule.id, payload);
+        await updateSchedule(editingSchedule.id, payload, userUid);
       } else {
-        await addSchedule(payload);
+        await addSchedule(payload, userUid);
       }
       onSaved();
     } catch (e) {

@@ -6,20 +6,43 @@ import { db, auth } from './firebase';
 import { getDb } from '../db/database';
 import { uuid } from '../db/taskRepository';
 
-const SECRET_SALT = 'J-PLANNING_BACKUP_INTEGRITY_SALT_v1_2026';
+// Veri Bütünlüğü Kontrolü (Checksum) için tuz değeri.
+// AMAÇ: Yedekleme/senkronizasyon sırasında oluşabilecek veri bozulmalarını
+//       (eksik indirme, ağ kesintisi, JSON parse hataları vb.) tespit etmek.
+// ÖNEMLİ: Bu bir kriptografik dijital imza veya tamper-proof mekanizma DEĞİLDİR.
+//         Bu tuz değeri istemci (tarayıcı) JS bundle'ında açıkça görünür — herkes
+//         tarafından okunabilir. Kasıtlı veri manipülasyonunu engellemez; sadece
+//         kazara/rastgele bozulmaları yakalar. Gerçek güvenlik istemci tarafında
+//         değil, Firestore Security Rules ve Firebase Auth ile sağlanır.
+const CHECKSUM_SALT = 'J-PLANNING_BACKUP_INTEGRITY_SALT_v1_2026';
 
-// Bu tarayıcı/cihaz örneği için benzersiz ID
-function getDeviceId() {
-  let devId = localStorage.getItem('jplanning:device_instance_id');
+// Bu tarayıcı/cihaz örneği için kullanıcının benzersiz ID'si
+function getDeviceId(uid) {
+  const userUid = uid || auth.currentUser?.uid;
+  const key = userUid ? `jplanning:${userUid}:device_instance_id` : 'jplanning:device_instance_id';
+
+  let devId = localStorage.getItem(key);
   if (!devId) {
-    devId = uuid();
-    localStorage.setItem('jplanning:device_instance_id', devId);
+    if (userUid) {
+      const legacyId = localStorage.getItem('jplanning:device_instance_id');
+      if (legacyId) {
+        devId = legacyId;
+        localStorage.setItem(key, devId);
+        localStorage.removeItem('jplanning:device_instance_id');
+      }
+    }
+    if (!devId) {
+      devId = uuid();
+      localStorage.setItem(key, devId);
+    }
   }
   return devId;
 }
 
-async function generateDataSignature(tablesPayload) {
-  const jsonStr = JSON.stringify(tablesPayload) + SECRET_SALT;
+// Veri bütünlüğünü doğrulamak için SHA-256 kontrol toplamı (checksum) hesaplar.
+// Bu fonksiyon güvenlik amaçlı DEĞİLDİR — sadece aktarımda bozulma tespiti içindir.
+async function calculateChecksum(tablesPayload) {
+  const jsonStr = JSON.stringify(tablesPayload) + CHECKSUM_SALT;
   const encoder = new TextEncoder();
   const data = encoder.encode(jsonStr);
   const hashBuffer = await crypto.subtle.digest('SHA-256', data);
@@ -58,22 +81,30 @@ export function getLocalSnapshotPayload() {
   };
 }
 
+export function recordLocalChange(uid) {
+  if (!uid) return;
+  const now = Date.now();
+  localStorage.setItem(`jplanning:${uid}:last_local_change_ts`, String(now));
+}
+
 export async function uploadCloudSync(uid) {
   if (!uid || isApplyingRemoteData) return;
 
   try {
     const tables = getLocalSnapshotPayload();
-    const signature = await generateDataSignature(tables);
+    const checksum = await calculateChecksum(tables);
     const now = Date.now();
     lastSyncedVersionTs = now;
+    recordLocalChange(uid);
 
     const docRef = doc(db, 'users', uid, 'user_backup', 'latest');
     await setDoc(docRef, {
       app: 'J-Planning',
       version: 1,
-      deviceId: getDeviceId(),
+      deviceId: getDeviceId(uid),
       updatedAtMs: now,
-      signature,
+      checksum,
+      signature: checksum, // Geriye dönük uyumluluk (eski sürüm "signature" alanını okuyordu)
       tablesJson: JSON.stringify(tables),
       updatedAt: serverTimestamp(),
     });
@@ -84,6 +115,7 @@ export async function uploadCloudSync(uid) {
 
 export function triggerAutoCloudSync(uid) {
   if (!uid || isApplyingRemoteData) return;
+  recordLocalChange(uid);
   if (syncTimeout) clearTimeout(syncTimeout);
   syncTimeout = setTimeout(() => {
     uploadCloudSync(uid);
@@ -303,12 +335,13 @@ export async function performInitialCloudSync(uid) {
   try {
     const localTables = getLocalSnapshotPayload();
     const localCount = countTableItems(localTables);
+    const localTs = Number(localStorage.getItem(`jplanning:${uid}:last_local_change_ts`)) || 0;
+    const CLOCK_SKEW_TOLERANCE = 2000;
 
     const docRef = doc(db, 'users', uid, 'user_backup', 'latest');
     const snap = await getDoc(docRef);
 
     if (!snap.exists()) {
-      // Bulutta henüz yedek yoksa ve yerelde veri varsa buluta yükle
       if (localCount > 0) {
         await uploadCloudSync(uid);
       }
@@ -316,7 +349,8 @@ export async function performInitialCloudSync(uid) {
     }
 
     const cloudData = snap.data();
-    if (!cloudData.tablesJson || !cloudData.signature) {
+    const remoteChecksum = cloudData.checksum || cloudData.signature;
+    if (!cloudData.tablesJson || !remoteChecksum) {
       if (localCount > 0) {
         await uploadCloudSync(uid);
       }
@@ -324,39 +358,37 @@ export async function performInitialCloudSync(uid) {
     }
 
     const remoteTables = JSON.parse(cloudData.tablesJson);
-    const expectedSig = await generateDataSignature(remoteTables);
-    if (cloudData.signature !== expectedSig) {
-      console.warn('Bulut senkronizasyon imza uyuşmazlığı, yerel veriler korundu.');
+    const expectedChecksum = await calculateChecksum(remoteTables);
+    if (remoteChecksum !== expectedChecksum) {
+      console.warn('Bulut senkronizasyon bütünlük kontrolü (checksum) uyuşmadı, yerel veriler korundu.');
       return;
     }
 
     const remoteCount = countTableItems(remoteTables);
+    const remoteTs = cloudData.updatedAtMs || 0;
 
-    // EĞER yerelde daha çok öge varsa (ör. telefonda 5 eski görev var ama bulutta az/hiç yok):
-    // Yereldeki verileri buluta aktar!
-    if (localCount > remoteCount) {
+    // Sadece yerelde hiç veri yoksa ama bulutta varsa (yeni cihaz/temiz veri): Yerele aktar
+    if (localCount === 0 && remoteCount > 0) {
+      await applyRemoteTablesToLocal(remoteTables);
+      lastSyncedVersionTs = remoteTs || Date.now();
+      localStorage.setItem(`jplanning:${uid}:last_local_change_ts`, String(lastSyncedVersionTs));
+      window.dispatchEvent(new Event('jplanning:cloud-sync-update'));
+      return;
+    }
+
+    // Zaman damgasına göre karar ver
+    if (remoteTs > localTs + CLOCK_SKEW_TOLERANCE) {
+      // Bulut daha yeni -> Bulut verisini yerele aktar
+      await applyRemoteTablesToLocal(remoteTables);
+      lastSyncedVersionTs = remoteTs || Date.now();
+      localStorage.setItem(`jplanning:${uid}:last_local_change_ts`, String(lastSyncedVersionTs));
+      window.dispatchEvent(new Event('jplanning:cloud-sync-update'));
+    } else if (localTs > remoteTs + CLOCK_SKEW_TOLERANCE) {
+      // Yerel daha yeni -> Yerel veriyi buluta aktar
       await uploadCloudSync(uid);
-      return;
+    } else {
+      // Eşit veya tolerans dahilinde -> Ekstra yükleme/indirme yapma
     }
-
-    // EĞER bulutta yerelden daha çok öge varsa (ör. tablet boş ama bulutta telefondan gelen 5 görev var):
-    // Buluttaki veriyi indirip yerel veritabanında güncelle!
-    if (remoteCount > localCount) {
-      await applyRemoteTablesToLocal(remoteTables);
-      lastSyncedVersionTs = cloudData.updatedAtMs || Date.now();
-      window.dispatchEvent(new Event('jplanning:cloud-sync-update'));
-      return;
-    }
-
-    // Öge sayıları eşitse zaman damgasına göre güncelle
-    if (cloudData.updatedAtMs && cloudData.updatedAtMs > lastSyncedVersionTs) {
-      await applyRemoteTablesToLocal(remoteTables);
-      lastSyncedVersionTs = cloudData.updatedAtMs || Date.now();
-      window.dispatchEvent(new Event('jplanning:cloud-sync-update'));
-      return;
-    }
-
-    await uploadCloudSync(uid);
   } catch (err) {
     console.warn('İlk senkronizasyon kontrolü uyarısı:', err);
   }
@@ -370,17 +402,19 @@ export async function downloadAndApplyCloudSync(uid) {
     if (!snap.exists()) return false;
 
     const data = snap.data();
-    if (!data.tablesJson || !data.signature) return false;
+    const remoteChecksum = data.checksum || data.signature;
+    if (!data.tablesJson || !remoteChecksum) return false;
 
     const tables = JSON.parse(data.tablesJson);
-    const expectedSignature = await generateDataSignature(tables);
-    if (data.signature !== expectedSignature) {
-      console.warn('Bulut senkronizasyon verisinin bütünlük imzası uyuşmuyor.');
+    const expectedChecksum = await calculateChecksum(tables);
+    if (remoteChecksum !== expectedChecksum) {
+      console.warn('Bulut senkronizasyon verisinin bütünlük kontrolü (checksum) uyuşmuyor.');
       return false;
     }
 
     await applyRemoteTablesToLocal(tables);
     lastSyncedVersionTs = data.updatedAtMs || Date.now();
+    localStorage.setItem(`jplanning:${uid}:last_local_change_ts`, String(lastSyncedVersionTs));
     return true;
   } catch (err) {
     console.warn('Buluttan senkron veri indirme uyarısı:', err);
@@ -397,16 +431,18 @@ export function listenCloudSync(uid, onRemoteUpdate) {
     const data = snap.data();
 
     // Kendi cihazımızın başlattığı yüklemeyi tekrar uygulamaması için cihaz kontrolü
-    if (data.deviceId === getDeviceId()) return;
+    if (data.deviceId === getDeviceId(uid)) return;
     if (data.updatedAtMs && data.updatedAtMs <= lastSyncedVersionTs) return;
 
-    if (data.tablesJson && data.signature) {
+    const remoteChecksum = data.checksum || data.signature;
+    if (data.tablesJson && remoteChecksum) {
       try {
         const tables = JSON.parse(data.tablesJson);
-        const expectedSignature = await generateDataSignature(tables);
-        if (data.signature === expectedSignature) {
+        const expectedChecksum = await calculateChecksum(tables);
+        if (remoteChecksum === expectedChecksum) {
           await applyRemoteTablesToLocal(tables);
           lastSyncedVersionTs = data.updatedAtMs || Date.now();
+          localStorage.setItem(`jplanning:${uid}:last_local_change_ts`, String(lastSyncedVersionTs));
           if (onRemoteUpdate) onRemoteUpdate();
         }
       } catch (err) {

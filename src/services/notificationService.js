@@ -1,9 +1,25 @@
 import { getToken, onMessage } from 'firebase/messaging';
-import { doc, updateDoc, arrayUnion } from 'firebase/firestore';
-import { db, messaging } from './firebase';
+import { doc, updateDoc, arrayUnion, arrayRemove } from 'firebase/firestore';
+import { db, messaging, auth } from './firebase';
 
-const STORAGE_KEY = 'jplanning:notification_schedules';
 let lastTriggeredMinuteKey = '';
+
+function getStorageKey(uid) {
+  const userUid = uid || auth.currentUser?.uid;
+  if (!userUid) return null;
+  const userKey = `jplanning:${userUid}:notification_schedules`;
+
+  if (typeof localStorage !== 'undefined') {
+    if (!localStorage.getItem(userKey)) {
+      const legacyRaw = localStorage.getItem('jplanning:notification_schedules');
+      if (legacyRaw) {
+        localStorage.setItem(userKey, legacyRaw);
+        localStorage.removeItem('jplanning:notification_schedules');
+      }
+    }
+  }
+  return userKey;
+}
 
 export async function registerFCMPushToken(userUid) {
   if (!('Notification' in window) || Notification.permission !== 'granted') return null;
@@ -22,6 +38,9 @@ export async function registerFCMPushToken(userUid) {
     });
 
     if (token && userUid) {
+      if (typeof localStorage !== 'undefined') {
+        localStorage.setItem('jplanning:current_fcm_token', token);
+      }
       const userRef = doc(db, 'users', userUid);
       await updateDoc(userRef, {
         fcmTokens: arrayUnion(token),
@@ -32,6 +51,43 @@ export async function registerFCMPushToken(userUid) {
   } catch (err) {
     console.warn('FCM Push Token alınamadı:', err);
     return null;
+  }
+}
+
+export async function unregisterFCMPushToken(userUid) {
+  if (!userUid) return false;
+
+  try {
+    let token = null;
+    if (messaging && 'Notification' in window && Notification.permission === 'granted') {
+      let serviceWorkerRegistration;
+      if ('serviceWorker' in navigator) {
+        serviceWorkerRegistration = await navigator.serviceWorker.ready;
+      }
+      const vapidKey = import.meta.env.VITE_FIREBASE_VAPID_KEY || undefined;
+      token = await getToken(messaging, {
+        vapidKey,
+        serviceWorkerRegistration,
+      }).catch(() => null);
+    }
+
+    const storedToken = typeof localStorage !== 'undefined' ? localStorage.getItem('jplanning:current_fcm_token') : null;
+    const targetToken = token || storedToken;
+
+    if (targetToken && userUid) {
+      const userRef = doc(db, 'users', userUid);
+      await updateDoc(userRef, {
+        fcmTokens: arrayRemove(targetToken),
+      }).catch(() => {});
+    }
+
+    if (typeof localStorage !== 'undefined') {
+      localStorage.removeItem('jplanning:current_fcm_token');
+    }
+    return true;
+  } catch (err) {
+    console.warn('FCM Push Token silinemedi:', err);
+    return false;
   }
 }
 
@@ -110,39 +166,43 @@ export async function sendWebNotification(title, body) {
   return false;
 }
 
-export async function getSchedules() {
-  const raw = localStorage.getItem(STORAGE_KEY);
+export async function getSchedules(uid) {
+  const key = getStorageKey(uid);
+  if (!key) return [];
+  const raw = localStorage.getItem(key);
   return raw ? JSON.parse(raw) : [];
 }
 
-async function saveSchedules(schedules) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(schedules));
+export async function saveSchedules(schedules, uid) {
+  const key = getStorageKey(uid);
+  if (!key) return;
+  localStorage.setItem(key, JSON.stringify(schedules));
 }
 
-export async function addSchedule(schedule) {
-  const schedules = await getSchedules();
+export async function addSchedule(schedule, uid) {
+  const schedules = await getSchedules(uid);
   const newSchedule = { id: uuid(), ...schedule };
   schedules.push(newSchedule);
-  await saveSchedules(schedules);
+  await saveSchedules(schedules, uid);
   return newSchedule.id;
 }
 
-export async function updateSchedule(scheduleId, updatedData) {
-  const schedules = await getSchedules();
+export async function updateSchedule(scheduleId, updatedData, uid) {
+  const schedules = await getSchedules(uid);
   const updated = schedules.map((s) =>
     s.id === scheduleId ? { ...s, ...updatedData } : s
   );
-  await saveSchedules(updated);
+  await saveSchedules(updated, uid);
 }
 
-export async function removeSchedule(scheduleId) {
-  const schedules = await getSchedules();
+export async function removeSchedule(scheduleId, uid) {
+  const schedules = await getSchedules(uid);
   const updated = schedules.filter((s) => s.id !== scheduleId);
-  await saveSchedules(updated);
+  await saveSchedules(updated, uid);
 }
 
-export async function removeAllSchedules() {
-  await saveSchedules([]);
+export async function removeAllSchedules(uid) {
+  await saveSchedules([], uid);
 }
 
 export function weekdayLabel(value) {
@@ -155,6 +215,9 @@ export function formatTime(hour, minute) {
 
 // Zamanlanmış bildirim kontrolü (Uygulama açıkken veya PWA ortamında zamanı gelen bildirimi tetikler)
 export async function checkAndTriggerSchedules() {
+  const activeUid = auth.currentUser?.uid;
+  if (!activeUid) return;
+
   const now = new Date();
   // 1 = Pazar, 2 = Pazartesi ... 7 = Cumartesi (Expo/JS Date standardı)
   const currentWeekday = now.getDay() + 1;
@@ -164,7 +227,7 @@ export async function checkAndTriggerSchedules() {
   const minuteKey = `${now.getFullYear()}-${now.getMonth()}-${now.getDate()}-${currentHour}:${currentMinute}`;
   if (lastTriggeredMinuteKey === minuteKey) return;
 
-  const schedules = await getSchedules();
+  const schedules = await getSchedules(activeUid);
   for (const schedule of schedules) {
     if (
       schedule.weekdays.includes(currentWeekday) &&

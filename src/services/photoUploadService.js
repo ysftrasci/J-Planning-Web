@@ -7,9 +7,38 @@
 
 const TARGET_SIZE = 120;
 const COMPRESS_QUALITY = 0.4;
+export const MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024; // 10 MB
+
+export function validatePhotoFile(file) {
+  if (!file) {
+    return { valid: false, error: 'Fotoğraf dosyası seçilmedi.' };
+  }
+  if (file instanceof File || file instanceof Blob) {
+    if (file.size > MAX_FILE_SIZE_BYTES) {
+      return {
+        valid: false,
+        error: 'Fotoğraf boyutu çok büyük (Maksimum 10MB yükleyebilirsiniz).',
+      };
+    }
+    if (file.type && !file.type.startsWith('image/')) {
+      return {
+        valid: false,
+        error: 'Lütfen geçerli bir resim dosyası seçin (JPG, PNG, WebP vb.).',
+      };
+    }
+  }
+  return { valid: true };
+}
 
 export function processProfilePhoto(fileOrSrc) {
   return new Promise((resolve, reject) => {
+    if (fileOrSrc instanceof File || fileOrSrc instanceof Blob) {
+      const check = validatePhotoFile(fileOrSrc);
+      if (!check.valid) {
+        return reject(new Error(check.error));
+      }
+    }
+
     const img = new Image();
     img.crossOrigin = 'anonymous';
 
@@ -35,8 +64,8 @@ export function processProfilePhoto(fileOrSrc) {
       }
     };
 
-    img.onerror = (err) => {
-      reject(new Error('Fotoğraf işlenirken bir hata oluştu.'));
+    img.onerror = () => {
+      reject(new Error('Seçilen resim dosyası okunamadı veya biçimi bozuk.'));
     };
 
     if (typeof fileOrSrc === 'string') {
@@ -46,7 +75,9 @@ export function processProfilePhoto(fileOrSrc) {
       reader.onload = (e) => {
         img.src = e.target.result;
       };
-      reader.onerror = reject;
+      reader.onerror = () => {
+        reject(new Error('Dosya okunurken bir hata oluştu.'));
+      };
       reader.readAsDataURL(fileOrSrc);
     } else {
       reject(new Error('Geçersiz fotoğraf kaynağı.'));

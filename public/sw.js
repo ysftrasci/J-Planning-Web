@@ -1,6 +1,6 @@
 // J-Planning — Service Worker (PWA Çevrimdışı Çalışma Desteği)
 
-const CACHE_NAME = 'j-planning-v2';
+const CACHE_NAME = 'j-planning-v3';
 
 // Service Worker Kurulumu & Önbelleğe alma
 self.addEventListener('install', (event) => {

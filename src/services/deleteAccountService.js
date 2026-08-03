@@ -21,7 +21,6 @@ import {
   getDocs,
   doc,
   deleteDoc,
-  writeBatch,
 } from 'firebase/firestore';
 import {
   EmailAuthProvider,
@@ -30,10 +29,9 @@ import {
 } from 'firebase/auth';
 import { db, auth } from './firebase';
 import { deleteUserDatabase } from '../db/database';
+import { markUserProfileAsDeleting } from '../db/userProfileRepository';
+import { getDoc } from 'firebase/firestore';
 
-// Kullanıcının uid'sinin "atayan" ya da "atanan"/"gönderen" ya da "alıcı"
-// tarafında göründüğü tüm dokümanları toplar (friendships, assignedTasks,
-// assignedRewards için uid alan isimleri farklı olduğundan parametrik).
 async function collectDocsByFields(collectionName, fieldNames, uid) {
   const results = [];
   const colRef = collection(db, collectionName);
@@ -45,26 +43,23 @@ async function collectDocsByFields(collectionName, fieldNames, uid) {
   return results;
 }
 
-// Firestore'daki bu kullanıcıya ait HER ŞEYİ siler:
-// - users/{uid} profil dokümanı
-// - friendships (fromUid veya toUid bu kullanıcıysa)
-// - assignedTasks (assignedByUid veya assignedToUid bu kullanıcıysa)
-// - assignedRewards (assignedByUid veya assignedToUid bu kullanıcıysa)
-//
-// NOT: userCodes/{code} dokümanı BİLİNÇLİ OLARAK silinmiyor. Firestore
-// Security Rules bu koleksiyon için "allow update, delete: if false;"
-// diyor — yani kimse (kodun asıl sahibi bile) bu dokümanı silemez. Bu,
-// başka bir kullanıcının kodunu kötü niyetle silmesini engellemek için
-// bilinçli konmuş bir kural. Hesap silindikten sonra o kod (ör. JP-3947)
-// artık kimse tarafından kullanılamaz halde "rezerve" kalır — 4 haneli kod
-// havuzu (9000 kombinasyon) için pratikte önemsiz bir maliyettir.
 export async function deleteAllFirestoreData(uid) {
   const refsToDelete = [];
 
-  // users/{uid}/user_backup/latest
+  // users/{uid}/user_backup/latest (users/{uid} ana dokümanı en son adıma bırakıldı)
   refsToDelete.push(doc(db, 'users', uid, 'user_backup', 'latest'));
-  // users/{uid}
-  refsToDelete.push(doc(db, 'users', uid));
+
+  // userCodes/{userCode} — Hesap silindiğinde kullanıcı kodunu havuza geri sal
+  // (böylece silinen hesapların kodları yeni kullanıcılara verilebilir)
+  try {
+    const userSnap = await getDoc(doc(db, 'users', uid));
+    const userCode = userSnap.data()?.userCode;
+    if (userCode) {
+      refsToDelete.push(doc(db, 'userCodes', userCode));
+    }
+  } catch (e) {
+    console.warn('User code fetch note:', e);
+  }
 
   // friendships, assignedTasks, assignedRewards
   try {
@@ -88,7 +83,6 @@ export async function deleteAllFirestoreData(uid) {
     console.warn('Reward docs fetch note:', e);
   }
 
-  // Her dokümanı güvenle tek tek sil — biri olmasa bile diğerlerinin silinmesini ve hesap silmeyi engellemesin
   for (const ref of refsToDelete) {
     try {
       await deleteDoc(ref);
@@ -98,10 +92,14 @@ export async function deleteAllFirestoreData(uid) {
   }
 }
 
-// Firebase, hesap silme gibi hassas işlemler için kullanıcının yakın
-// zamanda giriş yapmış olmasını şart koşar. Uzun süredir açık bir
-// oturumda bu şart sağlanmayabilir; bu durumda şifreyi tekrar isteyip
-// yeniden doğrulama yapıyoruz.
+export async function deleteUserProfileDoc(uid) {
+  try {
+    await deleteDoc(doc(db, 'users', uid));
+  } catch (e) {
+    console.warn('users/{uid} dokümanı silme uyarısı:', e);
+  }
+}
+
 export async function reauthenticate(password) {
   const user = auth.currentUser;
   if (!user || !user.email) throw new Error('Giriş yapılmış bir hesap bulunamadı.');
@@ -109,31 +107,66 @@ export async function reauthenticate(password) {
   await reauthenticateWithCredential(user, credential);
 }
 
-// Tüm silme adımlarını sırayla uygular. `password` verilmezse yeniden
-// doğrulama denenmez (gerekirse çağıran taraf auth/requires-recent-login
-// hatasını yakalayıp şifre isteyip tekrar çağırmalıdır).
 export async function deleteAccountCompletely({ uid, password }) {
   const user = auth.currentUser;
   if (!user || user.uid !== uid) {
     throw new Error('Hesap doğrulanamadı, lütfen tekrar giriş yapıp deneyin.');
   }
 
+  // 0) Idempotency Kontrolü: Profil önceden silinme sürecinde kalmış mı?
+  let isAlreadyDeleting = false;
+  try {
+    const userSnap = await getDoc(doc(db, 'users', uid));
+    if (userSnap.exists() && userSnap.data()?.isDeleting === true) {
+      isAlreadyDeleting = true;
+    }
+  } catch (err) {
+    console.warn('Profil durumu okuma uyarısı:', err);
+    throw new Error('Ağ bağlantısı sağlanamadı. Lütfen internet bağlantınızı kontrol edip tekrar deneyin.');
+  }
+
+  // 1) Reauthenticate (Şifre doğrulaması en başta yapılır)
   if (password) {
     await reauthenticate(password);
   }
 
-  // 1) Firestore verileri (Auth hesabı silinmeden ÖNCE — bkz. dosya başındaki not)
-  await deleteAllFirestoreData(uid);
+  if (!isAlreadyDeleting) {
+    // 2) users/{uid} üzerine isDeleting: true bayrağını koy (HATA VERİRSE İŞLEMİ DURDUR)
+    try {
+      await markUserProfileAsDeleting(uid);
+    } catch (err) {
+      console.error('Hesap silinme bayrağı atılamadı:', err);
+      throw new Error('Hesap silme işlemi başlatılamadı (Ağ/Firestore hatası). Lütfen tekrar deneyin.');
+    }
 
-  // 2) Yerel tarayıcı verisi (görevler, kategoriler, ödüller, odaklanma geçmişi)
-  try {
-    await deleteUserDatabase(uid);
-  } catch (e) {
-    // Yerel veri silinemese bile hesap silme işlemini durdurmuyoruz;
-    // en kötü ihtimalle tarayıcıda kullanılmayan bir yerel kayıt kalır.
-    console.warn('Yerel veritabanı silinemedi:', e);
+    // 3) Firestore alt verilerini temizle
+    await deleteAllFirestoreData(uid);
+
+    // 4) Yerel tarayıcı verisini temizle
+    try {
+      await deleteUserDatabase(uid);
+      if (typeof localStorage !== 'undefined') {
+        localStorage.removeItem(`jplanning:${uid}:notification_schedules`);
+        localStorage.removeItem(`jplanning:${uid}:device_instance_id`);
+        localStorage.removeItem(`jplanning:${uid}:last_local_change_ts`);
+        localStorage.removeItem(`jplanning:${uid}:friend_search_attempts`);
+        localStorage.removeItem(`jplanning:${uid}:friend_search_daily`);
+        localStorage.removeItem(`jplanning:${uid}:friend_search_blocked_until`);
+      }
+    } catch (e) {
+      console.warn('Yerel veritabanı silinemedi:', e);
+    }
   }
 
-  // 3) Firebase Authentication hesabının kendisi (en son adım)
+  // 5) Firebase Authentication hesabının kendisini sil
   await deleteUser(user);
+
+  // 6) Başarılı olursa users/{uid} profil dokümanını sil
+  await deleteUserProfileDoc(uid);
+}
+
+export async function abandonAccountDeletionAndReset(uid) {
+  if (!uid) return;
+  // Doküman silme hatası yutulmaz, kurtarma akışının gerçek başarısını doğrular
+  await deleteDoc(doc(db, 'users', uid));
 }

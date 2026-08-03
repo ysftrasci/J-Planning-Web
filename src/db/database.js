@@ -209,11 +209,6 @@ export async function initDatabase(uid) {
 
   runMigrations(db);
 
-  // Var olan tüm veritabanlarında description, notes ve daily_notes.studyTimeText sütunlarının varlığından emin ol
-  tryAddColumn(db, 'tasks', 'description TEXT');
-  tryAddColumn(db, 'tasks', 'notes TEXT');
-  tryAddColumn(db, 'daily_notes', 'studyTimeText TEXT');
-
   // Varsayılan kategorilerin (YKS dahil) var olduğundan emin ol
   ensureDefaultCategories();
 
@@ -234,6 +229,19 @@ function tryAddColumn(db, table, columnDef) {
   }
 }
 
+// Tüm versiyonlarda eklenmiş olması gereken opsiyonel sütunların varlığını garanti eder
+function ensureSchemaIntegrity(db) {
+  tryAddColumn(db, 'tasks', 'assignedToUserId TEXT');
+  tryAddColumn(db, 'tasks', 'assignedToName TEXT');
+  tryAddColumn(db, 'tasks', 'assignmentDirection TEXT');
+  tryAddColumn(db, 'tasks', 'subtaskCount INTEGER NOT NULL DEFAULT 1');
+  tryAddColumn(db, 'tasks', 'subtaskLabels TEXT');
+  tryAddColumn(db, 'tasks', 'notes TEXT');
+  tryAddColumn(db, 'tasks', 'description TEXT');
+  tryAddColumn(db, 'task_records', 'completedSubtasks INTEGER NOT NULL DEFAULT 0');
+  tryAddColumn(db, 'daily_notes', 'studyTimeText TEXT');
+}
+
 function runMigrations(db) {
   const row = db.getFirstSync(`SELECT value FROM app_meta WHERE key = 'schema_version'`);
   const currentVersion = row ? parseInt(row.value, 10) : 1;
@@ -241,15 +249,23 @@ function runMigrations(db) {
   if (currentVersion < 2) {
     tryAddColumn(db, 'tasks', 'assignedToUserId TEXT');
     tryAddColumn(db, 'tasks', 'assignedToName TEXT');
-    tryAddColumn(db, 'tasks', "assignmentDirection TEXT");
+    tryAddColumn(db, 'tasks', 'assignmentDirection TEXT');
     tryAddColumn(db, 'tasks', 'subtaskCount INTEGER NOT NULL DEFAULT 1');
     tryAddColumn(db, 'tasks', 'subtaskLabels TEXT');
     tryAddColumn(db, 'task_records', 'completedSubtasks INTEGER NOT NULL DEFAULT 0');
   }
 
+  if (currentVersion < 3) {
+    tryAddColumn(db, 'tasks', 'notes TEXT');
+    tryAddColumn(db, 'daily_notes', 'studyTimeText TEXT');
+  }
+
   if (currentVersion < 4) {
     tryAddColumn(db, 'tasks', 'description TEXT');
   }
+
+  // Bütünlük güvencesi: Tüm opsiyonel sütunların varlığından emin ol
+  ensureSchemaIntegrity(db);
 
   db.runSync(
     `INSERT INTO app_meta (key, value) VALUES ('schema_version', ?)

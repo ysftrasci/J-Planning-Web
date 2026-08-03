@@ -21,6 +21,7 @@ import NotificationSettingsPage from '../pages/NotificationSettingsPage.jsx';
 import DangerZonePage from '../pages/DangerZonePage.jsx';
 import VerifyEmailPage from '../pages/VerifyEmailPage.jsx';
 import DailyNotesPage from '../pages/DailyNotesPage.jsx';
+import AccountDeletionPendingModal from '../components/AccountDeletionPendingModal.jsx';
 import { useAuth } from '../context/AuthContext.jsx';
 
 // Aşama 0 kapsamında kurulan temel yönlendirme (routing) iskeleti,
@@ -78,10 +79,24 @@ function LoadingScreen() {
 // başka birinin e-postasıyla hesap açılsa bile o hesap gerçek kullanıma
 // asla geçemez (doğrulama linki her zaman e-postanın gerçek sahibine gider).
 function RequireAuth({ children }) {
-  const { user, initializing } = useAuth();
+  const { user, initializing, signOut } = useAuth();
   if (initializing) return <LoadingScreen />;
   if (!user) return <Navigate to="/login" replace />;
   if (!user.emailVerified) return <Navigate to="/verify-email" replace />;
+
+  if (user?.profile?.isDeleting === true) {
+    return (
+      <AccountDeletionPendingModal
+        open={true}
+        uid={user.uid}
+        onSuccess={() => {
+          window.location.href = '/login';
+        }}
+        onSignOut={signOut}
+      />
+    );
+  }
+
   return children;
 }
 
