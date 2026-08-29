@@ -20,3 +20,10 @@ yarn-error.log*
 *.suo
 *.ntvs*
 *.njsproj
+
+# Firebase Admin / Service Account Keys
+*serviceAccount*.json
+*firebase-admin*.json
+serviceAccountKey.json
+credentials/
+

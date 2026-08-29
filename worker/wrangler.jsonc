@@ -11,5 +11,12 @@
     "TURSO_GROUP": "jplanning",
     "FIREBASE_PROJECT_ID": "j-planning",
     "ALLOWED_ORIGINS": "http://localhost:5173,http://localhost:3000,https://j-planning-web.vercel.app,https://j-planning.vercel.app,https://j-planning.web.app,https://j-planning.firebaseapp.com"
-  }
+  },
+  "rules": [
+    {
+      "type": "Text",
+      "globs": ["**/*.sql"],
+      "fallthrough": true
+    }
+  ]
 }

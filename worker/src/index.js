@@ -87,6 +87,83 @@ async function verifyFirebaseToken(authHeader, projectId) {
 }
 
 /**
+ * Firebase ID Token içindeki admin claim'ini doğrular.
+ */
+async function verifyAdminClaim(authHeader, projectId) {
+  const { uid, payload } = await verifyFirebaseToken(authHeader, projectId);
+
+  if (payload.admin !== true) {
+    const forbiddenErr = new Error('Admin yetkisi bulunamadı');
+    forbiddenErr.isForbidden = true;
+    forbiddenErr.uid = uid;
+    throw forbiddenErr;
+  }
+
+  return { uid, payload };
+}
+
+/**
+ * Control Plane veritabanı istemcisini döndürür.
+ */
+function getControlPlaneClient(env) {
+  const org = env.TURSO_ORG;
+  const dbUrl = env.TURSO_CONTROL_DB_URL || `libsql://jplanning-control-${org}.turso.io`;
+  const dbToken = env.TURSO_CONTROL_DB_TOKEN || env.TURSO_PLATFORM_TOKEN;
+
+  if (!dbToken) {
+    return null;
+  }
+
+  return createClient({
+    url: dbUrl,
+    authToken: dbToken,
+  });
+}
+
+/**
+ * Kullanıcı giriş yaptığında (POST /session), meta verileri Control Plane DB'ye kaydeder/günceller.
+ * Bu işlem fire-and-forget şeklinde çalışır; ana akışı geciktirmez veya kesmez.
+ */
+async function syncUserToControlPlane(env, { uid, email, displayName, dbName }) {
+  try {
+    const client = getControlPlaneClient(env);
+    if (!client) {
+      return;
+    }
+
+    const now = Date.now();
+    const query = `
+      INSERT INTO admin_users_index (
+        uid, email, display_name, db_name, created_at, last_login_at, task_count, jp_balance, is_disabled, updated_at
+      ) VALUES (
+        ?, ?, ?, ?, ?, ?, 0, 0, 0, ?
+      )
+      ON CONFLICT(uid) DO UPDATE SET
+        email = excluded.email,
+        display_name = excluded.display_name,
+        db_name = excluded.db_name,
+        last_login_at = excluded.last_login_at,
+        updated_at = excluded.updated_at;
+    `;
+
+    await client.execute({
+      sql: query,
+      args: [
+        uid,
+        email || null,
+        displayName || null,
+        dbName,
+        now,
+        now,
+        now,
+      ],
+    });
+  } catch (err) {
+    console.error('[Worker Control Plane Sync Hatası]:', err.message);
+  }
+}
+
+/**
  * Turso Platform API Çağrısı Yardımcısı
  */
 async function callTursoPlatformApi(endpoint, env, options = {}) {
@@ -174,9 +251,6 @@ async function ensureUserDatabase(dbName, env) {
   }
 
   // 2. Kapsamı bu veritabanı ile sınırlı 1 saatlik full-access token üret
-  // Turso Platform API dokümantasyonu:
-  // POST /v1/organizations/{org}/databases/{db}/auth/tokens?expiration=1h&authorization=full-access
-  // NOT: Turso Platform API'sinde expiration ve authorization QUERY PARAMETER olarak gönderilmelidir!
   const tokenEndpoint = `/databases/${dbName}/auth/tokens?expiration=1h&authorization=full-access&permission=full-access`;
   const tokenRes = await callTursoPlatformApi(tokenEndpoint, env, {
     method: 'POST',
@@ -222,7 +296,7 @@ async function ensureUserDatabase(dbName, env) {
 }
 
 export default {
-  async fetch(request, env) {
+  async fetch(request, env, ctx) {
     const corsHeaders = getCorsHeaders(request, env);
 
     // CORS Preflight (OPTIONS) İsteği
@@ -248,6 +322,80 @@ export default {
       );
     }
 
+    // GET /admin/ping (Admin yetkisi doğrulama ve sağlık kontrolü)
+    if (request.method === 'GET' && url.pathname === '/admin/ping') {
+      try {
+        const authHeader = request.headers.get('Authorization');
+        const projectId = env.FIREBASE_PROJECT_ID || 'j-planning';
+
+        const { uid, payload } = await verifyAdminClaim(authHeader, projectId);
+
+        return jsonResponse(
+          {
+            success: true,
+            service: 'jplanning-admin',
+            message: 'Admin yetkisi başarıyla doğrulandı',
+            uid,
+            email: payload.email || null,
+            timestamp: new Date().toISOString(),
+          },
+          200,
+          corsHeaders
+        );
+      } catch (err) {
+        console.warn('[Worker /admin/ping Auth Error]:', err.message);
+
+        if (err.isForbidden) {
+          return jsonResponse(
+            {
+              error: 'FORBIDDEN',
+              message: 'Yetkisiz erişim: Bu işlem için yönetici (admin) yetkisi gereklidir.',
+            },
+            403,
+            corsHeaders
+          );
+        }
+
+        const isAuthError =
+          err.name?.startsWith('JWT') ||
+          err.name?.startsWith('JWS') ||
+          err.name?.startsWith('JWE') ||
+          err.code?.startsWith('ERR_JWT') ||
+          err.code?.startsWith('ERR_JWS') ||
+          err.code?.startsWith('ERR_JWE') ||
+          err.name === 'JWTExpired' ||
+          err.name === 'JWTClaimValidationFailed' ||
+          err.name === 'JWSSignatureVerificationFailed' ||
+          err.name === 'JWSInvalid' ||
+          err.message?.includes('Authorization') ||
+          err.message?.includes('Token') ||
+          err.message?.includes('token') ||
+          err.message?.includes('JWT') ||
+          err.message?.includes('jwt');
+
+        if (isAuthError) {
+          return jsonResponse(
+            {
+              error: 'UNAUTHORIZED',
+              message: 'Oturum doğrulanamadı veya süresi doldu. Lütfen tekrar giriş yapın.',
+            },
+            401,
+            corsHeaders
+          );
+        }
+
+        return jsonResponse(
+          {
+            error: 'INTERNAL_ERROR',
+            message: 'Doğrulama sırasında bir hata oluştu.',
+            detail: err.message,
+          },
+          500,
+          corsHeaders
+        );
+      }
+    }
+
     // POST /session (Firebase Token -> Turso DB & Scoped Token)
     if (request.method === 'POST' && url.pathname === '/session') {
       try {
@@ -255,13 +403,27 @@ export default {
         const projectId = env.FIREBASE_PROJECT_ID || 'j-planning';
 
         // 1. Firebase Token Doğrulama
-        const { uid } = await verifyFirebaseToken(authHeader, projectId);
+        const { uid, payload } = await verifyFirebaseToken(authHeader, projectId);
 
         // 2. Kullanıcıya özel DB adı
         const dbName = getDbNameForUser(uid);
 
         // 3. DB kontrolü / oluşturma & scoped token üretimi
         const sessionInfo = await ensureUserDatabase(dbName, env);
+
+        // 4. Control Plane sync (Fire-and-forget, ana akışı geciktirmez)
+        const syncPromise = syncUserToControlPlane(env, {
+          uid,
+          email: payload.email,
+          displayName: payload.name || payload.display_name,
+          dbName,
+        });
+
+        if (ctx?.waitUntil) {
+          ctx.waitUntil(syncPromise);
+        } else {
+          syncPromise.catch(() => {});
+        }
 
         return jsonResponse(
           {
@@ -279,11 +441,21 @@ export default {
         console.error('[Worker /session Error]:', err);
 
         const isAuthError =
+          err.name?.startsWith('JWT') ||
+          err.name?.startsWith('JWS') ||
+          err.name?.startsWith('JWE') ||
+          err.code?.startsWith('ERR_JWT') ||
+          err.code?.startsWith('ERR_JWS') ||
+          err.code?.startsWith('ERR_JWE') ||
           err.name === 'JWTExpired' ||
           err.name === 'JWTClaimValidationFailed' ||
           err.name === 'JWSSignatureVerificationFailed' ||
-          err.message.includes('Authorization') ||
-          err.message.includes('Token');
+          err.name === 'JWSInvalid' ||
+          err.message?.includes('Authorization') ||
+          err.message?.includes('Token') ||
+          err.message?.includes('token') ||
+          err.message?.includes('JWT') ||
+          err.message?.includes('jwt');
 
         if (isAuthError) {
           return jsonResponse(

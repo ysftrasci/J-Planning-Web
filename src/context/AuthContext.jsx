@@ -15,6 +15,7 @@ const AuthContext = createContext(null);
 
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
+  const [isAdmin, setIsAdmin] = useState(false);
   const [initializing, setInitializing] = useState(true);
   const [dbError, setDbError] = useState(null);
 
@@ -31,14 +32,20 @@ export function AuthProvider({ children }) {
         try {
           setDbError(null);
           
-          // Profil ve Turso veritabanını paralel başlat (Açılış süresini yarı yarıya düşür)
-          const [profile] = await Promise.all([
+          // Profil, Turso veritabanı ve Admin claim'i paralel başlat
+          const [profile, , tokenResult] = await Promise.all([
             ensureUserProfile(firebaseUser).catch((err) => {
               console.warn('Profil alma uyarısı:', err);
               return null;
             }),
             initDatabase(firebaseUser.uid),
+            firebaseUser.getIdTokenResult().catch((err) => {
+              console.warn('Admin claim sorgulanamadı:', err);
+              return { claims: {} };
+            }),
           ]);
+
+          setIsAdmin(Boolean(tokenResult?.claims?.admin));
 
           // =========================================================================
           // SOSYAL ÖZELLİK (%100 KORUNDU): Arkadaş Görev Atama Dinleyicisi
@@ -62,9 +69,11 @@ export function AuthProvider({ children }) {
           console.error('Giriş sonrası veritabanı hazırlığı başarısız:', error);
           setDbError(error.message || 'Veritabanı bağlantısı kurulamadı.');
           setUser(firebaseUser);
+          setIsAdmin(false);
         }
       } else {
         setUser(null);
+        setIsAdmin(false);
         setDbError(null);
       }
       setInitializing(false);
@@ -83,6 +92,22 @@ export function AuthProvider({ children }) {
       setUser({ ...auth.currentUser, profile });
     } catch (e) {
       console.warn('Profil yenilenemedi:', e);
+    }
+  };
+
+  const refreshAdminStatus = async () => {
+    if (!auth.currentUser) {
+      setIsAdmin(false);
+      return false;
+    }
+    try {
+      const tokenResult = await auth.currentUser.getIdTokenResult(true); // force refresh
+      const adminClaim = Boolean(tokenResult?.claims?.admin);
+      setIsAdmin(adminClaim);
+      return adminClaim;
+    } catch (err) {
+      console.warn('Admin yetkisi yenilenemedi:', err);
+      return false;
     }
   };
 
@@ -107,6 +132,7 @@ export function AuthProvider({ children }) {
         console.warn('Çıkışta push token temizlenemedi:', e);
       }
     }
+    setIsAdmin(false);
     await firebaseSignOut(auth);
   };
 
@@ -114,9 +140,11 @@ export function AuthProvider({ children }) {
     <AuthContext.Provider
       value={{
         user,
+        isAdmin,
         initializing,
         dbError,
         refreshProfile,
+        refreshAdminStatus,
         retryDatabaseConnection,
         signOut,
       }}

@@ -22,6 +22,7 @@ import DangerZonePage from '../pages/DangerZonePage.jsx';
 import VerifyEmailPage from '../pages/VerifyEmailPage.jsx';
 import DailyNotesPage from '../pages/DailyNotesPage.jsx';
 import AccountDeletionPendingModal from '../components/AccountDeletionPendingModal.jsx';
+import AdminPlaceholderPage from '../pages/admin/AdminPlaceholderPage.jsx';
 import { useAuth } from '../context/AuthContext.jsx';
 
 function LoadingScreen() {
@@ -75,6 +76,33 @@ function RequireAuth({ children }) {
   return children;
 }
 
+function RequireAdmin({ children }) {
+  const { user, isAdmin, initializing, signOut } = useAuth();
+  if (initializing) return <LoadingScreen />;
+  if (!user) return <Navigate to="/login" replace />;
+  if (!user.emailVerified) return <Navigate to="/verify-email" replace />;
+
+  if (user?.profile?.isDeleting === true) {
+    return (
+      <AccountDeletionPendingModal
+        open={true}
+        uid={user.uid}
+        onSuccess={() => {
+          window.location.href = '/login';
+        }}
+        onSignOut={signOut}
+      />
+    );
+  }
+
+  // Admin yetkisi yoksa, rota varlığını hissettirmeden ana sayfaya yönlendir
+  if (!isAdmin) {
+    return <Navigate to="/" replace />;
+  }
+
+  return children;
+}
+
 function RequireUnverified({ children }) {
   const { user, initializing } = useAuth();
   if (initializing) return <LoadingScreen />;
@@ -108,6 +136,15 @@ export default function AppRouter() {
           <RequireUnverified>
             <VerifyEmailPage />
           </RequireUnverified>
+        }
+      />
+      {/* Yönetici Paneli Rotası */}
+      <Route
+        path="admin"
+        element={
+          <RequireAdmin>
+            <AdminPlaceholderPage />
+          </RequireAdmin>
         }
       />
       <Route
