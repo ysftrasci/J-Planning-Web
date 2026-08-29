@@ -10,6 +10,9 @@ yarn-error.log*
 .env
 .env.local
 .env.*.local
+.dev.vars
+.dev.vars.*
+.wrangler/
 
 # Editor
 .vscode/*

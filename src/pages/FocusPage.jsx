@@ -75,9 +75,9 @@ export default function FocusPage() {
     triggerConfetti();
     const jp = calculateFocusSessionJP(selectedMinutes);
     if (jp > 0) {
-      addWalletTransaction('me', jp, 'FOCUS_SESSION');
+      await addWalletTransaction('me', jp, 'FOCUS_SESSION');
     }
-    recordFocusSession({
+    await recordFocusSession({
       durationMinutes: selectedMinutes,
       soundKey: selectedSound,
       jpEarned: jp,

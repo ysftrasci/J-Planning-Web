@@ -12,18 +12,31 @@ export default function DangerZonePage() {
   const [rows, setRows] = useState([]);
 
   useEffect(() => {
-    const tasks = getActiveTasks();
-    const data = tasks
-      .map((task) => {
-        const records = getTaskRecords(task.id);
-        const total = records.length;
-        const failed = records.filter((r) => r.status === 'FAILED').length;
-        const rate = total > 0 ? Math.round((failed / total) * 100) : 0;
-        return { task, failed, total, rate };
-      })
-      .filter((r) => r.rate >= DANGER_ZONE_THRESHOLD)
-      .sort((a, b) => b.rate - a.rate);
-    setRows(data);
+    let mounted = true;
+    async function loadDangerData() {
+      try {
+        const tasks = (await getActiveTasks()) || [];
+        const taskDataList = await Promise.all(
+          tasks.map(async (task) => {
+            const records = (await getTaskRecords(task.id)) || [];
+            const total = records.length;
+            const failed = records.filter((r) => r.status === 'FAILED').length;
+            const rate = total > 0 ? Math.round((failed / total) * 100) : 0;
+            return { task, failed, total, rate };
+          })
+        );
+        const data = taskDataList
+          .filter((r) => r.rate >= DANGER_ZONE_THRESHOLD)
+          .sort((a, b) => b.rate - a.rate);
+        if (mounted) setRows(data);
+      } catch (err) {
+        console.error('Tehlikeli alan verisi yüklenirken hata:', err);
+      }
+    }
+    loadDangerData();
+    return () => {
+      mounted = false;
+    };
   }, []);
 
   return (

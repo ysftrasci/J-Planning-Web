@@ -1,34 +1,19 @@
-// J-Planning — SQLite Veritabanı Katmanı (Web)
-// Mobildeki src/db/database.js dosyasının web karşılığı. Şema ve migration
-// mantığı BİREBİR aynı — sadece motor expo-sqlite yerine sql.js + IndexedDB
-// (bkz. sqliteEngine.js).
+// J-Planning — SQLite / Turso Veritabanı Katmanı (Web)
 //
-// ÖNEMLİ: Veritabanı KULLANICIYA ÖZELDİR. Aynı tarayıcıda birden fazla hesaba
-// (ör. aile üyeleri) giriş yapılabildiği için, her kullanıcının görevleri
-// ayrı bir sql.js veritabanında saklanır (jplanning_{uid}.db — bu isim artık
-// bir dosya değil, IndexedDB'deki anahtar/kayıt adıdır). Bu sayede bir
-// hesaptan çıkıp başka hesapla girildiğinde görevler asla karışmaz.
-// initDatabase(uid) uygulama açılışında DEĞİL, kullanıcı giriş yaptıktan
-// SONRA (AuthContext üzerinden) çağrılmalıdır.
-//
-// FARK (mobile -> web): expo-sqlite'ın openDatabaseSync'i senkrondu; sql.js'in
-// ilk yüklenmesi (wasm) ve IndexedDB'den okuma asenkron olduğu için
-// switchToUserDatabase ve initDatabase burada ASYNC fonksiyonlardır. Bunun
-// dışında (execSync/runSync/getFirstSync/getAllSync) tüm çağrılar senkron
-// kalmaya devam eder — repository dosyaları neredeyse değişmeden taşınabildi.
+// Cloudflare Worker üzerinden sağlanan scoped token ile kullanıcının
+// Turso veritabanına bağlanır. Şema kurulumu ilk açılışta Worker tarafından
+// yapıldığı için istemci sadece bağlantıyı kurar ve varsayılan kayıtları garanti eder.
 
-import { openSqliteConnection, deleteDatabaseBytes } from './sqliteEngine';
+import { openTursoConnection } from './sqliteEngine';
 import { ensureDefaultCategories } from './categoryRepository';
+import { migrateLegacyDataIfNeeded } from './migrationService';
+import { auth } from '../services/firebase';
 
 let dbInstance = null;
 let currentUid = null;
+let currentSession = null; // { dbUrl, token, expiresAt, uid }
 
-function dbNameForUser(uid) {
-  // İsimde sorun çıkarabilecek karakterleri (Firebase uid'leri genelde
-  // güvenlidir ama önlem amaçlı) temizle.
-  const safeUid = String(uid).replace(/[^a-zA-Z0-9_-]/g, '');
-  return `jplanning_${safeUid}.db`;
-}
+const WORKER_URL = (import.meta.env.VITE_WORKER_URL || 'https://jplanning-auth-worker.ysftrasci.workers.dev').replace(/\/+$/, '');
 
 export function getDb() {
   if (!dbInstance) {
@@ -37,239 +22,144 @@ export function getDb() {
   return dbInstance;
 }
 
-// Kullanıcı değiştiğinde (giriş/çıkış) önceki bağlantıyı kapatıp, yeni
-// kullanıcının kendi veritabanını açar. Aynı kullanıcı için tekrar
-// çağrılırsa (ör. React StrictMode / hot reload) mevcut bağlantı yeniden kullanılır.
-export async function switchToUserDatabase(uid) {
-  if (currentUid === uid && dbInstance) {
-    return dbInstance;
+/**
+ * Worker'dan kullanıcı için DB URL ve scoped token alır (sessionStorage ile önbelleklenir).
+ */
+async function requestWorkerSession(forceFreshIdToken = false) {
+  const currentUser = auth.currentUser;
+  if (!currentUser) {
+    throw new Error('Oturum açmış bir Firebase kullanıcısı bulunamadı.');
   }
+
+  // Önbellek kontrolü (en az 5 dakika geçerli token varsa Worker'a tekrar gitme)
+  if (!forceFreshIdToken) {
+    try {
+      const cachedStr = sessionStorage.getItem(`jplanning_session_${currentUser.uid}`);
+      if (cachedStr) {
+        const cached = JSON.parse(cachedStr);
+        const nowSec = Math.floor(Date.now() / 1000);
+        if (cached.dbUrl && cached.token && cached.expiresAt && cached.expiresAt > nowSec + 300) {
+          return cached;
+        }
+      }
+    } catch (_) {}
+  }
+
+  const idToken = await currentUser.getIdToken(forceFreshIdToken);
+  const response = await fetch(`${WORKER_URL}/session`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${idToken}`,
+    },
+  });
+
+  if (!response.ok) {
+    let errMessage = `Worker oturum hatası (${response.status})`;
+    try {
+      const errData = await response.json();
+      if (errData.message) errMessage = errData.message;
+    } catch (_) {}
+    throw new Error(errMessage);
+  }
+
+  const data = await response.json();
+  if (!data.dbUrl || !data.token) {
+    throw new Error('Worker yanıtında dbUrl veya token bulunamadı.');
+  }
+
+  const session = {
+    dbUrl: data.dbUrl,
+    token: data.token,
+    expiresAt: data.expiresAt || Math.floor(Date.now() / 1000) + 3600,
+    uid: currentUser.uid,
+  };
+
+  try {
+    sessionStorage.setItem(`jplanning_session_${currentUser.uid}`, JSON.stringify(session));
+  } catch (_) {}
+
+  return session;
+}
+
+/**
+ * Token Yöneticisi: Proaktif ve reaktif token tazeleme
+ */
+const tokenManager = {
+  getToken: () => currentSession?.token || null,
+  getDbUrl: () => currentSession?.dbUrl || null,
+  getExpiresAt: () => currentSession?.expiresAt || 0,
+  refreshToken: async () => {
+    const session = await requestWorkerSession(true);
+    currentSession = session;
+    return session.token;
+  },
+};
+
+/**
+ * Belirtilen UID için Turso bağlantısını açar veya mevcut olanı döndürür.
+ */
+export async function switchToUserDatabase(uid) {
+  if (dbInstance && currentUid === uid) {
+    const token = await tokenManager.getToken();
+    if (token) return dbInstance;
+  }
+
   if (dbInstance) {
     try {
-      dbInstance.closeSync();
-    } catch (e) {
-      // Bağlantı zaten kapalıysa görmezden gel.
-    }
+      dbInstance.close();
+    } catch (_) {}
   }
-  dbInstance = await openSqliteConnection(dbNameForUser(uid));
+
+  const session = await requestWorkerSession();
+  currentSession = session;
   currentUid = uid;
+
+  dbInstance = openTursoConnection(session.dbUrl, session.token, tokenManager);
   return dbInstance;
 }
 
-// Hesap silme akışında (services/deleteAccountService.js) kullanılır.
-// Kullanıcının yerel SQLite veritabanını (görevler, kategoriler, ödüller,
-// odaklanma geçmişi) IndexedDB'den tamamen kaldırır. Önce açık bağlantı
-// varsa kapatılır, aksi halde IndexedDB üzerinde kilit/tutarsızlık oluşabilir.
-export async function deleteUserDatabase(uid) {
-  if (currentUid === uid && dbInstance) {
-    try {
-      dbInstance.closeSync();
-    } catch (e) {
-      // Bağlantı zaten kapalıysa görmezden gel.
-    }
-    dbInstance = null;
-    currentUid = null;
-  }
-  await deleteDatabaseBytes(dbNameForUser(uid));
-}
-
-// Görev periyodu: DAILY | WEEKLY | MONTHLY
-// Görev durumu: PENDING (süresi devam ediyor) | SUCCESSFUL | FAILED
-// Öncelik: HIGH | MEDIUM | LOW  (JP karşılığı: 5 / 3 / 1 — bkz. utils/rewards.js)
-// Alt görev (subtask): bir periyodun kaç kez yapılması gerektiği (ör. diş fırçalama
-// günde 2 kez). subtaskCount=1 ise normal (eski) davranışla birebir aynı.
-
-const CURRENT_SCHEMA_VERSION = 4;
-
+/**
+ * Veritabanını başlatır, gerekirse eski verileri taşır ve varsayılan kayıtları kontrol eder.
+ */
 export async function initDatabase(uid) {
   const db = await switchToUserDatabase(uid);
 
-  db.execSync(`
-    CREATE TABLE IF NOT EXISTS categories (
-      id TEXT PRIMARY KEY,
-      name TEXT NOT NULL,
-      color TEXT,
-      createdAt INTEGER NOT NULL
-    );
-
-    CREATE TABLE IF NOT EXISTS tasks (
-      id TEXT PRIMARY KEY,
-      title TEXT NOT NULL,
-      description TEXT,
-      categoryId TEXT,
-      priority TEXT NOT NULL DEFAULT 'MEDIUM',       -- HIGH | MEDIUM | LOW
-      period TEXT NOT NULL DEFAULT 'DAILY',          -- DAILY | WEEKLY | MONTHLY
-      ownerUserId TEXT NOT NULL DEFAULT 'me',        -- 'me' ya da arkadaşın userId'si
-      assignedByUserId TEXT,                         -- görevi atayan kişi (sosyal özellik)
-      assignedByName TEXT,
-      assignedToUserId TEXT,                         -- görevi kabul edip yürüten kişi (ben)
-      assignedToName TEXT,
-      assignmentDirection TEXT,                      -- NULL | 'SENT' (ben attım) | 'RECEIVED' (bana atandı)
-      firestoreAssignmentId TEXT,                     -- RECEIVED görevlerde: Firestore'daki assignedTasks/{id} referansı.
-                                                       -- Tamamlama/geri alma işlemleri bu ID üzerinden Firestore'a da yansıtılır,
-                                                       -- böylece atayan taraf gerçek zamanlı olarak görebilir.
-      assignmentStatus TEXT NOT NULL DEFAULT 'NONE', -- NONE | PENDING_ACCEPT | ACCEPTED
-      subtaskCount INTEGER NOT NULL DEFAULT 1,       -- bir periyotta kaç kez yapılması gerektiği
-      subtaskLabels TEXT,                            -- JSON dizi, ör: '["Sabah","Akşam"]'; boşsa sadece sayı gösterilir
-      isArchived INTEGER NOT NULL DEFAULT 0,
-      createdAt INTEGER NOT NULL,
-      FOREIGN KEY (categoryId) REFERENCES categories(id)
-    );
-
-    -- Her periyot (gün/hafta/ay) için tek kayıt tutulur. periodKey = o periyodun başlangıç tarihi (YYYY-MM-DD)
-    CREATE TABLE IF NOT EXISTS task_records (
-      id TEXT PRIMARY KEY,
-      taskId TEXT NOT NULL,
-      periodKey TEXT NOT NULL,
-      status TEXT NOT NULL,               -- SUCCESSFUL | FAILED
-      completedSubtasks INTEGER NOT NULL DEFAULT 0,  -- bu periyotta kaç alt adım tamamlandı
-      completedAt INTEGER,                -- gerçekten (tamamen) işaretlendiği an
-      isLateMarked INTEGER NOT NULL DEFAULT 0,  -- 1.5 kuralı: geçmişe dönük düzeltme mi?
-      lateMarkedAt INTEGER,
-      jpEarned INTEGER NOT NULL DEFAULT 0,
-      streakBonusEarned INTEGER NOT NULL DEFAULT 0,
-      FOREIGN KEY (taskId) REFERENCES tasks(id),
-      UNIQUE(taskId, periodKey)
-    );
-
-    CREATE TABLE IF NOT EXISTS wallet (
-      userId TEXT PRIMARY KEY,
-      balance INTEGER NOT NULL DEFAULT 0
-    );
-
-    CREATE TABLE IF NOT EXISTS wallet_transactions (
-      id TEXT PRIMARY KEY,
-      userId TEXT NOT NULL,
-      amount INTEGER NOT NULL,           -- pozitif: kazanç, negatif: harcama
-      reason TEXT NOT NULL,              -- 'TASK_COMPLETE' | 'STREAK_BONUS' | 'REWARD_REDEEM' | 'FOCUS_SESSION'
-      relatedTaskId TEXT,
-      relatedRewardId TEXT,
-      createdAt INTEGER NOT NULL
-    );
-
-    CREATE TABLE IF NOT EXISTS rewards (
-      id TEXT PRIMARY KEY,
-      title TEXT NOT NULL,
-      description TEXT,
-      cost INTEGER NOT NULL,
-      ownerUserId TEXT NOT NULL DEFAULT 'me',
-      assignedByUserId TEXT,
-      assignedByName TEXT,
-      assignmentStatus TEXT NOT NULL DEFAULT 'NONE',  -- NONE | PENDING_ACCEPT | ACCEPTED
-      isRedeemed INTEGER NOT NULL DEFAULT 0,
-      redeemedAt INTEGER,
-      createdAt INTEGER NOT NULL
-    );
-
-    CREATE TABLE IF NOT EXISTS friends (
-      id TEXT PRIMARY KEY,
-      friendUserId TEXT NOT NULL,
-      friendDisplayName TEXT NOT NULL,
-      friendCode TEXT NOT NULL,
-      status TEXT NOT NULL DEFAULT 'ACCEPTED', -- PENDING_SENT | PENDING_RECEIVED | ACCEPTED
-      createdAt INTEGER NOT NULL
-    );
-
-    -- Her başarıyla tamamlanan (erken bitirilmemiş) odaklanma seansı ayrı bir
-    -- kayıt olarak saklanır. Görevlerdeki gibi periyot/tekrar kavramı yok —
-    -- her seans bağımsız bir olay. monthKey (YYYY-MM) ile ay bazlı filtreleme
-    -- kolaylaştırılır.
-    CREATE TABLE IF NOT EXISTS focus_sessions (
-      id TEXT PRIMARY KEY,
-      durationMinutes INTEGER NOT NULL,
-      soundKey TEXT,
-      jpEarned INTEGER NOT NULL DEFAULT 0,
-      monthKey TEXT NOT NULL,
-      completedAt INTEGER NOT NULL
-    );
-
-    CREATE TABLE IF NOT EXISTS task_study_logs (
-      id TEXT PRIMARY KEY,
-      taskId TEXT NOT NULL,
-      periodKey TEXT NOT NULL,
-      studyTimeText TEXT NOT NULL,
-      createdAt INTEGER NOT NULL,
-      updatedAt INTEGER NOT NULL,
-      FOREIGN KEY (taskId) REFERENCES tasks(id)
-    );
-
-    CREATE TABLE IF NOT EXISTS daily_notes (
-      id TEXT PRIMARY KEY,
-      dateKey TEXT UNIQUE NOT NULL,
-      content TEXT NOT NULL,
-      createdAt INTEGER NOT NULL,
-      updatedAt INTEGER NOT NULL
-    );
-
-    CREATE TABLE IF NOT EXISTS app_meta (
-      key TEXT PRIMARY KEY,
-      value TEXT
-    );
-  `);
-
-  runMigrations(db);
-
-  // Varsayılan kategorilerin (YKS dahil) var olduğundan emin ol
-  ensureDefaultCategories();
-
-  // "me" için cüzdan kaydı yoksa oluştur
-  const existing = db.getFirstSync('SELECT userId FROM wallet WHERE userId = ?', ['me']);
-  if (!existing) {
-    db.runSync('INSERT INTO wallet (userId, balance) VALUES (?, 0)', ['me']);
-  }
-}
-
-// Eski (v1) yüklemelerde eksik olan sütunları güvenli şekilde ekler.
-// SQLite'ta "ADD COLUMN IF NOT EXISTS" yok, bu yüzden hata yutularak denenir.
-function tryAddColumn(db, table, columnDef) {
+  // 1. Önce eski verileri (IndexedDB veya Firestore'dan) Turso'ya taşı
   try {
-    db.execSync(`ALTER TABLE ${table} ADD COLUMN ${columnDef}`);
-  } catch (e) {
-    // Sütun zaten varsa hata verir, bu beklenen ve zararsızdır.
+    await migrateLegacyDataIfNeeded(uid, db);
+  } catch (migErr) {
+    console.error('[Migration] Migrasyon sırasında beklenmeyen hata:', migErr);
   }
+
+  // 2. Varsayılan kategorileri ve cüzdanı paralel kontrol et
+  await Promise.all([
+    ensureDefaultCategories().catch((e) => console.warn('Varsayılan kategoriler uyarısı:', e)),
+    db.getFirstAsync('SELECT userId FROM wallet WHERE userId = ?', ['me'])
+      .then((existing) => {
+        if (!existing) {
+          return db.runAsync('INSERT INTO wallet (userId, balance) VALUES (?, 0)', ['me']);
+        }
+      })
+      .catch((e) => console.warn('Cüzdan kontrolü uyarısı:', e)),
+  ]);
+
+  return db;
 }
 
-// Tüm versiyonlarda eklenmiş olması gereken opsiyonel sütunların varlığını garanti eder
-function ensureSchemaIntegrity(db) {
-  tryAddColumn(db, 'tasks', 'assignedToUserId TEXT');
-  tryAddColumn(db, 'tasks', 'assignedToName TEXT');
-  tryAddColumn(db, 'tasks', 'assignmentDirection TEXT');
-  tryAddColumn(db, 'tasks', 'subtaskCount INTEGER NOT NULL DEFAULT 1');
-  tryAddColumn(db, 'tasks', 'subtaskLabels TEXT');
-  tryAddColumn(db, 'tasks', 'notes TEXT');
-  tryAddColumn(db, 'tasks', 'description TEXT');
-  tryAddColumn(db, 'task_records', 'completedSubtasks INTEGER NOT NULL DEFAULT 0');
-  tryAddColumn(db, 'daily_notes', 'studyTimeText TEXT');
-}
-
-function runMigrations(db) {
-  const row = db.getFirstSync(`SELECT value FROM app_meta WHERE key = 'schema_version'`);
-  const currentVersion = row ? parseInt(row.value, 10) : 1;
-
-  if (currentVersion < 2) {
-    tryAddColumn(db, 'tasks', 'assignedToUserId TEXT');
-    tryAddColumn(db, 'tasks', 'assignedToName TEXT');
-    tryAddColumn(db, 'tasks', 'assignmentDirection TEXT');
-    tryAddColumn(db, 'tasks', 'subtaskCount INTEGER NOT NULL DEFAULT 1');
-    tryAddColumn(db, 'tasks', 'subtaskLabels TEXT');
-    tryAddColumn(db, 'task_records', 'completedSubtasks INTEGER NOT NULL DEFAULT 0');
+/**
+ * Hesap silme akışında bağlantıyı kapatır.
+ */
+export async function deleteUserDatabase(uid) {
+  try {
+    sessionStorage.removeItem(`jplanning_session_${uid}`);
+  } catch (_) {}
+  if (currentUid === uid && dbInstance) {
+    try {
+      dbInstance.close();
+    } catch (_) {}
+    dbInstance = null;
+    currentUid = null;
+    currentSession = null;
   }
-
-  if (currentVersion < 3) {
-    tryAddColumn(db, 'tasks', 'notes TEXT');
-    tryAddColumn(db, 'daily_notes', 'studyTimeText TEXT');
-  }
-
-  if (currentVersion < 4) {
-    tryAddColumn(db, 'tasks', 'description TEXT');
-  }
-
-  // Bütünlük güvencesi: Tüm opsiyonel sütunların varlığından emin ol
-  ensureSchemaIntegrity(db);
-
-  db.runSync(
-    `INSERT INTO app_meta (key, value) VALUES ('schema_version', ?)
-     ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
-    [String(CURRENT_SCHEMA_VERSION)]
-  );
 }

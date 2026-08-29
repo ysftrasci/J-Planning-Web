@@ -17,7 +17,15 @@ export default function RewardHistoryPage() {
   const [rewards, setRewards] = useState([]);
 
   useEffect(() => {
-    setRewards(getRedeemedRewards());
+    let mounted = true;
+    getRedeemedRewards()
+      .then((list) => {
+        if (mounted) setRewards(list || []);
+      })
+      .catch((err) => console.error('Ödül geçmişi yüklenemedi:', err));
+    return () => {
+      mounted = false;
+    };
   }, []);
 
   return (

@@ -15,17 +15,28 @@ export default function CategoriesPage() {
   const [showAddModal, setShowAddModal] = useState(false);
   const [categoryToDelete, setCategoryToDelete] = useState(null);
 
-  const load = useCallback(() => {
-    setCategories(getCategories());
+  const load = useCallback(async () => {
+    try {
+      const list = await getCategories();
+      setCategories(list);
+    } catch (e) {
+      console.error('Kategoriler yüklenemedi:', e);
+    }
   }, []);
 
-  useEffect(load, [load]);
-
-  const confirmDelete = () => {
-    if (!categoryToDelete) return;
-    deleteCategory(categoryToDelete.id);
-    setCategoryToDelete(null);
+  useEffect(() => {
     load();
+  }, [load]);
+
+  const confirmDelete = async () => {
+    if (!categoryToDelete) return;
+    try {
+      await deleteCategory(categoryToDelete.id);
+      setCategoryToDelete(null);
+      await load();
+    } catch (e) {
+      console.error('Kategori silinemedi:', e);
+    }
   };
 
   return (
@@ -70,9 +81,9 @@ export default function CategoriesPage() {
       <AddCategoryModal
         open={showAddModal}
         onClose={() => setShowAddModal(false)}
-        onSaved={() => {
+        onSaved={async () => {
           setShowAddModal(false);
-          load();
+          await load();
         }}
       />
 
@@ -98,25 +109,34 @@ function AddCategoryModal({ open, onClose, onSaved }) {
   const [name, setName] = useState('');
   const [color, setColor] = useState(COLOR_OPTIONS[0]);
   const [errorMessage, setErrorMessage] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   const handleClose = () => {
     setName('');
     setColor(COLOR_OPTIONS[0]);
     setErrorMessage('');
+    setIsSubmitting(false);
     onClose();
   };
 
-  const handleSave = (e) => {
+  const handleSave = async (e) => {
     e.preventDefault();
     if (!name.trim()) {
       setErrorMessage('Lütfen kategori adı gir.');
       return;
     }
-    createCategory(name.trim(), color);
-    setName('');
-    setColor(COLOR_OPTIONS[0]);
-    setErrorMessage('');
-    onSaved();
+    try {
+      setIsSubmitting(true);
+      await createCategory(name.trim(), color);
+      setName('');
+      setColor(COLOR_OPTIONS[0]);
+      setErrorMessage('');
+      setIsSubmitting(false);
+      onSaved();
+    } catch (err) {
+      setIsSubmitting(false);
+      setErrorMessage(err.message || 'Kategori eklenemedi.');
+    }
   };
 
   return (
@@ -129,6 +149,7 @@ function AddCategoryModal({ open, onClose, onSaved }) {
           value={name}
           onChange={(e) => setName(e.target.value)}
           autoFocus
+          disabled={isSubmitting}
         />
         {errorMessage && <p className="categories-page__error">{errorMessage}</p>}
         <div className="categories-page__color-row">
@@ -137,6 +158,7 @@ function AddCategoryModal({ open, onClose, onSaved }) {
               type="button"
               key={c}
               onClick={() => setColor(c)}
+              disabled={isSubmitting}
               aria-label={`Renk seç: ${c}`}
               className={`categories-page__color-option ${color === c ? 'categories-page__color-option--selected' : ''}`}
               style={{ backgroundColor: c }}
@@ -144,8 +166,8 @@ function AddCategoryModal({ open, onClose, onSaved }) {
           ))}
         </div>
         <div className="categories-page__modal-actions">
-          <AppButton type="button" title="Vazgeç" variant="ghost" onClick={handleClose} />
-          <AppButton type="submit" title="Kaydet" />
+          <AppButton type="button" title="Vazgeç" variant="ghost" onClick={handleClose} disabled={isSubmitting} />
+          <AppButton type="submit" title={isSubmitting ? 'Kaydediliyor...' : 'Kaydet'} disabled={isSubmitting} />
         </div>
       </form>
     </AppModal>

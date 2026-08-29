@@ -1,180 +1,145 @@
-// J-Planning — sql.js + IndexedDB Motoru (Web)
+// J-Planning — Turso SQLite Motoru (Web)
 //
-// Mobildeki expo-sqlite'ın senkron API'sini (execSync / runSync / getFirstSync /
-// getAllSync / closeSync) taklit eden ince bir sarmalayıcı. Böylece database.js
-// ve repository dosyaları mobil koddan neredeyse değişmeden taşınabiliyor.
+// Eski sql.js + IndexedDB motorunun yerini alan, doğrudan Turso bulut
+// veritabanı ile HTTP/Web fetch protokolü üzerinden haberleşen asenkron motor.
 //
-// ÇALIŞMA MANTIĞI:
-// - sql.js tarayıcıda WebAssembly ile çalışan, bellek-içi bir SQLite motorudur.
-//   Kendi başına diske/IndexedDB'ye yazmaz — veritabanının tamamı bir
-//   Uint8Array (byte dizisi) olarak bellekte tutulur.
-// - Uygulama açılışında (initSqliteDatabase) bu byte dizisi IndexedDB'den
-//   okunur (varsa) ve sql.js'e yüklenir; yoksa boş bir veritabanı oluşturulur.
-// - Her yazma işleminden (INSERT/UPDATE/DELETE) sonra, güncel byte dizisi
-//   IndexedDB'ye geri yazılır (persistNow / persistDebounced). Bu sayede
-//   tarayıcı kapansa bile veri kalıcı olur.
-// - sql.js'in kendi API'si senkron (db.run/db.exec) olduğu için, IndexedDB'ye
-//   yazma dışındaki tüm işlemler (execSync/runSync/getFirstSync/getAllSync)
-//   gerçekten senkrondur — mobildeki kodla birebir aynı şekilde çağrılabilir.
-//   Sadece motorun İLK YÜKLENMESİ (initSqliteDatabase) asenkrondur.
+// Özellikler:
+// 1. Asenkron Sorgu İcrası: @libsql/client/web üzerinden executeMultiple ve execute.
+// 2. Proaktif Token Kontrolü: Token süresi bitmeden önce otomatik yenileme.
+// 3. Reaktif 401 Yeniden Deneme: 401 Unauthorized durumunda anında token tazeleyip sorguyu tekrarlama.
 
-import initSqlJs from 'sql.js';
-import sqlWasmUrl from 'sql.js/dist/sql-wasm.wasm?url';
-import { openDB } from 'idb';
+import { createClient } from '@libsql/client/web';
 
-const IDB_NAME = 'jplanning-sqlite-store';
-const IDB_VERSION = 1;
-const IDB_STORE = 'databases';
-
-let SQL = null; // sql.js modülü (initSqlJs sonucu), bir kez yüklenir ve paylaşılır
-let idbPromise = null;
-
-function getIdb() {
-  if (!idbPromise) {
-    idbPromise = openDB(IDB_NAME, IDB_VERSION, {
-      upgrade(database) {
-        if (!database.objectStoreNames.contains(IDB_STORE)) {
-          database.createObjectStore(IDB_STORE);
-        }
-      },
+export class TursoConnection {
+  constructor(dbUrl, token, tokenManager = null) {
+    this._dbUrl = dbUrl;
+    this._token = token;
+    this._tokenManager = tokenManager;
+    this._client = createClient({
+      url: this._dbUrl,
+      authToken: this._token,
     });
-  }
-  return idbPromise;
-}
-
-async function loadDatabaseBytes(dbName) {
-  const idb = await getIdb();
-  const bytes = await idb.get(IDB_STORE, dbName);
-  return bytes || null;
-}
-
-async function saveDatabaseBytes(dbName, bytes) {
-  const idb = await getIdb();
-  await idb.put(IDB_STORE, bytes, dbName);
-}
-
-// SqliteConnection: expo-sqlite'ın openDatabaseSync sonucuna benzer bir arayüz sunar.
-class SqliteConnection {
-  constructor(sqlJsDb, dbName) {
-    this._db = sqlJsDb;
-    this._dbName = dbName;
-    this._pendingPersist = null;
     this._closed = false;
   }
 
-  // Birden fazla ifadeyi (statement) ; ile ayrılmış şekilde çalıştırır.
-  // Dönüş değeri yoktur (mobildeki execSync ile aynı davranış).
-  execSync(sql) {
-    this._db.run(sql);
-    this._schedulePersist();
+  // Token yöneticisi üzerinden token'ı güncelle ve yeni istemci oluştur
+  updateToken(newToken) {
+    this._token = newToken;
+    this._client = createClient({
+      url: this._dbUrl,
+      authToken: this._token,
+    });
   }
 
-  // Parametreli TEK bir INSERT/UPDATE/DELETE çalıştırır.
-  runSync(sql, params = []) {
-    const stmt = this._db.prepare(sql);
-    try {
-      stmt.bind(params);
-      stmt.step();
-    } finally {
-      stmt.free();
+  _isAuthError(err) {
+    if (!err) return false;
+    const msg = String(err.message || err).toLowerCase();
+    return (
+      msg.includes('unauthorized') ||
+      msg.includes('401') ||
+      msg.includes('expired') ||
+      msg.includes('jwt') ||
+      msg.includes('token')
+    );
+  }
+
+  async _ensureValidToken() {
+    if (this._tokenManager?.ensureFreshToken) {
+      const freshToken = await this._tokenManager.ensureFreshToken();
+      if (freshToken && freshToken !== this._token) {
+        this.updateToken(freshToken);
+      }
     }
-    this._schedulePersist();
+  }
+
+  async _refreshToken() {
+    if (this._tokenManager?.forceRefreshToken) {
+      const newToken = await this._tokenManager.forceRefreshToken();
+      if (newToken) {
+        this.updateToken(newToken);
+      }
+    }
+  }
+
+  // Birden fazla SQL ifadesini ; ile ayrılmış şekilde çalıştırır.
+  async execAsync(sql) {
+    if (this._closed) throw new Error('Veritabanı bağlantısı kapalı.');
+    await this._ensureValidToken();
+    try {
+      return await this._client.executeMultiple(sql);
+    } catch (err) {
+      if (this._isAuthError(err)) {
+        await this._refreshToken();
+        return await this._client.executeMultiple(sql);
+      }
+      throw err;
+    }
+  }
+
+  // Parametreli tek bir INSERT/UPDATE/DELETE/SELECT çalıştırır.
+  async runAsync(sql, params = []) {
+    if (this._closed) throw new Error('Veritabanı bağlantısı kapalı.');
+    await this._ensureValidToken();
+    try {
+      return await this._client.execute({ sql, args: params });
+    } catch (err) {
+      if (this._isAuthError(err)) {
+        await this._refreshToken();
+        return await this._client.execute({ sql, args: params });
+      }
+      throw err;
+    }
   }
 
   // Parametreli bir SELECT çalıştırıp İLK satırı (obje olarak) döndürür, yoksa null.
-  getFirstSync(sql, params = []) {
-    const stmt = this._db.prepare(sql);
-    try {
-      stmt.bind(params);
-      if (stmt.step()) {
-        return stmt.getAsObject();
-      }
-      return null;
-    } finally {
-      stmt.free();
-    }
+  async getFirstAsync(sql, params = []) {
+    const result = await this.runAsync(sql, params);
+    return result.rows && result.rows.length > 0 ? result.rows[0] : null;
   }
 
   // Parametreli bir SELECT çalıştırıp TÜM satırları (obje dizisi) döndürür.
-  getAllSync(sql, params = []) {
-    const stmt = this._db.prepare(sql);
-    const rows = [];
-    try {
-      stmt.bind(params);
-      while (stmt.step()) {
-        rows.push(stmt.getAsObject());
-      }
-    } finally {
-      stmt.free();
-    }
-    return rows;
+  async getAllAsync(sql, params = []) {
+    const result = await this.runAsync(sql, params);
+    return result.rows ? Array.from(result.rows) : [];
   }
 
-  // Bağlantıyı kapatır. Kapatmadan önce bekleyen bir persist varsa hemen uygulanır.
-  closeSync() {
-    if (this._closed) return;
-    this._persistNow();
-    this._db.close();
+  // Kısa isimlendirme aliasları
+  async exec(sql) {
+    return this.execAsync(sql);
+  }
+  async run(sql, params) {
+    return this.runAsync(sql, params);
+  }
+  async getFirst(sql, params) {
+    return this.getFirstAsync(sql, params);
+  }
+  async getAll(sql, params) {
+    return this.getAllAsync(sql, params);
+  }
+
+  // Eski senkron metodları çağıran yerler için uyarıcı hata
+  execSync() {
+    throw new Error('Turso bağlantısı asenkrondur. Lütfen await execAsync(...) kullanın.');
+  }
+  runSync() {
+    throw new Error('Turso bağlantısı asenkrondur. Lütfen await runAsync(...) kullanın.');
+  }
+  getFirstSync() {
+    throw new Error('Turso bağlantısı asenkrondur. Lütfen await getFirstAsync(...) kullanın.');
+  }
+  getAllSync() {
+    throw new Error('Turso bağlantısı asenkrondur. Lütfen await getAllAsync(...) kullanın.');
+  }
+
+  close() {
     this._closed = true;
   }
 
-  // Yazma işleminden hemen sonra IndexedDB'ye kaydetmeyi tetikler.
-  // Art arda gelen çok sayıda yazmada (ör. toplu görev tamamlama) her seferinde
-  // diske yazmak yerine, kısa bir gecikmeyle (debounce) tek seferde kaydedilir.
-  _schedulePersist() {
-    if (this._pendingPersist) {
-      clearTimeout(this._pendingPersist);
-    }
-    this._pendingPersist = setTimeout(() => {
-      this._pendingPersist = null;
-      this._persistNow();
-    }, 150);
-  }
-
-  // Şu ana kadarki tüm değişiklikleri senkron olarak dışa aktarıp IndexedDB'ye
-  // yazar. Ağ/IO beklemeden dönmesi gerekmediği için "fire and forget" şeklinde
-  // çağrılabilir; hata olursa konsola loglanır (kullanıcı akışını bozmasın diye).
-  _persistNow() {
-    if (this._pendingPersist) {
-      clearTimeout(this._pendingPersist);
-      this._pendingPersist = null;
-    }
-    try {
-      const bytes = this._db.export();
-      // saveDatabaseBytes asenkron ama burada beklemiyoruz (fire-and-forget);
-      // repository fonksiyonları senkron kalmaya devam ediyor.
-      saveDatabaseBytes(this._dbName, bytes).catch((err) => {
-        console.error('Veritabanı IndexedDB\'ye kaydedilemedi:', err);
-      });
-    } catch (err) {
-      console.error('Veritabanı dışa aktarılamadı (export):', err);
-    }
+  closeSync() {
+    this.close();
   }
 }
 
-// sql.js modülünü bir kez yükler (wasm dosyasını indirir/derler) ve paylaşır.
-async function ensureSqlJsLoaded() {
-  if (!SQL) {
-    SQL = await initSqlJs({ locateFile: () => sqlWasmUrl });
-  }
-  return SQL;
-}
-
-// Verilen isimdeki veritabanını IndexedDB'den yükler (varsa) ya da yeni
-// oluşturur, ardından SqliteConnection olarak döndürür.
-// NOT: Bu fonksiyon ASENKRON'dur (sql.js'in ilk yüklenmesi ve IndexedDB
-// okuması nedeniyle) — mobildeki switchToUserDatabase senkrondu, bu farkı
-// database.js katmanında (initDatabase artık async) karşılıyoruz.
-export async function openSqliteConnection(dbName) {
-  const sqlJs = await ensureSqlJsLoaded();
-  const existingBytes = await loadDatabaseBytes(dbName);
-  const sqlJsDb = existingBytes ? new sqlJs.Database(existingBytes) : new sqlJs.Database();
-  return new SqliteConnection(sqlJsDb, dbName);
-}
-
-// Verilen isimdeki veritabanı kaydını IndexedDB'den tamamen kaldırır.
-// Hesap silme akışında (services/deleteAccountService.js) kullanılır.
-export async function deleteDatabaseBytes(dbName) {
-  const idb = await getIdb();
-  await idb.delete(IDB_STORE, dbName);
+export function openTursoConnection(dbUrl, token, tokenManager = null) {
+  return new TursoConnection(dbUrl, token, tokenManager);
 }

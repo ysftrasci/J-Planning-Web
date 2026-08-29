@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ChevronLeft, Send, Hourglass, CheckCircle2, Clock, Pencil, Trash2 } from 'lucide-react';
+import { ChevronLeft, Hourglass, CheckCircle2, Clock, Pencil, Trash2, FileText } from 'lucide-react';
 import { useAuth } from '../context/AuthContext.jsx';
 import { listenTasksIAssigned, deleteAssignedTask } from '../services/taskAssignmentService';
 import { deleteTask } from '../db/taskRepository';
@@ -32,7 +32,7 @@ export default function AssignedByMePage() {
     setErrorMessage('');
     try {
       await deleteAssignedTask(taskToDelete.id);
-      deleteTask(taskToDelete.id);
+      await deleteTask(taskToDelete.id);
       setTaskToDelete(null);
     } catch (e) {
       console.error('Atanan görev silinirken hata:', e);
@@ -57,14 +57,14 @@ export default function AssignedByMePage() {
       </p>
 
       {errorMessage && (
-        <p style={{ color: 'var(--color-danger, #ef4444)', fontSize: '14px', marginBottom: 'var(--space-sm)' }}>
+        <p style={{ color: 'var(--color-danger)', fontSize: '14px', marginBottom: 'var(--space-sm)' }}>
           {errorMessage}
         </p>
       )}
 
       {activeTasks.length === 0 ? (
         <EmptyState
-          icon={Send}
+          icon={Clock}
           title="Henüz kimseye görev atamadın"
           subtitle="Görev eklerken 'Kime atanacak?' kısmından bir arkadaşını seçebilirsin"
         />
@@ -73,7 +73,6 @@ export default function AssignedByMePage() {
           {activeTasks.map((item) => {
             const isPending = item.status === 'PENDING';
             const isDone = item.isCompletedToday === true;
-            const subtaskCount = item.subtaskCount || 1;
             const StatusIcon = isPending ? Hourglass : isDone ? CheckCircle2 : Clock;
             const statusClass = isPending
               ? 'assigned-by-me-page__status--pending'
@@ -85,81 +84,78 @@ export default function AssignedByMePage() {
               <div key={item.id} className="assigned-by-me-page__card">
                 <div className="assigned-by-me-page__card-header">
                   <span className="assigned-by-me-page__title">{item.title}</span>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0 }}>
+                  
+                  <div className="assigned-by-me-page__actions">
                     <span className={`assigned-by-me-page__status ${statusClass}`}>
-                      <StatusIcon size={14} />
-                      {isPending ? 'Onay Bekliyor' : isDone ? 'Tamamlandı' : 'Bekliyor'}
+                      <StatusIcon size={13} />
+                      <span>{isPending ? 'Onay Bekliyor' : isDone ? 'Tamamlandı' : 'Bekliyor'}</span>
                     </span>
+
                     <button
                       type="button"
-                      className="assigned-by-me-page__edit-btn"
-                      title="Görevi Düzenle"
+                      className="assigned-by-me-page__btn assigned-by-me-page__btn--edit"
                       onClick={() => navigate(`/task/${item.id}/edit`)}
-                      style={{
-                        background: 'var(--color-surface-alt)',
-                        border: '1px solid var(--color-border)',
-                        borderRadius: 'var(--radius-pill)',
-                        cursor: 'pointer',
-                        color: 'var(--color-text-secondary)',
-                        padding: '4px 8px',
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        gap: '4px',
-                        fontSize: '12px',
-                        fontWeight: 600,
-                      }}
+                      title="Düzenle"
                     >
-                      <Pencil size={13} />
+                      <Pencil size={12} />
                       <span>Düzenle</span>
                     </button>
+
                     <button
                       type="button"
-                      className="assigned-by-me-page__delete-btn"
-                      title="Görevi Sil"
+                      className="assigned-by-me-page__btn assigned-by-me-page__btn--delete"
                       onClick={() => setTaskToDelete(item)}
-                      style={{
-                        background: 'var(--color-danger-soft, rgba(239, 68, 68, 0.1))',
-                        border: '1px solid var(--color-danger-border, rgba(239, 68, 68, 0.2))',
-                        borderRadius: 'var(--radius-pill)',
-                        cursor: 'pointer',
-                        color: 'var(--color-danger, #ef4444)',
-                        padding: '4px 8px',
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        gap: '4px',
-                        fontSize: '12px',
-                        fontWeight: 600,
-                      }}
+                      title="Sil"
                     >
-                      <Trash2 size={13} />
+                      <Trash2 size={12} />
                       <span>Sil</span>
                     </button>
                   </div>
                 </div>
+
                 {item.description && (
-                  <p className="caption" style={{ marginTop: 'var(--space-xs)', color: 'var(--color-text-primary)' }}>
-                    📝 {item.description}
-                  </p>
+                  <div className="assigned-by-me-page__desc-row">
+                    <FileText size={13} className="assigned-by-me-page__desc-icon" />
+                    <span className="assigned-by-me-page__description">{item.description}</span>
+                  </div>
                 )}
-                <p className="assigned-by-me-page__meta">
-                  {item.assignedToName} • {periodLabel(item.period)} • {PRIORITY_LABEL[item.priority]}
-                  {!isPending && subtaskCount > 1 ? ` • ${item.completedSubtasks || 0}/${subtaskCount}` : ''}
-                </p>
+
+                <div className="assigned-by-me-page__meta">
+                  {item.assignedToName || 'Arkadaşın'} • {periodLabel(item.period)} • {PRIORITY_LABEL[item.priority] || 'Orta'}
+                </div>
               </div>
             );
           })}
         </div>
       )}
 
-      <AppModal open={!!taskToDelete} onClose={() => setTaskToDelete(null)} title="Atanan Görevi Sil">
-        <p className="caption">
-          "{taskToDelete?.title}" görevini silmek istediğinize emin misiniz? Bu görev <strong>{taskToDelete?.assignedToName}</strong> kullanıcısının ekranından da kaldırılacaktır.
-        </p>
-        <div className="assigned-by-me-page__modal-actions" style={{ display: 'flex', gap: 'var(--space-md)', justifyContent: 'flex-end', marginTop: 'var(--space-md)' }}>
-          <AppButton title="Vazgeç" variant="ghost" onClick={() => setTaskToDelete(null)} disabled={deleting} />
-          <AppButton title="Sil" variant="danger" onClick={confirmDelete} loading={deleting} />
-        </div>
-      </AppModal>
+      {/* Silme Onay Modalı */}
+      {taskToDelete && (
+        <AppModal
+          open={!!taskToDelete}
+          onClose={() => setTaskToDelete(null)}
+          title="Atanan Görevi Sil"
+        >
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', padding: '8px 0' }}>
+            <p style={{ margin: 0, fontSize: '14px', lineHeight: 1.5 }}>
+              <strong>"{taskToDelete.title}"</strong> görevini silmek istediğine emin misin? Görev arkadaşının listesinden de kaldırılacaktır.
+            </p>
+            <div style={{ display: 'flex', gap: '12px' }}>
+              <AppButton
+                title="Vazgeç"
+                variant="secondary"
+                onClick={() => setTaskToDelete(null)}
+              />
+              <AppButton
+                title="Evet, Sil"
+                variant="danger"
+                loading={deleting}
+                onClick={confirmDelete}
+              />
+            </div>
+          </div>
+        </AppModal>
+      )}
     </div>
   );
 }

@@ -1,8 +1,7 @@
 // J-Planning — Görev Kartı (Web)
 // Mobildeki src/components/TaskCard.js dosyasının web karşılığı.
 // Pressable/haptics yerine iki ayrı tıklanabilir alan: kart gövdesi (detaya
-// gider) ve sağdaki daire buton (tamamla/geri al). Titreşim (haptics) web'de
-// karşılığı olmadığı için sessizce atlandı.
+// gider) ve sağdaki daire buton (tamamla/geri al).
 import { Flame, Check, X, Circle, ArrowDownCircle, ArrowUpCircle } from 'lucide-react';
 import { periodLabel } from '../utils/period';
 import './TaskCard.css';
@@ -24,7 +23,16 @@ const PRIORITY_LABEL = {
 };
 
 // task.assignmentDirection: null (kendi görevim) | 'RECEIVED' (bana atandı) | 'SENT' (ben attım)
-export default function TaskCard({ task, status, completedSubtasks, streak, onOpen, onComplete, onUncomplete }) {
+export default function TaskCard({
+  task,
+  status,
+  completedSubtasks,
+  streak,
+  onOpen,
+  onClick,
+  onComplete,
+  onUncomplete,
+}) {
   const priorityColorVar = PRIORITY_COLOR_VAR[task.priority] || '--color-priority-medium';
   const isDone = status === 'SUCCESSFUL';
   const isFailed = status === 'FAILED';
@@ -34,6 +42,12 @@ export default function TaskCard({ task, status, completedSubtasks, streak, onOp
   const hasMultipleSubtasks = subtaskCount > 1;
 
   const accentVar = isSent ? '--color-friend-sent' : isReceived ? '--color-friend-received' : priorityColorVar;
+
+  const handleBodyClick = (e) => {
+    e.stopPropagation();
+    if (onOpen) onOpen();
+    else if (onClick) onClick();
+  };
 
   const handleCheckClick = (e) => {
     e.stopPropagation(); // kart gövdesindeki detay tıklamasını tetiklemesin
@@ -47,7 +61,7 @@ export default function TaskCard({ task, status, completedSubtasks, streak, onOp
 
   return (
     <div className="task-card" style={{ '--task-accent': `var(${accentVar})` }}>
-      <button type="button" className="task-card__body" onClick={onOpen}>
+      <button type="button" className="task-card__body" onClick={handleBodyClick}>
         <div className="task-card__bar" />
         <div className="task-card__content">
           <div className="task-card__header-row">
@@ -98,7 +112,7 @@ export default function TaskCard({ task, status, completedSubtasks, streak, onOp
           type="button"
           onClick={handleCheckClick}
           aria-label={isDone ? 'Tamamlamayı geri al' : 'Tamamlandı olarak işaretle'}
-          className={`task-card__check ${isDone ? 'task-card__check--done' : ''} ${isFailed ? 'task-card__check--failed' : ''}`}
+          className={`task-card__check ${isDone ? 'task-card__check--done' : isFailed ? 'task-card__check--failed' : ''}`}
         >
           {isDone ? <Check size={20} /> : isFailed ? <X size={20} /> : <Circle size={20} />}
         </button>

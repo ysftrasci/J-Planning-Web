@@ -1,17 +1,17 @@
 import { useEffect, useState, useMemo, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ChevronLeft, ChevronRight, ChevronDown, ChevronUp, BookOpen, Save, Calendar, CheckCircle2, Clock, Pencil, Trash2 } from 'lucide-react';
+import { ChevronLeft, ChevronRight, BookOpen, Clock, Calendar, Pencil, Trash2 } from 'lucide-react';
 import { getDailyNote, saveDailyNote, deleteDailyNote, getDailyNotesByMonth, getAllDailyNoteMonths } from '../db/dailyNoteRepository';
 import { toDateStr } from '../utils/period';
-import AppButton from '../components/AppButton.jsx';
 import AppModal from '../components/AppModal.jsx';
-import EmptyState from '../components/EmptyState.jsx';
+import AppButton from '../components/AppButton.jsx';
 import './DailyNotesPage.css';
 
 function monthLabelOf(monthKey) {
   const [y, m] = monthKey.split('-').map(Number);
   const d = new Date(y, m - 1, 1);
-  return d.toLocaleDateString('tr-TR', { month: 'long', year: 'numeric' });
+  const label = d.toLocaleDateString('tr-TR', { month: 'long', year: 'numeric' });
+  return label.charAt(0).toUpperCase() + label.slice(1);
 }
 
 function formatDateLabel(dateKey) {
@@ -29,74 +29,81 @@ export default function DailyNotesPage() {
   const [selectedMonthKey, setSelectedMonthKey] = useState(todayMonthKey);
   const [todayNoteText, setTodayNoteText] = useState('');
   const [todayStudyTimeText, setTodayStudyTimeText] = useState('');
-  const [todaySaved, setTodaySaved] = useState(false);
   const [monthNotes, setMonthNotes] = useState([]);
-  const [expandedDateKeys, setExpandedDateKeys] = useState(new Set());
   const [editingDateKey, setEditingDateKey] = useState(null);
   const [editingText, setEditingText] = useState('');
   const [editingStudyTimeText, setEditingStudyTimeText] = useState('');
   const [dateKeyToDelete, setDateKeyToDelete] = useState(null);
 
-  const loadData = useCallback(() => {
-    const months = getAllDailyNoteMonths();
-    setAvailableMonths(months);
-    if (!months.includes(selectedMonthKey)) {
-      setSelectedMonthKey(months[0] || todayMonthKey);
-    }
-    const currentToday = getDailyNote(todayKey);
-    setTodayNoteText(currentToday?.content || '');
-    setTodayStudyTimeText(currentToday?.studyTimeText || '');
+  const loadData = useCallback(async (targetMonthKey) => {
+    try {
+      const activeMonth = targetMonthKey || selectedMonthKey || todayMonthKey;
+      const months = await getAllDailyNoteMonths();
+      if (!months.includes(todayMonthKey)) {
+        months.unshift(todayMonthKey);
+      }
+      setAvailableMonths(months);
+      
+      const currentToday = await getDailyNote(todayKey);
+      setTodayNoteText(currentToday?.content || '');
+      setTodayStudyTimeText(currentToday?.studyTimeText || '');
 
-    const notes = getDailyNotesByMonth(selectedMonthKey);
-    setMonthNotes(notes);
+      const notes = await getDailyNotesByMonth(activeMonth);
+      setMonthNotes(notes || []);
+    } catch (e) {
+      console.error('Günlük notlar yüklenirken hata:', e);
+    }
   }, [selectedMonthKey, todayKey, todayMonthKey]);
 
   useEffect(() => {
-    loadData();
+    loadData(selectedMonthKey);
 
     const handleCloudUpdate = () => {
-      loadData();
+      loadData(selectedMonthKey);
     };
     window.addEventListener('jplanning:cloud-sync-update', handleCloudUpdate);
     return () => {
       window.removeEventListener('jplanning:cloud-sync-update', handleCloudUpdate);
     };
-  }, [loadData]);
+  }, [loadData, selectedMonthKey]);
 
-  const toggleExpand = (dateKey) => {
-    setExpandedDateKeys((prev) => {
-      const next = new Set(prev);
-      if (next.has(dateKey)) next.delete(dateKey);
-      else next.add(dateKey);
-      return next;
-    });
-  };
-
-  const handleSaveTodayNote = (e) => {
+  const handleSaveTodayNote = async (e) => {
     e?.preventDefault();
-    saveDailyNote(todayKey, todayNoteText, todayStudyTimeText);
-    setTodaySaved(true);
-    setTimeout(() => setTodaySaved(false), 2500);
-    loadData();
-  };
-
-  const handleSaveEditingNote = (dateKey) => {
-    saveDailyNote(dateKey, editingText, editingStudyTimeText);
-    setEditingDateKey(null);
-    setEditingText('');
-    setEditingStudyTimeText('');
-    loadData();
-  };
-
-  const confirmDeleteNote = () => {
-    if (!dateKeyToDelete) return;
-    deleteDailyNote(dateKeyToDelete);
-    if (dateKeyToDelete === todayKey) {
-      setTodayNoteText('');
-      setTodayStudyTimeText('');
+    try {
+      await saveDailyNote(todayKey, todayNoteText, todayStudyTimeText);
+      await loadData(selectedMonthKey);
+    } catch (err) {
+      console.error('Bugünün notu kaydedilemedi:', err);
     }
-    setDateKeyToDelete(null);
-    loadData();
+  };
+
+  const handleSaveEditingNote = async (dateKey) => {
+    try {
+      await saveDailyNote(dateKey, editingText, editingStudyTimeText);
+      setEditingDateKey(null);
+      setEditingText('');
+      setEditingStudyTimeText('');
+      await loadData(selectedMonthKey);
+    } catch (err) {
+      console.error('Not güncellenemedi:', err);
+    }
+  };
+
+  const confirmDeleteNote = async () => {
+    if (!dateKeyToDelete) return;
+    const targetKey = dateKeyToDelete;
+    try {
+      await deleteDailyNote(targetKey);
+      if (targetKey === todayKey) {
+        setTodayNoteText('');
+        setTodayStudyTimeText('');
+      }
+      setMonthNotes((prev) => prev.filter((n) => n.dateKey !== targetKey && n.id !== targetKey));
+      setDateKeyToDelete(null);
+      await loadData(selectedMonthKey);
+    } catch (err) {
+      console.error('[DailyNotes] Not silinemedi:', err);
+    }
   };
 
   const currentMonthIndex = availableMonths.indexOf(selectedMonthKey);
@@ -104,234 +111,157 @@ export default function DailyNotesPage() {
   const canGoNewer = currentMonthIndex > 0;
 
   const goOlderMonth = () => {
-    if (canGoOlder) setSelectedMonthKey(availableMonths[currentMonthIndex + 1]);
+    if (canGoOlder) {
+      const nextMonth = availableMonths[currentMonthIndex + 1];
+      setSelectedMonthKey(nextMonth);
+      loadData(nextMonth);
+    }
   };
+
   const goNewerMonth = () => {
-    if (canGoNewer) setSelectedMonthKey(availableMonths[currentMonthIndex - 1]);
+    if (canGoNewer) {
+      const prevMonth = availableMonths[currentMonthIndex - 1];
+      setSelectedMonthKey(prevMonth);
+      loadData(prevMonth);
+    }
   };
 
   return (
     <div className="daily-notes-page">
       <button type="button" className="daily-notes-page__back" onClick={() => navigate('/')}>
-        <ChevronLeft size={18} />
+        <ChevronLeft size={16} />
         Görevlerim
       </button>
 
-      <div className="daily-notes-page__header">
-        <h1>Günün Özeti</h1>
-        <p className="caption">Her gün aklından geçenleri, günün özetini ve çalışma süreni burada biriktirebilirsin.</p>
-      </div>
+      <h1 className="daily-notes-page__title">Günün Özeti</h1>
+      <p className="daily-notes-page__subtitle">
+        Her gün aklından geçenleri, günün özetini ve çalışma süreni burada biriktirebilirsin.
+      </p>
 
-      {/* Bugünün Özeti Yazma Kartı */}
-      <div className="daily-notes-page__card daily-notes-page__card--today">
+      {/* Bugünün Özeti Kartı */}
+      <div className="daily-notes-page__card">
         <div className="daily-notes-page__card-header">
-          <BookOpen size={20} className="daily-notes-page__icon" />
+          <BookOpen size={20} className="daily-notes-page__book-icon" />
           <div>
-            <h3>Bugünün Özeti ({formatDateLabel(todayKey)})</h3>
-            <span className="daily-notes-page__sub">Gününüzü değerlendirin, çalışma sürenizi ve notlarınızı yazın</span>
+            <h3 className="daily-notes-page__card-title">Bugünün Özeti ({formatDateLabel(todayKey)})</h3>
+            <p className="daily-notes-page__card-subtitle">Gününüzü değerlendirin, çalışma sürenizi ve notlarınızı yazın</p>
           </div>
         </div>
-        <form onSubmit={handleSaveTodayNote}>
-          <label className="daily-notes-page__input-label" htmlFor="today-study-time">
-            <Clock size={16} /> Bugün Kaç Saat Çalıştınız? (opsiyonel)
+
+        <div className="daily-notes-page__field">
+          <label className="daily-notes-page__field-label">
+            <Clock size={16} />
+            <span>Bugün Kaç Saat Çalıştınız? (opsiyonel)</span>
           </label>
           <input
-            id="today-study-time"
             type="text"
             className="daily-notes-page__input"
-            maxLength={50}
             placeholder="ör. 2 saat 30 dakika, 45 dk..."
             value={todayStudyTimeText}
             onChange={(e) => setTodayStudyTimeText(e.target.value)}
           />
+        </div>
 
+        <div className="daily-notes-page__field">
           <div className="daily-notes-page__label-row">
-            <label className="daily-notes-page__input-label" htmlFor="today-summary">
-              Günün Notu / Özeti (opsiyonel)
-            </label>
-            <span className="daily-notes-page__char-count">{todayNoteText.length} / 1000</span>
+            <label className="daily-notes-page__field-label">Günün Notu / Özeti (opsiyonel)</label>
+            <span className="daily-notes-page__char-counter">{todayNoteText.length} / 1000</span>
           </div>
           <textarea
-            id="today-summary"
             className="daily-notes-page__textarea"
-            maxLength={1000}
             placeholder="Bugün nasıl geçti? Aklındakileri ve günün özetini buraya yaz..."
+            maxLength={1000}
             rows={4}
             value={todayNoteText}
             onChange={(e) => setTodayNoteText(e.target.value)}
           />
-          <div className="daily-notes-page__card-footer">
-            {todaySaved && (
-              <span className="daily-notes-page__saved-msg">
-                <CheckCircle2 size={16} /> Kaydedildi
-              </span>
-            )}
-            <AppButton type="submit" title="Kaydet" icon={Save} />
-          </div>
-        </form>
+        </div>
+
+        <button
+          type="button"
+          className="daily-notes-page__save-btn"
+          onClick={handleSaveTodayNote}
+        >
+          Kaydet
+        </button>
       </div>
 
-      {/* Aylık Özet Listesi Seçici */}
-      <div className="daily-notes-page__month-bar">
-        <h2>Aylık Özet Geçmişi</h2>
-        <div className="daily-notes-page__month-nav">
-          <button
-            type="button"
-            className="daily-notes-page__nav-btn"
-            disabled={!canGoOlder}
-            onClick={goOlderMonth}
-            aria-label="Önceki Ay"
-          >
-            <ChevronLeft size={20} />
+      {/* Aylık Özet Geçmişi Başlığı */}
+      <div className="daily-notes-page__history-header">
+        <h2 className="daily-notes-page__history-title">Aylık Özet Geçmişi</h2>
+        <div className="daily-notes-page__month-selector">
+          <button type="button" className="daily-notes-page__month-nav-btn" onClick={goOlderMonth} aria-label="Önceki Ay">
+            <ChevronLeft size={16} />
           </button>
-          <span className="daily-notes-page__month-title">{monthLabelOf(selectedMonthKey)}</span>
-          <button
-            type="button"
-            className="daily-notes-page__nav-btn"
-            disabled={!canGoNewer}
-            onClick={goNewerMonth}
-            aria-label="Sonraki Ay"
-          >
-            <ChevronRight size={20} />
+          <span className="daily-notes-page__month-name">{monthLabelOf(selectedMonthKey)}</span>
+          <button type="button" className="daily-notes-page__month-nav-btn" onClick={goNewerMonth} aria-label="Sonraki Ay">
+            <ChevronRight size={16} />
           </button>
         </div>
       </div>
 
-      {/* Aylık Özetler Listesi */}
-      <div className="daily-notes-page__notes-list">
-        {monthNotes.length === 0 ? (
-          <EmptyState
-            title="Bu Ayda Özet Bulunmuyor"
-            description="Bu ay için kaydedilmiş herhangi bir günün özeti yok. Yukarıdan bugünün özetini ekleyebilirsiniz."
-          />
-        ) : (
-          monthNotes.map((note) => {
-            const isEditing = editingDateKey === note.dateKey;
-            const isExpanded = expandedDateKeys.has(note.dateKey);
-
-            return (
-              <div key={note.id} className={`daily-notes-page__note-item ${isExpanded ? 'daily-notes-page__note-item--expanded' : ''}`}>
-                <div
-                  className="daily-notes-page__note-header"
-                  onClick={() => !isEditing && toggleExpand(note.dateKey)}
-                  style={{ cursor: isEditing ? 'default' : 'pointer' }}
-                >
-                  <div className="daily-notes-page__note-date">
-                    <Calendar size={16} />
-                    <span>{formatDateLabel(note.dateKey)}</span>
-                    {note.studyTimeText && !isEditing && (
-                      <span className="daily-notes-page__study-badge">
-                        <Clock size={13} /> {note.studyTimeText}
-                      </span>
-                    )}
-                  </div>
-                  {!isEditing && (
-                    <div className="daily-notes-page__header-actions">
-                      <button
-                        type="button"
-                        className="daily-notes-page__edit-icon-btn"
-                        title="Günü Düzenle"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setEditingDateKey(note.dateKey);
-                          setEditingText(note.content || '');
-                          setEditingStudyTimeText(note.studyTimeText || '');
-                          setExpandedDateKeys((prev) => new Set(prev).add(note.dateKey));
-                        }}
-                      >
-                        <Pencil size={14} />
-                      </button>
-                      <button
-                        type="button"
-                        className="daily-notes-page__delete-icon-btn"
-                        title="Günün Özetini Sil"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setDateKeyToDelete(note.dateKey);
-                        }}
-                      >
-                        <Trash2 size={14} />
-                      </button>
-                      <span className="daily-notes-page__expand-icon">
-                        {isExpanded ? <ChevronUp size={18} /> : <ChevronDown size={18} />}
-                      </span>
-                    </div>
-                  )}
+      {/* Ayın Notları */}
+      {monthNotes.length === 0 ? (
+        <div className="daily-notes-page__empty-text">Bu Ayda Özet Bulunmuyor</div>
+      ) : (
+        <div className="daily-notes-page__notes-list">
+          {monthNotes.map((note) => (
+            <div key={note.id} className="daily-notes-page__note-item">
+              <div className="daily-notes-page__note-header">
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <Calendar size={16} className="daily-notes-page__book-icon" />
+                  <span className="daily-notes-page__note-date">{formatDateLabel(note.dateKey)}</span>
                 </div>
-
-                {/* Katlanmış Halde Kısa Önizleme */}
-                {!isExpanded && !isEditing && note.content && (
-                  <p
-                    className="daily-notes-page__note-preview"
-                    onClick={() => toggleExpand(note.dateKey)}
-                  >
-                    {note.content.length > 80 ? `${note.content.slice(0, 80)}...` : note.content}
-                  </p>
-                )}
-
-                {/* Genişletilmiş Gövde veya Düzenleme Modu */}
-                {isEditing ? (
-                  <div className="daily-notes-page__edit-box">
-                    <label className="daily-notes-page__input-label">
-                      <Clock size={15} /> Çalışma Süresi (opsiyonel)
-                    </label>
-                    <input
-                      type="text"
-                      className="daily-notes-page__input"
-                      maxLength={50}
-                      value={editingStudyTimeText}
-                      onChange={(e) => setEditingStudyTimeText(e.target.value)}
-                      placeholder="ör. 2 saat 30 dakika"
-                    />
-
-                    <div className="daily-notes-page__label-row">
-                      <label className="daily-notes-page__input-label">Günün Özeti</label>
-                      <span className="daily-notes-page__char-count">{editingText.length} / 1000</span>
-                    </div>
-                    <textarea
-                      className="daily-notes-page__textarea"
-                      maxLength={1000}
-                      value={editingText}
-                      onChange={(e) => setEditingText(e.target.value)}
-                      rows={4}
-                    />
-                    <div className="daily-notes-page__edit-actions">
-                      <button
-                        type="button"
-                        className="daily-notes-page__cancel-btn"
-                        onClick={() => setEditingDateKey(null)}
-                      >
-                        Vazgeç
-                      </button>
-                      <AppButton title="Güncelle" onClick={() => handleSaveEditingNote(note.dateKey)} />
-                    </div>
-                  </div>
-                ) : (
-                  isExpanded && (
-                    <div className="daily-notes-page__expanded-body">
-                      {note.content ? (
-                        <p className="daily-notes-page__note-content">{note.content}</p>
-                      ) : (
-                        <p className="daily-notes-page__empty-body-text">Bu gün için herhangi bir özet metni yazılmadı.</p>
-                      )}
-                    </div>
-                  )
+                {note.studyTimeText && (
+                  <span className="daily-notes-page__study-badge">
+                    <Clock size={13} /> {note.studyTimeText}
+                  </span>
                 )}
               </div>
-            );
-          })
-        )}
-      </div>
-
-      <AppModal open={!!dateKeyToDelete} onClose={() => setDateKeyToDelete(null)} title="Günün Özetini Sil">
-        <p className="caption">
-          {dateKeyToDelete && formatDateLabel(dateKeyToDelete)} tarihli günün özetini silmek istediğinize emin misiniz?
-        </p>
-        <div className="daily-notes-page__modal-actions" style={{ display: 'flex', gap: 'var(--space-md)', justifyContent: 'flex-end', marginTop: 'var(--space-md)' }}>
-          <AppButton title="Vazgeç" variant="ghost" onClick={() => setDateKeyToDelete(null)} />
-          <AppButton title="Sil" variant="danger" onClick={confirmDeleteNote} />
+              {note.content && <p className="daily-notes-page__note-content">{note.content}</p>}
+              <div className="daily-notes-page__note-actions">
+                <button
+                  type="button"
+                  className="daily-notes-page__small-btn"
+                  onClick={() => {
+                    setEditingDateKey(note.dateKey);
+                    setEditingText(note.content || '');
+                    setEditingStudyTimeText(note.studyTimeText || '');
+                  }}
+                >
+                  <Pencil size={12} /> Düzenle
+                </button>
+                <button
+                  type="button"
+                  className="daily-notes-page__small-btn daily-notes-page__small-btn--danger"
+                  onClick={() => setDateKeyToDelete(note.dateKey)}
+                >
+                  <Trash2 size={12} /> Sil
+                </button>
+              </div>
+            </div>
+          ))}
         </div>
-      </AppModal>
+      )}
+
+      {/* Silme Onay Modalı */}
+      {dateKeyToDelete && (
+        <AppModal
+          open={!!dateKeyToDelete}
+          onClose={() => setDateKeyToDelete(null)}
+          title="Notu Sil"
+        >
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', padding: '8px 0' }}>
+            <p style={{ margin: 0, fontSize: '14px', lineHeight: 1.5 }}>
+              {dateKeyToDelete ? formatDateLabel(dateKeyToDelete) : ''} tarihli notu silmek istiyor musunuz?
+            </p>
+            <div style={{ display: 'flex', gap: '12px' }}>
+              <AppButton title="Vazgeç" variant="secondary" onClick={() => setDateKeyToDelete(null)} />
+              <AppButton title="Sil" variant="danger" onClick={confirmDeleteNote} />
+            </div>
+          </div>
+        </AppModal>
+      )}
     </div>
   );
 }

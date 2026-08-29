@@ -9,7 +9,7 @@
 .app-layout__main {
   flex: 1;
   padding: var(--space-lg);
-  padding-bottom: 90px;
+  padding-bottom: 110px;
 }
 
 .app-layout__nav-wrapper {
@@ -32,13 +32,13 @@
   display: flex;
   align-items: center;
   justify-content: space-around;
-  background: rgba(255, 255, 255, 0.88);
+  background: var(--color-surface);
   backdrop-filter: blur(20px);
   -webkit-backdrop-filter: blur(20px);
-  border: 1px solid rgba(229, 231, 235, 0.8);
+  border: 1px solid var(--color-border);
   border-bottom: none;
   border-radius: 24px 24px 0 0;
-  box-shadow: 0 -6px 25px rgba(0, 0, 0, 0.07);
+  box-shadow: 0 -6px 25px rgba(0, 0, 0, 0.2);
   padding: 0 8px;
   margin: 0 auto;
 }
@@ -53,7 +53,7 @@
   height: 52px;
   padding: 4px 0;
   text-decoration: none;
-  color: var(--color-text-secondary, #6b7280);
+  color: var(--color-text-secondary);
   border-radius: 16px;
   transition: all 0.22s cubic-bezier(0.4, 0, 0.2, 1);
 }
@@ -70,19 +70,21 @@
 }
 
 .app-layout__tab:hover {
-  color: var(--color-accent-dark, #be185d);
-  background-color: rgba(190, 24, 93, 0.05);
+  color: var(--color-text-primary);
+  background-color: var(--color-surface-alt);
 }
 
 .app-layout__tab--active {
-  color: var(--color-accent-dark, #be185d) !important;
-  background-color: var(--color-accent-soft, #fbcfe8) !important;
+  color: var(--color-text-primary) !important;
+  background-color: var(--color-accent-soft) !important;
 }
 
 .app-layout__tab--active .app-layout__tab-icon {
   transform: scale(1.12);
+  color: var(--color-accent);
 }
 
 .app-layout__tab--active .app-layout__tab-label {
   font-weight: 700;
+  color: var(--color-accent-dark);
 }

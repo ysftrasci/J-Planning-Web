@@ -1,12 +1,19 @@
+// J-Planning — Görev Düzenle Sayfası (Web)
 import { useEffect, useState } from 'react';
+import { ChevronLeft, Plus, X, ShieldAlert } from 'lucide-react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { ChevronLeft, X, Plus, Info, ShieldAlert } from 'lucide-react';
 import { doc, getDoc } from 'firebase/firestore';
 import { db } from '../services/firebase';
-import { useAuth } from '../context/AuthContext.jsx';
 import { getDb } from '../db/database';
-import { updateTask, getSubtaskLabels, createSentTaskRecord } from '../db/taskRepository';
+import {
+  updateTask,
+  getSubtaskLabels,
+  createSentTaskRecord,
+  createTaskFromAssignment,
+  findTaskByIdOrFirestoreId,
+} from '../db/taskRepository';
 import { getCategories } from '../db/categoryRepository';
+import { useAuth } from '../context/AuthContext.jsx';
 import { updateAssignedTaskInFirestore } from '../services/taskAssignmentService';
 import AppButton from '../components/AppButton.jsx';
 import './EditTaskPage.css';
@@ -32,18 +39,6 @@ const PERIODS = [
   { key: 'ONCE', label: 'Tek Seferlik' },
 ];
 
-function Chip({ label, selected, onClick }) {
-  return (
-    <button
-      type="button"
-      className={`edit-task-page__chip ${selected ? 'edit-task-page__chip--selected' : ''}`}
-      onClick={onClick}
-    >
-      {label}
-    </button>
-  );
-}
-
 export default function EditTaskPage() {
   const { taskId } = useParams();
   const { user } = useAuth();
@@ -55,22 +50,30 @@ export default function EditTaskPage() {
   const [priority, setPriority] = useState('MEDIUM');
   const [period, setPeriod] = useState('DAILY');
   const [categoryId, setCategoryId] = useState(null);
-  const [categories] = useState(() => getCategories());
+  const [categories, setCategories] = useState([]);
   const [subtaskLabels, setSubtaskLabels] = useState(['']);
   const [errorMessage, setErrorMessage] = useState('');
   const [saving, setSaving] = useState(false);
   const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {
+    let mounted = true;
+    getCategories()
+      .then((cats) => {
+        if (mounted) setCategories(cats || []);
+      })
+      .catch((err) => console.error('Kategoriler yüklenemedi:', err));
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  useEffect(() => {
     let isMounted = true;
 
     async function loadTaskData() {
       try {
-        const sqliteDb = getDb();
-        let t = sqliteDb.getFirstSync('SELECT * FROM tasks WHERE id = ?', [taskId]);
-        if (!t) {
-          t = sqliteDb.getFirstSync('SELECT * FROM tasks WHERE firestoreAssignmentId = ?', [taskId]);
-        }
+        let t = await findTaskByIdOrFirestoreId(taskId);
 
         if (t) {
           if (!isMounted) return;
@@ -104,10 +107,10 @@ export default function EditTaskPage() {
             ? data.subtaskLabels
             : Array.from({ length: count }, () => '');
 
-          // Kendi SQLite kaydımızı oluşturalım ki yerelde de saklansın
+          // Kendi Turso kaydımızı oluşturalım ki yerelde de saklansın
           let createdLocalId = null;
           if (isSent) {
-            createdLocalId = createSentTaskRecord({
+            createdLocalId = await createSentTaskRecord({
               title: data.title,
               description: data.description || '',
               priority: data.priority,
@@ -223,7 +226,7 @@ export default function EditTaskPage() {
 
     setSaving(true);
     try {
-      updateTask(task.id, {
+      await updateTask(task.id, {
         title: title.trim(),
         description: description ? description.trim() : '',
         categoryId,
@@ -267,46 +270,69 @@ export default function EditTaskPage() {
 
       <h1>Görevi Düzenle</h1>
 
-      {isSentToFriend && (
-        <div className="edit-task-page__hint-banner">
-          <Info size={16} />
-          <span>
-            Bu görev <strong>{task.assignedToName}</strong> kullanıcısına atandı. Yapacağınız değişiklikler arkadaşınızın ekranında da güncellenecektir.
-          </span>
-        </div>
-      )}
-
       <form className="edit-task-page__form" onSubmit={handleSave}>
-        <label className="edit-task-page__label" htmlFor="task-title">Görev Adı</label>
+        {errorMessage && <p className="edit-task-page__error-banner">{errorMessage}</p>}
+
+        <label className="edit-task-page__label" htmlFor="edit-task-title">Görev Adı</label>
         <input
-          id="task-title"
+          id="edit-task-title"
           className="edit-task-page__input"
           type="text"
-          placeholder="örn. Su iç, spor yap..."
+          placeholder="Görev adı..."
           value={title}
           onChange={(e) => setTitle(e.target.value)}
-          autoFocus
         />
 
-        <label className="edit-task-page__label" htmlFor="task-description">Not / Açıklama (opsiyonel)</label>
-        <input
-          id="task-description"
-          className="edit-task-page__input"
-          type="text"
-          placeholder="örn. Sayfa 45-60 arası okunacak"
+        <label className="edit-task-page__label" htmlFor="edit-task-description">
+          Açıklama <span className="edit-task-page__optional">(opsiyonel)</span>
+        </label>
+        <textarea
+          id="edit-task-description"
+          className="edit-task-page__textarea"
+          placeholder="Görevle ilgili ek notlar veya detaylar..."
           value={description}
           onChange={(e) => setDescription(e.target.value)}
+          rows={3}
         />
 
-        <span className="edit-task-page__label">Periyot</span>
-        <div className="edit-task-page__chip-row">
+        {!isSentToFriend && (
+          <>
+            <label className="edit-task-page__label">Kategori</label>
+            <div className="edit-task-page__chip-group">
+              <Chip
+                label="Kategorisiz"
+                selected={categoryId === null}
+                onClick={() => setCategoryId(null)}
+              />
+              {categories.map((cat) => (
+                <Chip
+                  key={cat.id}
+                  label={cat.name}
+                  color={cat.color}
+                  selected={categoryId === cat.id}
+                  onClick={() => setCategoryId(cat.id)}
+                />
+              ))}
+            </div>
+          </>
+        )}
+
+        <label className="edit-task-page__label">Tekrar Sıklığı</label>
+        <div className="edit-task-page__chip-group">
           {PERIODS.map((p) => (
-            <Chip key={p.key} label={p.label} selected={period === p.key} onClick={() => handlePeriodChange(p.key)} />
+            <Chip
+              key={p.key}
+              label={p.label}
+              selected={period === p.key}
+              onClick={() => handlePeriodChange(p.key)}
+            />
           ))}
         </div>
 
-        <span className="edit-task-page__label">{isOnce ? 'Zorluk' : 'Öncelik'}</span>
-        <div className="edit-task-page__chip-row">
+        <label className="edit-task-page__label">
+          {isOnce ? 'Zorluk Seviyesi' : 'Öncelik'}
+        </label>
+        <div className="edit-task-page__chip-group">
           {(isOnce ? DIFFICULTIES : PRIORITIES).map((p) => (
             <Chip
               key={p.key}
@@ -317,58 +343,84 @@ export default function EditTaskPage() {
           ))}
         </div>
 
-        {categories.length > 0 && (
-          <>
-            <span className="edit-task-page__label">Kategori</span>
-            <div className="edit-task-page__chip-row">
-              <Chip label="Yok" selected={categoryId === null} onClick={() => setCategoryId(null)} />
-              {categories.map((c) => (
-                <Chip key={c.id} label={c.name} selected={categoryId === c.id} onClick={() => setCategoryId(c.id)} />
+        {!isOnce && (
+          <div className="edit-task-page__subtasks-section">
+            <div className="edit-task-page__subtasks-header">
+              <div>
+                <label className="edit-task-page__label" style={{ marginBottom: 0 }}>
+                  Periyot İçi Tekrar / Alt Adımlar
+                </label>
+                <p className="caption" style={{ marginTop: '2px', color: 'var(--color-text-secondary)' }}>
+                  Görevi gün/hafta içinde birden fazla kez yapmanız gerekiyorsa adım ekleyin.
+                </p>
+              </div>
+              <button
+                type="button"
+                className="edit-task-page__subtask-add-btn"
+                onClick={addSubtaskRow}
+                title="Yeni Alt Adım Ekle"
+              >
+                <Plus size={16} />
+                <span>Adım Ekle</span>
+              </button>
+            </div>
+
+            <div className="edit-task-page__subtasks-list">
+              {subtaskLabels.map((label, index) => (
+                <div key={index} className="edit-task-page__subtask-row">
+                  <span className="edit-task-page__subtask-index">{index + 1}.</span>
+                  <input
+                    type="text"
+                    className="edit-task-page__subtask-input"
+                    placeholder={`Örn: ${index === 0 ? 'Sabah' : index === 1 ? 'Akşam' : `${index + 1}. Tekrar`}`}
+                    value={label}
+                    onChange={(e) => updateSubtaskLabel(index, e.target.value)}
+                  />
+                  {subtaskLabels.length > 1 && (
+                    <button
+                      type="button"
+                      className="edit-task-page__subtask-remove-btn"
+                      onClick={() => removeSubtaskRow(index)}
+                      title="Adımı Kaldır"
+                    >
+                      <X size={16} />
+                    </button>
+                  )}
+                </div>
               ))}
             </div>
-          </>
+          </div>
         )}
 
-        {!isOnce && (
-          <>
-            <span className="edit-task-page__label">Sıklık (kaç kez yapılmalı?)</span>
-            <p className="edit-task-page__hint">
-              Görev bu periyotta birden fazla kez yapılacaksa, her tekrar için bir satır ekle.
-            </p>
-            {subtaskLabels.map((label, index) => (
-              <div key={index} className="edit-task-page__subtask-row">
-                <input
-                  className="edit-task-page__input edit-task-page__subtask-input"
-                  type="text"
-                  placeholder={`${index + 1}. tekrar (opsiyonel isim)`}
-                  value={label}
-                  onChange={(e) => updateSubtaskLabel(index, e.target.value)}
-                />
-                {subtaskLabels.length > 1 && (
-                  <button
-                    type="button"
-                    className="edit-task-page__remove-subtask"
-                    onClick={() => removeSubtaskRow(index)}
-                    aria-label="Bu tekrarı kaldır"
-                  >
-                    <X size={18} />
-                  </button>
-                )}
-              </div>
-            ))}
-            <button type="button" className="edit-task-page__add-subtask-link" onClick={addSubtaskRow}>
-              <Plus size={16} />
-              Tekrar Ekle
-            </button>
-          </>
-        )}
-
-        {errorMessage && <p className="edit-task-page__error">{errorMessage}</p>}
-
-        <div className="edit-task-page__footer">
-          <AppButton type="submit" title="Değişiklikleri Kaydet" loading={saving} />
+        <div className="edit-task-page__actions">
+          <AppButton
+            type="button"
+            title="İptal"
+            variant="ghost"
+            onClick={() => navigate(-1)}
+            disabled={saving}
+          />
+          <AppButton
+            type="submit"
+            title={saving ? 'Kaydediliyor...' : 'Değişiklikleri Kaydet'}
+            loading={saving}
+          />
         </div>
       </form>
     </div>
+  );
+}
+
+function Chip({ label, selected, onClick, color }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`edit-task-page__chip ${selected ? 'edit-task-page__chip--selected' : ''}`}
+      style={color ? { '--chip-color': color } : undefined}
+    >
+      {color && <span className="edit-task-page__chip-dot" style={{ background: color }} />}
+      {label}
+    </button>
   );
 }

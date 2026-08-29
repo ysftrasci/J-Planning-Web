@@ -40,7 +40,15 @@ export default function FocusHistoryPage() {
   const [selectedMonthKey, setSelectedMonthKey] = useState(null);
 
   useEffect(() => {
-    setSessions(getFocusSessions());
+    let mounted = true;
+    getFocusSessions()
+      .then((list) => {
+        if (mounted) setSessions(list || []);
+      })
+      .catch((err) => console.error('Odaklanma geçmişi yüklenemedi:', err));
+    return () => {
+      mounted = false;
+    };
   }, []);
 
   const availableMonths = useMemo(() => {

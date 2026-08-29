@@ -1,6 +1,6 @@
 // J-Planning — Service Worker (PWA Çevrimdışı Çalışma Desteği)
 
-const CACHE_NAME = 'j-planning-v3';
+const CACHE_NAME = 'j-planning-v5-turso';
 
 // Service Worker Kurulumu & Önbelleğe alma
 self.addEventListener('install', (event) => {
@@ -14,6 +14,7 @@ self.addEventListener('activate', (event) => {
       return Promise.all(
         cacheNames.map((cache) => {
           if (cache !== CACHE_NAME) {
+            console.log('[SW] Eski önbellek siliniyor:', cache);
             return caches.delete(cache);
           }
         })
@@ -38,7 +39,7 @@ self.addEventListener('message', (event) => {
   }
 });
 
-// Arka Plan Web Push (Push API) Dinleyicisi — Tarayıcı/Sekme kapalıyken işletim sistemine bildirim düşmesini sağlar
+// Arka Plan Web Push (Push API) Dinleyicisi
 self.addEventListener('push', (event) => {
   let payload = {};
   try {
@@ -74,16 +75,23 @@ self.addEventListener('notificationclick', (event) => {
   );
 });
 
-// İstek Yönetimi (Network First — Her zaman öncelikle güncel sunucu dosyasını çek)
+// İstek Yönetimi (Network First)
 self.addEventListener('fetch', (event) => {
   if (event.request.method !== 'GET') return;
   if (!event.request.url.startsWith('http')) return;
 
-  // HTML sayfa gezintisi için her zaman canlı sunucudan dene
+  const url = new URL(event.request.url);
+
+  // SADECE kendi sitemizin (origin) statik ve sayfa isteklerini işle.
+  // Dış API'ler (Cloudflare Worker, Turso DB, Firebase vb.) doğrudan tarayıcı tarafından yönetilsin.
+  if (url.origin !== self.location.origin) return;
+
+  // HTML sayfa gezintisi için Network-First (Taze HTTP Header/CSP garantisi)
   if (event.request.mode === 'navigate') {
     event.respondWith(
-      fetch(event.request).catch(() => {
-        return caches.match('/index.html');
+      fetch(event.request, { cache: 'no-cache' }).catch(async () => {
+        const cached = await caches.match('/index.html');
+        return cached || new Response('Offline', { status: 503, headers: { 'Content-Type': 'text/plain' } });
       })
     );
     return;
@@ -101,8 +109,10 @@ self.addEventListener('fetch', (event) => {
         }
         return response;
       })
-      .catch(() => {
-        return caches.match(event.request);
+      .catch(async () => {
+        const cached = await caches.match(event.request);
+        if (cached) return cached;
+        return new Response('', { status: 408, statusText: 'Offline' });
       })
   );
 });

@@ -101,6 +101,11 @@
   --color-priority-medium: #34D399;
   --color-priority-low: #64748B;
 
+  --color-success: #10B981;
+  --color-success-soft: rgba(16, 185, 129, 0.2);
+  --color-danger: #EF4444;
+  --color-danger-soft: rgba(239, 68, 68, 0.2);
+
   --color-border: #334155;
   --color-overlay: rgba(0, 0, 0, 0.75);
 

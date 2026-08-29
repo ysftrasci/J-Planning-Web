@@ -74,46 +74,56 @@ export default function TaskDetailPage() {
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
 
-  const load = useCallback(() => {
-    const db = getDb();
-    const t = findTaskByIdOrFirestoreId(taskId);
-    setTask(t);
-    if (t) {
-      const realId = t.id;
-      setTaskNotes(t.notes || '');
-      if (t.categoryId) {
-        const cat = db.getFirstSync('SELECT name FROM categories WHERE id = ?', [t.categoryId]);
-        setCategoryName(cat ? cat.name : '');
+  const load = useCallback(async () => {
+    try {
+      const db = getDb();
+      const t = await findTaskByIdOrFirestoreId(taskId);
+      setTask(t);
+      if (t) {
+        const realId = t.id;
+        setTaskNotes(t.notes || '');
+        if (t.categoryId) {
+          const cat = await db.getFirstAsync('SELECT name FROM categories WHERE id = ?', [t.categoryId]);
+          setCategoryName(cat ? cat.name : '');
+        } else {
+          setCategoryName('');
+        }
+        const todayKey = getPeriodKey(t.period, new Date());
+        const [studyLog, recs, jp] = await Promise.all([
+          getTaskStudyLog(realId, todayKey),
+          getTaskRecords(realId),
+          getTotalJPEarnedForTask(realId),
+        ]);
+        setStudyTimeText(studyLog?.studyTimeText || '');
+        setRecords(recs || []);
+        setTotalJP(jp);
       } else {
-        setCategoryName('');
+        setRecords([]);
+        setTotalJP(0);
       }
-      const todayKey = getPeriodKey(t.period, new Date());
-      const studyLog = getTaskStudyLog(realId, todayKey);
-      setStudyTimeText(studyLog?.studyTimeText || '');
-      setRecords(getTaskRecords(realId));
-      setTotalJP(getTotalJPEarnedForTask(realId));
-    } else {
-      setRecords([]);
-      setTotalJP(0);
+    } catch (err) {
+      console.error('Görev detayı yüklenirken hata:', err);
     }
   }, [taskId]);
 
-  useEffect(load, [load]);
+  useEffect(() => {
+    load();
+  }, [load]);
 
-  const handleSaveNotes = (e) => {
+  const handleSaveNotes = async (e) => {
     e?.preventDefault();
     const realId = task ? task.id : taskId;
-    updateTaskNotes(realId, taskNotes);
+    await updateTaskNotes(realId, taskNotes);
     setNotesSaved(true);
     setTimeout(() => setNotesSaved(false), 2000);
   };
 
-  const handleSaveStudyLog = (e) => {
+  const handleSaveStudyLog = async (e) => {
     e?.preventDefault();
     if (!task) return;
     const realId = task.id;
     const todayKey = getPeriodKey(task.period, new Date());
-    saveTaskStudyLog(realId, todayKey, studyTimeText);
+    await saveTaskStudyLog(realId, todayKey, studyTimeText);
     setStudyLogSaved(true);
     setTimeout(() => setStudyLogSaved(false), 2000);
   };
@@ -162,25 +172,31 @@ export default function TaskDetailPage() {
     setRecordToLateMark({ record, action });
   };
 
-  const confirmLateMark = () => {
+  const confirmLateMark = async () => {
     if (!recordToLateMark) return;
     try {
       if (recordToLateMark.action === 'UNCOMPLETE') {
-        lateMarkTaskUncomplete(taskId, recordToLateMark.record.periodKey);
+        await lateMarkTaskUncomplete(task.id, recordToLateMark.record.periodKey);
       } else {
-        lateMarkTaskComplete(taskId, recordToLateMark.record.periodKey);
+        await lateMarkTaskComplete(task.id, recordToLateMark.record.periodKey);
       }
       setRecordToLateMark(null);
-      load();
+      await load();
     } catch (e) {
       setErrorMessage(e.message);
       setRecordToLateMark(null);
     }
   };
 
-  const confirmDelete = () => {
-    deleteTask(taskId);
-    navigate('/');
+  const confirmDelete = async () => {
+    try {
+      await deleteTask(task.id);
+      setShowDeleteModal(false);
+      navigate('/');
+    } catch (e) {
+      setErrorMessage(e.message);
+      setShowDeleteModal(false);
+    }
   };
 
   return (
@@ -345,7 +361,7 @@ export default function TaskDetailPage() {
       {!isFriendAssigned && (
         <div className="task-detail-page__footer" style={{ display: 'flex', gap: 'var(--space-md)' }}>
           <AppButton title="Görevi Düzenle" variant="secondary" onClick={() => navigate(`/task/${taskId}/edit`)} />
-          <AppButton title="Görevi Sil" variant="danger" onClick={() => setShowDeleteModal(true)} />
+          <AppButton title="Görevi Sil" variant="danger" onClick={() => setShowDeleteModal(false || true)} />
         </div>
       )}
 

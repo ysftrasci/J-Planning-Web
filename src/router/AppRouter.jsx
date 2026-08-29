@@ -24,34 +24,6 @@ import DailyNotesPage from '../pages/DailyNotesPage.jsx';
 import AccountDeletionPendingModal from '../components/AccountDeletionPendingModal.jsx';
 import { useAuth } from '../context/AuthContext.jsx';
 
-// Aşama 0 kapsamında kurulan temel yönlendirme (routing) iskeleti,
-// Aşama 2 ile birlikte kimlik doğrulama koruması eklendi.
-// Aşama 3 ile birlikte çekirdek görev ekranları eklendi.
-// Aşama 4 ile birlikte ödül/puan ekranları eklendi.
-// Aşama 5 ile birlikte arkadaşlık/sosyal ekranları eklendi.
-// Aşama 6 ile birlikte odaklanma modu ekranları eklendi.
-// Aşama 7 ile birlikte profil ve ayarlar ekranları eklendi.
-// Rotalar:
-//   "/"                     -> Aşama 3: TasksListPage (tamamlandı)
-//   "/add-task"             -> Aşama 3: AddTaskPage (tamamlandı)
-//   "/task/:taskId"         -> Aşama 3: TaskDetailPage (tamamlandı)
-//   "/categories"           -> Aşama 3 & 7: CategoriesPage (tamamlandı)
-//   "/rewards"              -> Aşama 4: RewardsPage (tamamlandı)
-//   "/rewards/history"      -> Aşama 4: RewardHistoryPage (tamamlandı)
-//   "/friends"              -> Aşama 5: FriendsListPage (tamamlandı)
-//   "/friends/add"          -> Aşama 5: AddFriendPage (tamamlandı)
-//   "/friends/:friendshipId"-> Aşama 5: FriendDetailPage (tamamlandı)
-//   "/assigned-by-me"       -> Aşama 5: AssignedByMePage (tamamlandı)
-//   "/focus"                -> Aşama 6: FocusPage (tamamlandı)
-//   "/focus/history"        -> Aşama 6: FocusHistoryPage (tamamlandı)
-//   "/profile"              -> Aşama 7: ProfilePage (tamamlandı)
-//   "/profile/edit"         -> Aşama 7: EditProfilePage (tamamlandı)
-//   "/profile/notifications"-> Aşama 7: NotificationSettingsPage (tamamlandı)
-//   "/profile/danger-zone"   -> Aşama 7: DangerZonePage (tamamlandı)
-
-// Giriş yapılmamışsa /login'e yönlendirir; auth durumu netleşene kadar
-// (initializing) hiçbir şey render etmez, böylece kısa süreliğine
-// LoginPage'in yanıp sönmesi önlenir.
 function LoadingScreen() {
   return (
     <div
@@ -60,24 +32,27 @@ function LoadingScreen() {
         flexDirection: 'column',
         alignItems: 'center',
         justifyContent: 'center',
-        minHeight: '100vh',
-        backgroundColor: 'var(--color-background, #FAF5F7)',
-        color: 'var(--color-accent, #E06D8C)',
-        fontFamily: 'sans-serif',
+        height: '100vh',
         gap: '12px',
+        color: '#1a1a1a',
       }}
     >
+      <div
+        style={{
+          width: '32px',
+          height: '32px',
+          border: '3px solid #e5e5e5',
+          borderTopColor: '#C98A2C',
+          borderRadius: '50%',
+          animation: 'spin 0.8s linear infinite',
+        }}
+      />
       <h2 style={{ margin: 0, fontSize: '22px', fontWeight: '700' }}>J-Planning</h2>
       <p style={{ margin: 0, opacity: 0.7, fontSize: '14px' }}>Yükleniyor, lütfen bekleyin...</p>
     </div>
   );
 }
 
-// Güvenlik: giriş yapmış olsa bile e-postasını doğrulamayan kullanıcı
-// (bkz. services/emailAuth.js -> registerWithEmail) uygulamanın hiçbir
-// ekranını göremez, sadece VerifyEmailPage ile karşılaşır. Bu sayede
-// başka birinin e-postasıyla hesap açılsa bile o hesap gerçek kullanıma
-// asla geçemez (doğrulama linki her zaman e-postanın gerçek sahibine gider).
 function RequireAuth({ children }) {
   const { user, initializing, signOut } = useAuth();
   if (initializing) return <LoadingScreen />;
@@ -100,10 +75,6 @@ function RequireAuth({ children }) {
   return children;
 }
 
-// Doğrulama bekleyen kullanıcı /verify-email dışındaki bir rotaya gitmeye
-// çalışırsa zaten yukarıdaki RequireAuth onu buraya geri yönlendirir.
-// Bu bileşen de tam tersini yapar: doğrulanmış (veya hiç giriş yapmamış)
-// kullanıcı /verify-email'i doğrudan ziyaret ederse uygun yere yönlendirilir.
 function RequireUnverified({ children }) {
   const { user, initializing } = useAuth();
   if (initializing) return <LoadingScreen />;
@@ -147,10 +118,15 @@ export default function AppRouter() {
         }
       >
         <Route index element={<TasksListPage />} />
+        <Route path="tasks" element={<TasksListPage />} />
+        <Route path="tasks/new" element={<AddTaskPage />} />
+        <Route path="task/new" element={<AddTaskPage />} />
         <Route path="add-task" element={<AddTaskPage />} />
-        <Route path="daily-notes" element={<DailyNotesPage />} />
+        <Route path="tasks/:taskId" element={<TaskDetailPage />} />
         <Route path="task/:taskId" element={<TaskDetailPage />} />
+        <Route path="tasks/:taskId/edit" element={<EditTaskPage />} />
         <Route path="task/:taskId/edit" element={<EditTaskPage />} />
+        <Route path="daily-notes" element={<DailyNotesPage />} />
         <Route path="categories" element={<CategoriesPage />} />
         <Route path="rewards" element={<RewardsPage />} />
         <Route path="rewards/history" element={<RewardHistoryPage />} />

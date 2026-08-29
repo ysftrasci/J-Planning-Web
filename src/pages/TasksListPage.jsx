@@ -1,17 +1,17 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Send, Plus, CheckCircle2, ChevronRight, Bell, Search, X, SlidersHorizontal, Filter, BookOpen } from 'lucide-react';
+import { Send, Plus, CheckCircle2, Search, X, SlidersHorizontal, Filter, BookOpen } from 'lucide-react';
 import {
   getActiveTasks,
-  getCurrentPeriodStatus,
   completeSubtask,
   uncompleteSubtask,
   processExpiredPeriods,
-  getTaskRecords,
+  getAllTaskRecords,
   createTaskFromAssignment,
 } from '../db/taskRepository';
 import { getCategories } from '../db/categoryRepository';
 import { calculateCurrentStreak } from '../utils/streak';
+import { getPeriodKey } from '../utils/period';
 import { useAuth } from '../context/AuthContext.jsx';
 import { listenPendingTasksAssignedToMe, acceptAssignedTask, rejectAssignedTask, syncCompletionStatusToFirestore } from '../services/taskAssignmentService';
 import { listenFriends } from '../services/friendService';
@@ -26,19 +26,20 @@ import './TasksListPage.css';
 export default function TasksListPage() {
   const { user } = useAuth();
   const navigate = useNavigate();
+
   const [sections, setSections] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [toast, setToast] = useState(null);
+  const [toast, setToast] = useState('');
   const [pendingAssigned, setPendingAssigned] = useState([]);
   const [modalTask, setModalTask] = useState(null);
   const [friendNameByUid, setFriendNameByUid] = useState({});
+
+  // Arama ve Filtreleme State'leri
   const [searchQuery, setSearchQuery] = useState('');
-  
-  // Filtre durumları
   const [showFilterModal, setShowFilterModal] = useState(false);
-  const [periodFilter, setPeriodFilter] = useState('ALL'); // 'ALL' | 'DAILY' | 'WEEKLY' | 'MONTHLY' | 'ONCE'
-  const [priorityFilter, setPriorityFilter] = useState('ALL'); // 'ALL' | 'HIGH' | 'MEDIUM' | 'LOW'
-  const [sourceFilter, setSourceFilter] = useState('ALL'); // 'ALL' | 'MINE' | 'RECEIVED'
+  const [periodFilter, setPeriodFilter] = useState('ALL');
+  const [priorityFilter, setPriorityFilter] = useState('ALL');
+  const [sourceFilter, setSourceFilter] = useState('ALL');
 
   useEffect(() => {
     if (!user) return;
@@ -50,39 +51,68 @@ export default function TasksListPage() {
     return unsub;
   }, [user]);
 
-  const load = useCallback(() => {
-    processExpiredPeriods();
+  const load = useCallback(async () => {
+    try {
+      await processExpiredPeriods();
 
-    const tasks = getActiveTasks();
-    const categories = getCategories();
-    const categoryMap = new Map(categories.map((c) => [c.id, c]));
-    const grouped = new Map();
+      const [tasks, categories, allRecords] = await Promise.all([
+        getActiveTasks(),
+        getCategories(),
+        getAllTaskRecords(),
+      ]);
+      const categoryMap = new Map((categories || []).map((c) => [c.id, c]));
+      const grouped = new Map();
 
-    tasks.forEach((task) => {
-      if (task.assignmentDirection === 'SENT') return;
+      const recordsByTaskId = new Map();
+      for (const r of (allRecords || [])) {
+        if (!recordsByTaskId.has(r.taskId)) {
+          recordsByTaskId.set(r.taskId, []);
+        }
+        recordsByTaskId.get(r.taskId).push(r);
+      }
 
-      const displayTask = task.assignedByUserId && friendNameByUid[task.assignedByUserId]
-        ? { ...task, assignedByName: friendNameByUid[task.assignedByUserId] }
-        : task;
+      const now = new Date();
 
-      const records = getTaskRecords(task.id);
-      const { status, completedSubtasks } = getCurrentPeriodStatus(task);
-      const streak = calculateCurrentStreak(task, records);
-      const item = { task: displayTask, status, completedSubtasks, streak };
+      const items = (tasks || []).map((task) => {
+        if (task.assignmentDirection === 'SENT') return null;
 
-      const categoryName = task.categoryId && categoryMap.has(task.categoryId)
-        ? categoryMap.get(task.categoryId).name
-        : 'Kategorisiz';
+        const displayTask = task.assignedByUserId && friendNameByUid[task.assignedByUserId]
+          ? { ...task, assignedByName: friendNameByUid[task.assignedByUserId] }
+          : task;
 
-      if (!grouped.has(categoryName)) grouped.set(categoryName, []);
-      grouped.get(categoryName).push(item);
-    });
+        const taskRecords = recordsByTaskId.get(task.id) || [];
+        const currentPeriodKey = getPeriodKey(task.period, now);
+        const currentRecord = taskRecords.find((r) => r.periodKey === currentPeriodKey);
 
-    setSections(Array.from(grouped.entries()).map(([title, data]) => ({ title, data })));
-    setLoading(false);
+        const status = currentRecord ? currentRecord.status : 'PENDING';
+        const completedSubtasks = currentRecord ? (currentRecord.completedSubtasks || 0) : 0;
+        const streak = calculateCurrentStreak(task, taskRecords);
+
+        return { task: displayTask, status, completedSubtasks, streak };
+      });
+
+      items.forEach((item) => {
+        if (!item) return;
+        const task = item.task;
+        const categoryName = task.categoryId && categoryMap.has(task.categoryId)
+          ? categoryMap.get(task.categoryId).name
+          : 'KATEGORİSİZ';
+
+        if (!grouped.has(categoryName)) grouped.set(categoryName, []);
+        grouped.get(categoryName).push(item);
+      });
+
+      setSections(Array.from(grouped.entries()).map(([title, data]) => ({ title, data })));
+    } catch (err) {
+      console.error('Görev listesi yüklenirken hata:', err);
+    } finally {
+      setLoading(false);
+    }
   }, [friendNameByUid]);
 
-  useEffect(load, [load]);
+  useEffect(() => {
+    load();
+  }, [load]);
 
   useEffect(() => {
     const handleCloudUpdate = () => {
@@ -96,50 +126,89 @@ export default function TasksListPage() {
 
   useEffect(() => {
     if (!user) return;
-    const unsub = listenPendingTasksAssignedToMe(user.uid, setPendingAssigned);
+    const unsub = listenPendingTasksAssignedToMe(user.uid, (tasks) => {
+      setPendingAssigned(tasks || []);
+    });
     return unsub;
   }, [user]);
 
-  const showToast = (message) => {
-    setToast(message);
-    setTimeout(() => setToast(null), 3500);
+  const showToast = (msg) => {
+    setToast(msg);
+    setTimeout(() => setToast(''), 3000);
   };
 
-  const handleComplete = (task) => {
+  const handleComplete = async (task) => {
+    // 1. ANINDA ARAYÜZÜ GÜNCELLE (Optimistic Update — 0ms Gecikme)
+    setSections((prev) =>
+      prev.map((sec) => ({
+        ...sec,
+        data: sec.data.map((item) => {
+          if (item.task.id === task.id) {
+            const nextCompleted = Math.min(task.subtaskCount || 1, (item.completedSubtasks || 0) + 1);
+            const isDone = nextCompleted >= (task.subtaskCount || 1);
+            return {
+              ...item,
+              completedSubtasks: nextCompleted,
+              status: isDone ? 'SUCCESSFUL' : 'PENDING_PARTIAL',
+              streak: isDone ? item.streak + 1 : item.streak,
+            };
+          }
+          return item;
+        }),
+      }))
+    );
+
+    triggerConfetti();
+
+    // 2. Arka planda Turso veritabanına yaz
     try {
-      const result = completeSubtask(task.id);
-      if (result?.fullyCompleted) {
-        triggerConfetti();
-        if (result.bonus > 0) {
-          showToast(`Seri Bonusu! 🔥 ${result.newStreak} günlük seriye ulaştın! +${result.bonus} JP bonus kazandın (toplam +${result.total} JP).`);
-        }
-      }
+      const result = await completeSubtask(task.id);
       if (result?.firestoreAssignmentId) {
-        syncCompletionStatusToFirestore(result.firestoreAssignmentId, {
+        await syncCompletionStatusToFirestore(result.firestoreAssignmentId, {
           isCompleted: !!result.fullyCompleted || !!result.alreadyComplete,
           completedSubtasks: result.completedSubtasks,
           subtaskCount: result.subtaskCount,
         });
       }
-      load();
     } catch (e) {
       showToast(e.message);
+      await load();
     }
   };
 
-  const handleUncomplete = (task) => {
+  const handleUncomplete = async (task) => {
+    // 1. ANINDA ARAYÜZÜ GERİ AL (Optimistic Update — 0ms Gecikme)
+    setSections((prev) =>
+      prev.map((sec) => ({
+        ...sec,
+        data: sec.data.map((item) => {
+          if (item.task.id === task.id) {
+            const nextCompleted = Math.max(0, (item.completedSubtasks || 0) - 1);
+            return {
+              ...item,
+              completedSubtasks: nextCompleted,
+              status: nextCompleted > 0 ? 'PENDING_PARTIAL' : 'PENDING',
+              streak: Math.max(0, item.streak - 1),
+            };
+          }
+          return item;
+        }),
+      }))
+    );
+
+    // 2. Arka planda Turso veritabanından geri al
     try {
-      const result = uncompleteSubtask(task.id);
+      const result = await uncompleteSubtask(task.id);
       if (result?.firestoreAssignmentId) {
-        syncCompletionStatusToFirestore(result.firestoreAssignmentId, {
+        await syncCompletionStatusToFirestore(result.firestoreAssignmentId, {
           isCompleted: false,
           completedSubtasks: result.completedSubtasks,
           subtaskCount: result.subtaskCount,
         });
       }
-      load();
     } catch (e) {
       showToast(e.message);
+      await load();
     }
   };
 
@@ -147,9 +216,9 @@ export default function TasksListPage() {
     if (!modalTask) return;
     try {
       await acceptAssignedTask(modalTask.id);
-      createTaskFromAssignment(modalTask);
+      await createTaskFromAssignment(modalTask);
       setModalTask(null);
-      load();
+      await load();
     } catch (e) {
       showToast(e.message);
     }
@@ -165,59 +234,56 @@ export default function TasksListPage() {
     }
   };
 
-  const isFilterActive = periodFilter !== 'ALL' || priorityFilter !== 'ALL' || sourceFilter !== 'ALL';
-
-  const resetFilters = () => {
-    setPeriodFilter('ALL');
-    setPriorityFilter('ALL');
-    setSourceFilter('ALL');
-  };
-
   const filteredSections = useMemo(() => {
-    const q = searchQuery.trim().toLowerCase();
-    return sections
-      .map((sec) => {
-        const matchingData = sec.data.filter((item) => {
-          const t = item.task;
-          const matchesQuery = !q || t.title.toLowerCase().includes(q) || (t.description && t.description.toLowerCase().includes(q));
+    const query = searchQuery.trim().toLowerCase();
+    
+    return sections.map((section) => {
+      const filteredData = section.data.filter(({ task }) => {
+        if (query) {
+          const matchTitle = (task.title || '').toLowerCase().includes(query);
+          const matchDesc = (task.description || '').toLowerCase().includes(query);
+          const matchAssigner = (task.assignedByName || '').toLowerCase().includes(query);
+          if (!matchTitle && !matchDesc && !matchAssigner) return false;
+        }
 
-          let matchesPeriod = true;
-          if (periodFilter !== 'ALL') matchesPeriod = t.period === periodFilter;
+        if (periodFilter !== 'ALL' && task.period !== periodFilter) {
+          return false;
+        }
 
-          let matchesPriority = true;
-          if (priorityFilter !== 'ALL') matchesPriority = t.priority === priorityFilter;
+        if (priorityFilter !== 'ALL' && task.priority !== priorityFilter) {
+          return false;
+        }
 
-          let matchesSource = true;
-          if (sourceFilter === 'MINE') matchesSource = !t.assignmentDirection;
-          else if (sourceFilter === 'RECEIVED') matchesSource = t.assignmentDirection === 'RECEIVED';
+        if (sourceFilter === 'MINE' && task.assignmentDirection === 'RECEIVED') {
+          return false;
+        }
+        if (sourceFilter === 'RECEIVED' && task.assignmentDirection !== 'RECEIVED') {
+          return false;
+        }
 
-          return matchesQuery && matchesPeriod && matchesPriority && matchesSource;
-        });
-        return { ...sec, data: matchingData };
-      })
-      .filter((sec) => sec.data.length > 0);
+        return true;
+      });
+
+      return {
+        ...section,
+        data: filteredData,
+      };
+    }).filter((section) => section.data.length > 0);
   }, [sections, searchQuery, periodFilter, priorityFilter, sourceFilter]);
 
-  const pendingBannerText = useMemo(() => {
-    if (!pendingAssigned || pendingAssigned.length === 0) return '';
-    const sendersMap = new Map();
-    pendingAssigned.forEach((t) => {
-      const name = t.assignedByName || 'Bir arkadaşın';
-      sendersMap.set(name, (sendersMap.get(name) || 0) + 1);
-    });
-
-    const senders = Array.from(sendersMap.entries());
-    if (senders.length === 1) {
-      const [name, count] = senders[0];
-      return `${name} sana ${count} görev atadı, onay bekliyor`;
-    }
-    return `${pendingAssigned.length} görev isteğin var (${senders.length} arkadaşından), onay bekliyor`;
-  }, [pendingAssigned]);
-
-  const hasTasks = sections.length > 0;
+  const hasActiveFilters = periodFilter !== 'ALL' || priorityFilter !== 'ALL' || sourceFilter !== 'ALL';
+  const totalTasksCount = sections.reduce((sum, s) => sum + s.data.length, 0);
 
   return (
     <div className="tasks-list-page">
+      {toast && (
+        <div className="tasks-list-page__toast" role="alert">
+          <CheckCircle2 size={18} />
+          <span>{toast}</span>
+        </div>
+      )}
+
+      {/* Header: Başlık ve Üst Butonlar */}
       <div className="tasks-list-page__header">
         <h1>Görevlerim</h1>
         <div className="tasks-list-page__header-buttons">
@@ -225,8 +291,6 @@ export default function TasksListPage() {
             type="button"
             className="tasks-list-page__note-button"
             onClick={() => navigate('/daily-notes')}
-            aria-label="Günün Özeti"
-            title="Günün Özeti"
           >
             <BookOpen size={16} />
             <span>Günün Özeti</span>
@@ -235,36 +299,25 @@ export default function TasksListPage() {
             type="button"
             className="tasks-list-page__icon-button"
             onClick={() => navigate('/assigned-by-me')}
-            aria-label="Attıklarım"
-            title="Attıklarım"
+            title="Atadığım Görevler"
           >
             <Send size={18} />
           </button>
           <button
             type="button"
             className="tasks-list-page__add-button"
-            onClick={() => navigate('/add-task')}
-            aria-label="Yeni görev ekle"
+            onClick={() => navigate('/tasks/new')}
+            title="Yeni Görev Ekle"
           >
-            <Plus size={24} />
+            <Plus size={22} />
           </button>
         </div>
       </div>
 
-      {pendingAssigned.length > 0 && (
-        <button type="button" className="tasks-list-page__pending-banner" onClick={() => setModalTask(pendingAssigned[0])}>
-          <Bell size={18} />
-          <span>{pendingBannerText}</span>
-          <ChevronRight size={16} />
-        </button>
-      )}
-
-      {toast && <div className="tasks-list-page__toast">{toast}</div>}
-
-      {/* Arama ve Filtreleme Bölümü */}
+      {/* Arama ve Filtre Çubuğu */}
       <div className="tasks-list-page__filter-bar">
         <div className="tasks-list-page__search-wrap">
-          <Search size={16} color="var(--color-text-secondary)" />
+          <Search size={18} className="tasks-list-page__search-icon" />
           <input
             type="text"
             className="tasks-list-page__search-input"
@@ -277,8 +330,9 @@ export default function TasksListPage() {
               type="button"
               className="tasks-list-page__search-clear"
               onClick={() => setSearchQuery('')}
+              aria-label="Aramayı temizle"
             >
-              <X size={14} />
+              <X size={16} />
             </button>
           )}
         </div>
@@ -286,39 +340,41 @@ export default function TasksListPage() {
         <div className="tasks-list-page__chips-row">
           <button
             type="button"
-            className={`tasks-list-page__chip ${!isFilterActive ? 'tasks-list-page__chip--active' : ''}`}
-            onClick={resetFilters}
+            className={`tasks-list-page__chip ${periodFilter === 'ALL' && priorityFilter === 'ALL' && sourceFilter === 'ALL' ? 'tasks-list-page__chip--active' : ''}`}
+            onClick={() => {
+              setPeriodFilter('ALL');
+              setPriorityFilter('ALL');
+              setSourceFilter('ALL');
+            }}
           >
             Tümü
           </button>
           <button
             type="button"
             className={`tasks-list-page__chip ${periodFilter === 'DAILY' ? 'tasks-list-page__chip--active' : ''}`}
-            onClick={() => setPeriodFilter((prev) => (prev === 'DAILY' ? 'ALL' : 'DAILY'))}
+            onClick={() => setPeriodFilter(periodFilter === 'DAILY' ? 'ALL' : 'DAILY')}
           >
             Günlük
           </button>
           <button
             type="button"
             className={`tasks-list-page__chip ${priorityFilter === 'HIGH' ? 'tasks-list-page__chip--active' : ''}`}
-            onClick={() => setPriorityFilter((prev) => (prev === 'HIGH' ? 'ALL' : 'HIGH'))}
+            onClick={() => setPriorityFilter(priorityFilter === 'HIGH' ? 'ALL' : 'HIGH')}
           >
             Yüksek Öncelik
           </button>
           <button
             type="button"
             className={`tasks-list-page__chip ${sourceFilter === 'RECEIVED' ? 'tasks-list-page__chip--active' : ''}`}
-            onClick={() => setSourceFilter((prev) => (prev === 'RECEIVED' ? 'ALL' : 'RECEIVED'))}
+            onClick={() => setSourceFilter(sourceFilter === 'RECEIVED' ? 'ALL' : 'RECEIVED')}
           >
             Arkadaşımdan
           </button>
           <button
             type="button"
-            className={`tasks-list-page__chip ${isFilterActive ? 'tasks-list-page__chip--active' : ''}`}
+            className={`tasks-list-page__chip ${hasActiveFilters ? 'tasks-list-page__chip--active' : ''}`}
             onClick={() => setShowFilterModal(true)}
-            aria-label="Filtrele"
-            title="Tüm Filtreler"
-            style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}
+            style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
           >
             <SlidersHorizontal size={14} />
             <span>Filtrele</span>
@@ -326,52 +382,78 @@ export default function TasksListPage() {
         </div>
       </div>
 
-      {!loading && filteredSections.length === 0 && (
-        <EmptyState
-          icon={CheckCircle2}
-          title={searchQuery || isFilterActive ? 'Eşleşen görev bulunamadı' : 'Henüz görev yok'}
-          subtitle={searchQuery || isFilterActive ? 'Filtreleri veya arama kelimesini değiştirmeyi dene' : 'Sağ üstteki + butonuna dokunarak ilk görevini ekle'}
-        />
-      )}
-
-      {filteredSections.map((section) => (
-        <div key={section.title} className="tasks-list-page__section">
-          <h2 className="tasks-list-page__section-title">{section.title}</h2>
-          {section.data.map((item) => (
-            <TaskCard
-              key={item.task.id}
-              task={item.task}
-              status={item.status}
-              completedSubtasks={item.completedSubtasks}
-              streak={item.streak}
-              onOpen={() => navigate(`/task/${item.task.id}`)}
-              onComplete={() => handleComplete(item.task)}
-              onUncomplete={() => handleUncomplete(item.task)}
-            />
-          ))}
-        </div>
-      ))}
-
-      {hasTasks && (
+      {/* Sana Atanan Görevler Banner'ı */}
+      {pendingAssigned.length > 0 && (
         <button
           type="button"
-          className="tasks-list-page__danger-zone-link"
-          onClick={() => navigate('/profile/danger-zone')}
+          className="tasks-list-page__pending-banner"
+          onClick={() => setModalTask(pendingAssigned[0])}
         >
-          Tehlikeli Alan'ı görüntüle
-          <ChevronRight size={14} />
+          <Send size={18} />
+          <span>Sana atanan {pendingAssigned.length} yeni görev var!</span>
         </button>
       )}
 
+      {/* Görev Listesi */}
+      {loading ? (
+        <div style={{ textAlign: 'center', padding: '40px', color: 'var(--color-text-muted)' }}>Yükleniyor...</div>
+      ) : filteredSections.length === 0 ? (
+        totalTasksCount === 0 ? (
+          <EmptyState
+            icon={CheckCircle2}
+            title="Henüz görev eklemedin"
+            subtitle="Sağ üstteki + butonuna basarak ilk görevini oluştur."
+          />
+        ) : (
+          <EmptyState
+            icon={Filter}
+            title="Eşleşen görev bulunamadı"
+            subtitle="Arama kriterlerini veya filtreleri değiştirerek tekrar dene."
+          />
+        )
+      ) : (
+        <div className="tasks-list-page__sections">
+          {filteredSections.map((section) => (
+            <div key={section.title} className="tasks-list-page__section">
+              <h3 className="tasks-list-page__section-title">{section.title}</h3>
+              <div className="tasks-list-page__list">
+                {section.data.map(({ task, status, completedSubtasks, streak }) => (
+                  <TaskCard
+                    key={task.id}
+                    task={task}
+                    status={status}
+                    completedSubtasks={completedSubtasks}
+                    streak={streak}
+                    onComplete={() => handleComplete(task)}
+                    onUncomplete={() => handleUncomplete(task)}
+                    onClick={() => navigate(`/tasks/${task.id}`)}
+                  />
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Alt Tehlikeli Alan Linki */}
+      <button
+        type="button"
+        className="tasks-list-page__danger-zone-link"
+        onClick={() => navigate('/profile/danger-zone')}
+      >
+        Tehlikeli Alanı görüntüle &gt;
+      </button>
+
+      {/* Atanan Görev Karar Modalı */}
       <AssignedTaskModal
-        open={!!modalTask}
         task={modalTask}
+        open={!!modalTask}
         onClose={() => setModalTask(null)}
         onAccept={handleAcceptAssigned}
         onReject={handleRejectAssigned}
       />
 
-      {/* Detaylı Filtreleme Modalı */}
+      {/* Filtreleme Seçenekleri Modalı */}
       {showFilterModal && (
         <AppModal
           open={showFilterModal}
@@ -380,40 +462,77 @@ export default function TasksListPage() {
         >
           <div className="tasks-list-page__filter-modal">
             <div className="tasks-list-page__filter-group">
-              <label className="tasks-list-page__filter-label">Periyot</label>
+              <span className="tasks-list-page__filter-label">Periyot:</span>
               <div className="tasks-list-page__chip-row">
-                <Chip label="Tümü" selected={periodFilter === 'ALL'} onClick={() => setPeriodFilter('ALL')} />
-                <Chip label="Günlük" selected={periodFilter === 'DAILY'} onClick={() => setPeriodFilter('DAILY')} />
-                <Chip label="Haftalık" selected={periodFilter === 'WEEKLY'} onClick={() => setPeriodFilter('WEEKLY')} />
-                <Chip label="Aylık" selected={periodFilter === 'MONTHLY'} onClick={() => setPeriodFilter('MONTHLY')} />
-                <Chip label="Tek Seferlik" selected={periodFilter === 'ONCE'} onClick={() => setPeriodFilter('ONCE')} />
+                {[
+                  { id: 'ALL', label: 'Tümü' },
+                  { id: 'DAILY', label: 'Günlük' },
+                  { id: 'WEEKLY', label: 'Haftalık' },
+                  { id: 'MONTHLY', label: 'Aylık' },
+                  { id: 'ONCE', label: 'Tek Seferlik' },
+                ].map((opt) => (
+                  <button
+                    key={opt.id}
+                    type="button"
+                    className={`tasks-list-page__chip ${periodFilter === opt.id ? 'tasks-list-page__chip--active' : ''}`}
+                    onClick={() => setPeriodFilter(opt.id)}
+                  >
+                    {opt.label}
+                  </button>
+                ))}
               </div>
             </div>
 
             <div className="tasks-list-page__filter-group">
-              <label className="tasks-list-page__filter-label">Öncelik / Zorluk</label>
+              <span className="tasks-list-page__filter-label">Öncelik:</span>
               <div className="tasks-list-page__chip-row">
-                <Chip label="Tümü" selected={priorityFilter === 'ALL'} onClick={() => setPriorityFilter('ALL')} />
-                <Chip label="Yüksek / Zor" selected={priorityFilter === 'HIGH'} onClick={() => setPriorityFilter('HIGH')} />
-                <Chip label="Orta" selected={priorityFilter === 'MEDIUM'} onClick={() => setPriorityFilter('MEDIUM')} />
-                <Chip label="Düşük / Kolay" selected={priorityFilter === 'LOW'} onClick={() => setPriorityFilter('LOW')} />
+                {[
+                  { id: 'ALL', label: 'Tümü' },
+                  { id: 'HIGH', label: 'Yüksek' },
+                  { id: 'MEDIUM', label: 'Orta' },
+                  { id: 'LOW', label: 'Düşük' },
+                ].map((opt) => (
+                  <button
+                    key={opt.id}
+                    type="button"
+                    className={`tasks-list-page__chip ${priorityFilter === opt.id ? 'tasks-list-page__chip--active' : ''}`}
+                    onClick={() => setPriorityFilter(opt.id)}
+                  >
+                    {opt.label}
+                  </button>
+                ))}
               </div>
             </div>
 
             <div className="tasks-list-page__filter-group">
-              <label className="tasks-list-page__filter-label">Görev Kaynağı</label>
+              <span className="tasks-list-page__filter-label">Kaynak:</span>
               <div className="tasks-list-page__chip-row">
-                <Chip label="Tümü" selected={sourceFilter === 'ALL'} onClick={() => setSourceFilter('ALL')} />
-                <Chip label="Kendi Görevlerim" selected={sourceFilter === 'MINE'} onClick={() => setSourceFilter('MINE')} />
-                <Chip label="Arkadaşımdan Gelenler" selected={sourceFilter === 'RECEIVED'} onClick={() => setSourceFilter('RECEIVED')} />
+                {[
+                  { id: 'ALL', label: 'Tümü' },
+                  { id: 'MINE', label: 'Kendi Görevlerim' },
+                  { id: 'RECEIVED', label: 'Bana Atananlar' },
+                ].map((opt) => (
+                  <button
+                    key={opt.id}
+                    type="button"
+                    className={`tasks-list-page__chip ${sourceFilter === opt.id ? 'tasks-list-page__chip--active' : ''}`}
+                    onClick={() => setSourceFilter(opt.id)}
+                  >
+                    {opt.label}
+                  </button>
+                ))}
               </div>
             </div>
 
             <div className="tasks-list-page__modal-actions">
               <AppButton
-                title="Filtreleri Sıfırla"
-                variant="secondary"
-                onClick={resetFilters}
+                title="Sıfırla"
+                variant="ghost"
+                onClick={() => {
+                  setPeriodFilter('ALL');
+                  setPriorityFilter('ALL');
+                  setSourceFilter('ALL');
+                }}
               />
               <AppButton
                 title="Uygula"
@@ -424,17 +543,5 @@ export default function TasksListPage() {
         </AppModal>
       )}
     </div>
-  );
-}
-
-function Chip({ label, selected, onClick }) {
-  return (
-    <button
-      type="button"
-      className={`tasks-list-page__chip ${selected ? 'tasks-list-page__chip--active' : ''}`}
-      onClick={onClick}
-    >
-      {label}
-    </button>
   );
 }

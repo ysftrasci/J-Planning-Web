@@ -1,10 +1,20 @@
+/* J-Planning — Görevler Listesi Sayfası */
+
+.tasks-list-page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+  max-width: 900px;
+  margin: 0 auto;
+  width: 100%;
+}
+
 .tasks-list-page__header {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: var(--space-md, 14px);
-  flex-wrap: wrap;
-  margin-bottom: var(--space-lg);
+  margin-bottom: var(--space-sm);
 }
 
 .tasks-list-page__header h1 {
@@ -12,7 +22,7 @@
   font-weight: 800;
   letter-spacing: -0.5px;
   color: var(--color-text-primary);
-  margin-right: var(--space-xs, 4px);
+  margin: 0;
 }
 
 .tasks-list-page__header-buttons {
@@ -22,30 +32,29 @@
 }
 
 .tasks-list-page__note-button {
-  height: 40px;
+  height: 38px;
   padding: 0 14px;
   border-radius: var(--radius-pill);
-  background-color: var(--color-accent-soft);
-  color: var(--color-accent-dark);
-  border: 1px solid var(--color-border);
+  background-color: rgba(16, 185, 129, 0.15);
+  color: #10b981;
+  border: 1px solid rgba(16, 185, 129, 0.3);
   display: flex;
   align-items: center;
   gap: 6px;
   font-size: 13px;
   font-weight: 600;
   cursor: pointer;
-  box-shadow: var(--shadow-card);
-  transition: all 0.22s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: all 0.2s ease;
 }
+
 .tasks-list-page__note-button:hover {
+  background-color: rgba(16, 185, 129, 0.25);
   transform: translateY(-1px);
-  border-color: var(--color-accent);
-  box-shadow: var(--shadow-card-hover);
 }
 
 .tasks-list-page__icon-button {
-  width: 40px;
-  height: 40px;
+  width: 38px;
+  height: 38px;
   border-radius: var(--radius-pill);
   background-color: var(--color-surface);
   color: var(--color-text-secondary);
@@ -54,26 +63,18 @@
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  position: relative;
-  box-shadow: var(--shadow-card);
-  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: all 0.2s ease;
 }
 
 .tasks-list-page__icon-button:hover {
   transform: translateY(-1px);
-  color: var(--color-accent-dark);
-  border-color: var(--color-accent);
-}
-
-.tasks-list-page__icon-button--active {
-  background-color: var(--color-accent-soft);
-  color: var(--color-accent-dark);
-  border-color: var(--color-accent);
+  color: var(--color-text-primary);
+  border-color: var(--color-text-muted);
 }
 
 .tasks-list-page__add-button {
-  width: 42px;
-  height: 42px;
+  width: 38px;
+  height: 38px;
   border-radius: var(--radius-pill);
   background: linear-gradient(135deg, #e06d8c 0%, #b83256 100%);
   color: #ffffff;
@@ -82,13 +83,13 @@
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  box-shadow: 0 4px 14px rgba(184, 50, 86, 0.35);
-  transition: all 0.22s cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: 0 4px 12px rgba(184, 50, 86, 0.35);
+  transition: all 0.2s ease;
 }
 
 .tasks-list-page__add-button:hover {
-  transform: translateY(-2px) scale(1.05);
-  box-shadow: 0 6px 20px rgba(184, 50, 86, 0.45);
+  transform: translateY(-1px) scale(1.04);
+  box-shadow: 0 6px 16px rgba(184, 50, 86, 0.45);
 }
 
 .tasks-list-page__pending-banner {
@@ -99,9 +100,8 @@
   background: linear-gradient(135deg, #fde8ef 0%, #fbcfe8 100%);
   color: var(--color-accent-dark);
   border: 1px solid rgba(224, 109, 140, 0.3);
-  padding: 14px 16px;
+  padding: 12px 16px;
   border-radius: var(--radius-lg);
-  margin-bottom: var(--space-md);
   font-size: 14px;
   font-weight: 600;
   cursor: pointer;
@@ -120,27 +120,30 @@
 }
 
 .tasks-list-page__toast {
-  background-color: var(--color-accent-soft);
-  color: var(--color-accent-dark);
-  padding: var(--space-md);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background-color: var(--color-success-soft);
+  color: var(--color-success);
+  padding: 12px 16px;
   border-radius: var(--radius-md);
-  margin-bottom: var(--space-md);
-  font-size: var(--font-caption-size);
-  border: 1px solid var(--color-accent-soft);
+  margin-bottom: var(--space-xs);
+  font-size: 14px;
+  font-weight: 600;
+  border: 1px solid var(--color-success);
 }
 
-/* Arama Bölümü */
+/* Arama ve Filtre Çubuğu */
 .tasks-list-page__filter-bar {
   display: flex;
   flex-direction: column;
-  gap: var(--space-md);
-  margin-bottom: var(--space-lg);
+  gap: var(--space-sm);
 }
 
 .tasks-list-page__search-wrap {
   display: flex;
   align-items: center;
-  gap: var(--space-sm);
+  gap: 10px;
   background-color: var(--color-surface);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-pill);
@@ -151,7 +154,12 @@
 
 .tasks-list-page__search-wrap:focus-within {
   border-color: var(--color-accent);
-  box-shadow: 0 0 0 3px rgba(224, 109, 140, 0.15);
+  box-shadow: 0 0 0 2px rgba(224, 109, 140, 0.2);
+}
+
+.tasks-list-page__search-icon {
+  color: var(--color-text-muted);
+  flex-shrink: 0;
 }
 
 .tasks-list-page__search-input {
@@ -159,7 +167,7 @@
   border: none;
   background: transparent;
   outline: none;
-  font-size: 14.5px;
+  font-size: 14px;
   color: var(--color-text-primary);
   font-family: inherit;
 }
@@ -179,6 +187,7 @@
   gap: 8px;
   flex-wrap: wrap;
   align-items: center;
+  margin-top: 2px;
 }
 
 .tasks-list-page__chip {
@@ -186,19 +195,17 @@
   border-radius: var(--radius-pill);
   background-color: var(--color-surface);
   border: 1px solid var(--color-border);
-  font-size: 13px;
+  font-size: 12.5px;
   font-weight: 500;
   color: var(--color-text-secondary);
   cursor: pointer;
   white-space: nowrap;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.03);
-  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: all 0.2s ease;
 }
 
 .tasks-list-page__chip:hover {
   color: var(--color-text-primary);
   border-color: var(--color-text-muted);
-  transform: translateY(-1px);
 }
 
 .tasks-list-page__chip--active {
@@ -206,10 +213,51 @@
   border-color: transparent;
   color: #ffffff !important;
   font-weight: 600;
-  box-shadow: 0 3px 10px rgba(184, 50, 86, 0.25);
 }
 
-/* Modal Filtreleme İçeriği */
+/* Bölümler ve Liste */
+.tasks-list-page__sections {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+  margin-top: var(--space-sm);
+}
+
+.tasks-list-page__section-title {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.8px;
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  margin: 12px 0 6px 4px;
+}
+
+.tasks-list-page__list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+}
+
+.tasks-list-page__danger-zone-link {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  width: 100%;
+  border: none;
+  background: none;
+  color: var(--color-text-muted);
+  font-size: 13px;
+  cursor: pointer;
+  padding: 24px 0 12px;
+  transition: color 0.2s ease;
+}
+
+.tasks-list-page__danger-zone-link:hover {
+  color: var(--color-text-primary);
+}
+
+/* Modal Filtreleme */
 .tasks-list-page__filter-modal {
   display: flex;
   flex-direction: column;
@@ -224,15 +272,15 @@
 }
 
 .tasks-list-page__filter-label {
-  font-size: var(--font-body-medium-size);
-  font-weight: var(--font-body-medium-weight);
+  font-size: 14px;
+  font-weight: 600;
   color: var(--color-text-primary);
 }
 
 .tasks-list-page__chip-row {
   display: flex;
   flex-wrap: wrap;
-  gap: var(--space-xs);
+  gap: 6px;
 }
 
 .tasks-list-page__modal-actions {
@@ -243,27 +291,4 @@
 
 .tasks-list-page__modal-actions button {
   flex: 1;
-}
-
-.tasks-list-page__section-title {
-  font-size: var(--font-caption-size);
-  font-weight: 400;
-  color: var(--color-text-muted);
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-  margin: var(--space-lg) 0 var(--space-sm);
-}
-
-.tasks-list-page__danger-zone-link {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: var(--space-xs);
-  width: 100%;
-  border: none;
-  background: none;
-  color: var(--color-text-muted);
-  font-size: var(--font-caption-size);
-  cursor: pointer;
-  padding: var(--space-lg) 0;
 }

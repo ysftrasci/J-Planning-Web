@@ -29,13 +29,24 @@ export default function RewardsPage() {
   const [rewardToDelete, setRewardToDelete] = useState(null);
   const [errorMessage, setErrorMessage] = useState('');
 
-  const load = useCallback(() => {
-    setBalance(getWalletBalance('me'));
-    setFreezeCount(getStreakFreezeCount());
-    setRewards(getActiveRewards());
+  const load = useCallback(async () => {
+    try {
+      const [wBalance, fCount, rList] = await Promise.all([
+        getWalletBalance('me'),
+        getStreakFreezeCount(),
+        getActiveRewards(),
+      ]);
+      setBalance(wBalance);
+      setFreezeCount(fCount);
+      setRewards(rList);
+    } catch (e) {
+      console.error('Ödüller yüklenirken hata:', e);
+    }
   }, []);
 
-  useEffect(load, [load]);
+  useEffect(() => {
+    load();
+  }, [load]);
 
   useEffect(() => {
     if (!user) return;
@@ -43,52 +54,64 @@ export default function RewardsPage() {
     return unsub;
   }, [user]);
 
-  const handleBuyFreeze = () => {
+  const handleBuyFreeze = async () => {
     try {
-      buyStreakFreeze(50);
+      await buyStreakFreeze(50);
       triggerConfetti();
-      load();
+      await load();
     } catch (e) {
       setErrorMessage(e.message);
     }
   };
 
-  const confirmRedeem = () => {
+  const confirmRedeem = async () => {
     if (!rewardToRedeem) return;
     try {
-      redeemReward(rewardToRedeem.id);
+      await redeemReward(rewardToRedeem.id);
       triggerConfetti();
       setRewardToRedeem(null);
-      load();
+      await load();
     } catch (e) {
       setErrorMessage(e.message);
       setRewardToRedeem(null);
     }
   };
 
-  const confirmDelete = () => {
+  const confirmDelete = async () => {
     if (!rewardToDelete) return;
-    deleteReward(rewardToDelete.id);
-    setRewardToDelete(null);
-    load();
+    try {
+      await deleteReward(rewardToDelete.id);
+      setRewardToDelete(null);
+      await load();
+    } catch (e) {
+      console.error('Ödül silinemedi:', e);
+    }
   };
 
-  const handleAcceptPending = () => {
+  const handleAcceptPending = async () => {
     if (!pendingToDecide) return;
-    acceptAssignedReward(pendingToDecide.id)
-      .then(() => {
-        createReward({ title: pendingToDecide.title, description: pendingToDecide.description, cost: pendingToDecide.cost });
-        setPendingToDecide(null);
-        load();
-      })
-      .catch((e) => setErrorMessage(e.message));
+    try {
+      await acceptAssignedReward(pendingToDecide.id);
+      await createReward({
+        title: pendingToDecide.title,
+        description: pendingToDecide.description,
+        cost: pendingToDecide.cost,
+      });
+      setPendingToDecide(null);
+      await load();
+    } catch (e) {
+      setErrorMessage(e.message);
+    }
   };
 
-  const handleRejectPending = () => {
+  const handleRejectPending = async () => {
     if (!pendingToDecide) return;
-    rejectAssignedReward(pendingToDecide.id)
-      .then(() => setPendingToDecide(null))
-      .catch((e) => setErrorMessage(e.message));
+    try {
+      await rejectAssignedReward(pendingToDecide.id);
+      setPendingToDecide(null);
+    } catch (e) {
+      setErrorMessage(e.message);
+    }
   };
 
   return (
@@ -192,9 +215,9 @@ export default function RewardsPage() {
       <AddRewardModal
         open={showAddModal}
         onClose={() => setShowAddModal(false)}
-        onSaved={() => {
+        onSaved={async () => {
           setShowAddModal(false);
-          load();
+          await load();
         }}
       />
 
@@ -265,9 +288,16 @@ function AddRewardModal({ open, onClose, onSaved }) {
     }
 
     if (assignTo === 'me') {
-      createReward({ title: title.trim(), description: description.trim(), cost: costNum });
-      resetAndClose();
-      onSaved();
+      try {
+        setSaving(true);
+        await createReward({ title: title.trim(), description: description.trim(), cost: costNum });
+        resetAndClose();
+        onSaved();
+      } catch (err) {
+        setErrorMessage(err.message || 'Ödül eklenemedi.');
+      } finally {
+        setSaving(false);
+      }
       return;
     }
 
@@ -302,6 +332,7 @@ function AddRewardModal({ open, onClose, onSaved }) {
           value={title}
           onChange={(e) => setTitle(e.target.value)}
           autoFocus
+          disabled={saving}
         />
         <input
           className="rewards-page__input"
@@ -309,6 +340,7 @@ function AddRewardModal({ open, onClose, onSaved }) {
           placeholder="Açıklama (opsiyonel)"
           value={description}
           onChange={(e) => setDescription(e.target.value)}
+          disabled={saving}
         />
         <input
           className="rewards-page__input"
@@ -317,6 +349,7 @@ function AddRewardModal({ open, onClose, onSaved }) {
           placeholder="Maliyet (JP)"
           value={cost}
           onChange={(e) => setCost(e.target.value)}
+          disabled={saving}
         />
 
         <span className="rewards-page__label">Kime atanacak?</span>
@@ -330,8 +363,8 @@ function AddRewardModal({ open, onClose, onSaved }) {
         {errorMessage && <p className="rewards-page__form-error">{errorMessage}</p>}
 
         <div className="rewards-page__modal-actions">
-          <AppButton type="button" title="Vazgeç" variant="ghost" onClick={resetAndClose} />
-          <AppButton type="submit" title="Kaydet" loading={saving} />
+          <AppButton type="button" title="Vazgeç" variant="ghost" onClick={resetAndClose} disabled={saving} />
+          <AppButton type="submit" title={saving ? 'Kaydediliyor...' : 'Kaydet'} disabled={saving} />
         </div>
       </form>
     </AppModal>

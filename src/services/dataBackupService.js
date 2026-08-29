@@ -1,17 +1,19 @@
+// J-Planning — Veri Yedekleme ve Geri Yükleme Servisi (Web)
+//
+// Kullanıcının TÜM yerel verilerini (kategoriler, görevler, periyot kayıtları,
+// cüzdan bakiyesi, işlem geçmişi, ödüller, arkadaşlar, odaklanma seansları,
+// bildirim tercihleri) tek bir JSON dosyası olarak dışa aktarır ve doğrulanmış
+// olarak geri yükler.
+
 import { getDb } from '../db/database';
 import { getSchedules, saveSchedules } from './notificationService';
 
-const VALID_PRIORITIES = ['HIGH', 'MEDIUM', 'LOW', 'ZERO'];
+const VALID_PRIORITIES = ['HIGH', 'MEDIUM', 'LOW', 'ZERO', 'EASY', 'HARD'];
 const VALID_PERIODS = ['DAILY', 'WEEKLY', 'MONTHLY', 'ONCE'];
+
 // Veri Bütünlüğü Kontrolü (Checksum) için tuz değeri.
-// AMAÇ: Yedek dosyasının indirme/yükleme sırasında bozulup bozulmadığını tespit etmek.
-// ÖNEMLİ: Bu bir kriptografik dijital imza veya tamper-proof mekanizma DEĞİLDİR.
-//         Tuz değeri istemci JS bundle'ında açıkça görünür, kasıtlı manipülasyonu
-//         engellemez. Sadece kazara bozulmaları (eksik dosya, kırık JSON) yakalar.
 const CHECKSUM_SALT = 'J-PLANNING_BACKUP_INTEGRITY_SALT_v1_2026';
 
-// Veri bütünlüğünü doğrulamak için SHA-256 kontrol toplamı (checksum) hesaplar.
-// Güvenlik amaçlı değildir — sadece aktarım sırasındaki bozulma tespiti içindir.
 async function calculateChecksum(tablesPayload) {
   const jsonStr = JSON.stringify(tablesPayload) + CHECKSUM_SALT;
   const encoder = new TextEncoder();
@@ -42,17 +44,41 @@ function sanitizeString(val, maxLength = 1000) {
 export async function exportAllUserData() {
   const db = getDb();
 
+  const [
+    categories,
+    tasks,
+    task_records,
+    wallet,
+    wallet_transactions,
+    rewards,
+    friends,
+    focus_sessions,
+    daily_notes,
+    task_study_logs,
+  ] = await Promise.all([
+    db.getAllAsync('SELECT * FROM categories'),
+    db.getAllAsync('SELECT * FROM tasks'),
+    db.getAllAsync('SELECT * FROM task_records'),
+    db.getAllAsync('SELECT * FROM wallet'),
+    db.getAllAsync('SELECT * FROM wallet_transactions'),
+    db.getAllAsync('SELECT * FROM rewards'),
+    db.getAllAsync('SELECT * FROM friends'),
+    db.getAllAsync('SELECT * FROM focus_sessions'),
+    db.getAllAsync('SELECT * FROM daily_notes'),
+    db.getAllAsync('SELECT * FROM task_study_logs'),
+  ]);
+
   const tables = {
-    categories: db.getAllSync('SELECT * FROM categories'),
-    tasks: db.getAllSync('SELECT * FROM tasks'),
-    task_records: db.getAllSync('SELECT * FROM task_records'),
-    wallet: db.getAllSync('SELECT * FROM wallet'),
-    wallet_transactions: db.getAllSync('SELECT * FROM wallet_transactions'),
-    rewards: db.getAllSync('SELECT * FROM rewards'),
-    friends: db.getAllSync('SELECT * FROM friends'),
-    focus_sessions: db.getAllSync('SELECT * FROM focus_sessions'),
-    daily_notes: db.getAllSync('SELECT * FROM daily_notes'),
-    task_study_logs: db.getAllSync('SELECT * FROM task_study_logs'),
+    categories,
+    tasks,
+    task_records,
+    wallet,
+    wallet_transactions,
+    rewards,
+    friends,
+    focus_sessions,
+    daily_notes,
+    task_study_logs,
   };
 
   const checksum = await calculateChecksum(tables);
@@ -62,7 +88,7 @@ export async function exportAllUserData() {
     version: 1,
     exportedAt: new Date().toISOString(),
     checksum,
-    signature: checksum, // Geriye dönük uyumluluk (eski sürüm "signature" alanını okuyordu)
+    signature: checksum,
     tables,
     notificationSchedules: await getSchedules(),
   };
@@ -72,12 +98,14 @@ export async function exportAllUserData() {
   const url = URL.createObjectURL(blob);
 
   const dateStr = new Date().toISOString().slice(0, 10);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = `j-planning-yedek-${dateStr}.json`;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
+  const fileName = `jplanning-backup-${dateStr}.json`;
+
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = fileName;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
   URL.revokeObjectURL(url);
 }
 
@@ -85,18 +113,14 @@ export async function importUserData(jsonText) {
   let data;
   try {
     data = JSON.parse(jsonText);
-  } catch (e) {
-    throw new Error('Yedek dosyası geçerli bir JSON formatında değil.');
+  } catch {
+    throw new Error('Dosya geçerli bir JSON formatında değil.');
   }
 
-  if (!data || data.app !== 'J-Planning' || !data.tables || typeof data.tables !== 'object') {
-    throw new Error('Geçersiz yedek dosyası formatı.');
+  if (!data || data.app !== 'J-Planning' || !data.tables) {
+    throw new Error('Bu dosya geçerli bir J-Planning yedek dosyası değil.');
   }
 
-  // Veri Bütünlüğü (Checksum) Kontrolü
-  // Dosyanın aktarım sırasında bozulup bozulmadığını kontrol eder.
-  // NOT: Bu kasıtlı manipülasyonu engellemez (bkz. CHECKSUM_SALT yorumu);
-  // sadece eksik indirme, ağ kesintisi gibi kazara bozulmaları tespit eder.
   const fileChecksum = data.checksum || data.signature;
   if (fileChecksum) {
     const expectedChecksum = await calculateChecksum(data.tables);
@@ -108,14 +132,12 @@ export async function importUserData(jsonText) {
   const db = getDb();
   const tables = data.tables;
 
-  // Tüm tabloları sıfırla ve verileri doğrulanmış olarak yükle
-  db.execSync('BEGIN TRANSACTION;');
   try {
     if (Array.isArray(tables.categories)) {
-      db.runSync('DELETE FROM categories;');
+      await db.runAsync('DELETE FROM categories;');
       for (const row of tables.categories) {
         if (!row.id || !row.name) continue;
-        db.runSync(
+        await db.runAsync(
           'INSERT INTO categories (id, name, color, createdAt) VALUES (?, ?, ?, ?)',
           [
             sanitizeString(row.id, 100),
@@ -128,10 +150,10 @@ export async function importUserData(jsonText) {
     }
 
     if (Array.isArray(tables.tasks)) {
-      db.runSync('DELETE FROM tasks;');
+      await db.runAsync('DELETE FROM tasks;');
       for (const row of tables.tasks) {
         if (!row.id || !row.title) continue;
-        db.runSync(
+        await db.runAsync(
           `INSERT INTO tasks (id, title, description, notes, categoryId, priority, period, ownerUserId, assignedByUserId, assignedByName, assignedToUserId, assignedToName, assignmentDirection, firestoreAssignmentId, assignmentStatus, subtaskCount, subtaskLabels, isArchived, createdAt)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [
@@ -160,10 +182,10 @@ export async function importUserData(jsonText) {
     }
 
     if (Array.isArray(tables.task_records)) {
-      db.runSync('DELETE FROM task_records;');
+      await db.runAsync('DELETE FROM task_records;');
       for (const row of tables.task_records) {
         if (!row.id || !row.taskId || !row.periodKey) continue;
-        db.runSync(
+        await db.runAsync(
           `INSERT INTO task_records (id, taskId, periodKey, status, completedSubtasks, completedAt, isLateMarked, lateMarkedAt, jpEarned, streakBonusEarned)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [
@@ -183,9 +205,9 @@ export async function importUserData(jsonText) {
     }
 
     if (Array.isArray(tables.wallet)) {
-      db.runSync('DELETE FROM wallet;');
+      await db.runAsync('DELETE FROM wallet;');
       for (const row of tables.wallet) {
-        db.runSync('INSERT INTO wallet (userId, balance) VALUES (?, ?)', [
+        await db.runAsync('INSERT INTO wallet (userId, balance) VALUES (?, ?)', [
           sanitizeString(row.userId || 'me', 100),
           sanitizeInt(row.balance, 0, 1000000, 0),
         ]);
@@ -193,10 +215,10 @@ export async function importUserData(jsonText) {
     }
 
     if (Array.isArray(tables.wallet_transactions)) {
-      db.runSync('DELETE FROM wallet_transactions;');
+      await db.runAsync('DELETE FROM wallet_transactions;');
       for (const row of tables.wallet_transactions) {
         if (!row.id) continue;
-        db.runSync(
+        await db.runAsync(
           `INSERT INTO wallet_transactions (id, userId, amount, reason, relatedTaskId, relatedRewardId, createdAt)
            VALUES (?, ?, ?, ?, ?, ?, ?)`,
           [
@@ -213,10 +235,10 @@ export async function importUserData(jsonText) {
     }
 
     if (Array.isArray(tables.rewards)) {
-      db.runSync('DELETE FROM rewards;');
+      await db.runAsync('DELETE FROM rewards;');
       for (const row of tables.rewards) {
         if (!row.id || !row.title) continue;
-        db.runSync(
+        await db.runAsync(
           `INSERT INTO rewards (id, title, description, cost, ownerUserId, assignedByUserId, assignedByName, assignmentStatus, isRedeemed, redeemedAt, createdAt)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [
@@ -237,10 +259,10 @@ export async function importUserData(jsonText) {
     }
 
     if (Array.isArray(tables.focus_sessions)) {
-      db.runSync('DELETE FROM focus_sessions;');
+      await db.runAsync('DELETE FROM focus_sessions;');
       for (const row of tables.focus_sessions) {
         if (!row.id) continue;
-        db.runSync(
+        await db.runAsync(
           `INSERT INTO focus_sessions (id, durationMinutes, soundKey, jpEarned, monthKey, completedAt)
            VALUES (?, ?, ?, ?, ?, ?)`,
           [
@@ -256,10 +278,10 @@ export async function importUserData(jsonText) {
     }
 
     if (Array.isArray(tables.daily_notes)) {
-      db.runSync('DELETE FROM daily_notes;');
+      await db.runAsync('DELETE FROM daily_notes;');
       for (const row of tables.daily_notes) {
         if (!row.id || !row.dateKey || !row.content) continue;
-        db.runSync(
+        await db.runAsync(
           `INSERT INTO daily_notes (id, dateKey, content, createdAt, updatedAt)
            VALUES (?, ?, ?, ?, ?)`,
           [
@@ -274,10 +296,10 @@ export async function importUserData(jsonText) {
     }
 
     if (Array.isArray(tables.task_study_logs)) {
-      db.runSync('DELETE FROM task_study_logs;');
+      await db.runAsync('DELETE FROM task_study_logs;');
       for (const row of tables.task_study_logs) {
         if (!row.id || !row.taskId || !row.periodKey) continue;
-        db.runSync(
+        await db.runAsync(
           `INSERT INTO task_study_logs (id, taskId, periodKey, studyTimeText, createdAt, updatedAt)
            VALUES (?, ?, ?, ?, ?, ?)`,
           [
@@ -295,10 +317,8 @@ export async function importUserData(jsonText) {
     if (Array.isArray(data.notificationSchedules)) {
       await saveSchedules(data.notificationSchedules);
     }
-
-    db.execSync('COMMIT;');
   } catch (err) {
-    db.execSync('ROLLBACK;');
+    console.error('Yedek geri yükleme hatası:', err);
     throw err;
   }
 }
