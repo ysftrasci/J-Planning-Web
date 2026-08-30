@@ -49,28 +49,34 @@ async function main() {
     process.exit(1);
   }
 
-  let admin;
+  let initializeApp, cert, getApps, getAuth;
   try {
-    const adminModule = await import('firebase-admin');
-    admin = adminModule.default || adminModule;
+    const appModule = await import('firebase-admin/app');
+    const authModule = await import('firebase-admin/auth');
+    initializeApp = appModule.initializeApp;
+    cert = appModule.cert;
+    getApps = appModule.getApps;
+    getAuth = authModule.getAuth;
   } catch (err) {
-    console.error('❌ HATA: firebase-admin paketi bulunamadı.');
+    console.error('❌ HATA: firebase-admin modülü yüklenemedi:', err.message);
     console.log('   Lütfen "npm install -D firebase-admin" komutunu çalıştırın.');
     process.exit(1);
   }
 
   const serviceAccount = JSON.parse(fs.readFileSync(serviceAccountPath, 'utf8'));
 
-  if (!admin.apps.length) {
-    admin.initializeApp({
-      credential: admin.credential.cert(serviceAccount),
+  if (!getApps().length) {
+    initializeApp({
+      credential: cert(serviceAccount),
     });
   }
+
+  const auth = getAuth();
 
   let targetUid = uidArg;
   if (!targetUid && emailArg) {
     try {
-      const userRecord = await admin.auth().getUserByEmail(emailArg);
+      const userRecord = await auth.getUserByEmail(emailArg);
       targetUid = userRecord.uid;
       console.log(`👤 Kullanıcı bulundu: ${userRecord.email} (UID: ${targetUid})`);
     } catch (err) {
@@ -79,16 +85,16 @@ async function main() {
     }
   }
 
-  const existingClaims = (await admin.auth().getUser(targetUid)).customClaims || {};
+  const existingClaims = (await auth.getUser(targetUid)).customClaims || {};
 
   if (isRevoke) {
     const updatedClaims = { ...existingClaims };
     delete updatedClaims.admin;
-    await admin.auth().setCustomUserClaims(targetUid, updatedClaims);
+    await auth.setCustomUserClaims(targetUid, updatedClaims);
     console.log(`✅ [${targetUid}] kullanıcısının admin yetkisi kaldırıldı.`);
   } else {
     const updatedClaims = { ...existingClaims, admin: true };
-    await admin.auth().setCustomUserClaims(targetUid, updatedClaims);
+    await auth.setCustomUserClaims(targetUid, updatedClaims);
     console.log(`👑 [${targetUid}] kullanıcısına "admin: true" yetkisi başarıyla atandı!`);
   }
 

@@ -295,6 +295,51 @@ async function ensureUserDatabase(dbName, env) {
   };
 }
 
+// Rate Limiter: KV binding varsa KV ile, yoksa in-memory sliding-window fallback
+const memoryRateLimitMap = new Map();
+
+async function isRateLimited(request, env, identifier = null) {
+  const ip = request.headers.get('CF-Connecting-IP') || request.headers.get('x-forwarded-for') || '127.0.0.1';
+  const keyId = identifier || ip;
+  const now = Date.now();
+  const minuteWindow = Math.floor(now / 60000);
+  const limit = 40; // dakikada maks 40 istek
+
+  // 1. Cloudflare KV varsa kullan
+  if (env.RATE_LIMIT_KV) {
+    try {
+      const kvKey = `rl:${keyId}:${minuteWindow}`;
+      const countStr = await env.RATE_LIMIT_KV.get(kvKey);
+      const count = countStr ? parseInt(countStr, 10) : 0;
+      if (count >= limit) {
+        return true;
+      }
+      await env.RATE_LIMIT_KV.put(kvKey, (count + 1).toString(), { expirationTtl: 65 });
+      return false;
+    } catch (_) {
+      // KV hatası durumunda in-memory'e düş
+    }
+  }
+
+  // 2. In-Memory fallback (lokal test ve tekil isolate için)
+  const userRecord = memoryRateLimitMap.get(keyId) || { count: 0, resetAt: now + 60000 };
+  if (now > userRecord.resetAt) {
+    userRecord.count = 0;
+    userRecord.resetAt = now + 60000;
+  }
+  userRecord.count++;
+  memoryRateLimitMap.set(keyId, userRecord);
+
+  // Periyodik temizlik (RAM şişmesini önle)
+  if (memoryRateLimitMap.size > 5000) {
+    for (const [k, v] of memoryRateLimitMap.entries()) {
+      if (now > v.resetAt) memoryRateLimitMap.delete(k);
+    }
+  }
+
+  return userRecord.count > limit;
+}
+
 export default {
   async fetch(request, env, ctx) {
     const corsHeaders = getCorsHeaders(request, env);
@@ -320,6 +365,20 @@ export default {
         200,
         corsHeaders
       );
+    }
+
+    // Rate Limiting Kontrolü (Tüm /session ve /admin/* endpoint'leri için)
+    if (url.pathname === '/session' || url.pathname.startsWith('/admin/')) {
+      if (await isRateLimited(request, env)) {
+        return jsonResponse(
+          {
+            error: 'TOO_MANY_REQUESTS',
+            message: 'Çok fazla istek gönderildi. Lütfen bir süre bekleyin.',
+          },
+          429,
+          corsHeaders
+        );
+      }
     }
 
     // GET /admin/ping (Admin yetkisi doğrulama ve sağlık kontrolü)
@@ -638,6 +697,236 @@ export default {
       }
     }
 
+    // GET /admin/users/:uid/detail (Kullanıcı Detayı - Salt Okunur ve Drill-Down Senkronu)
+    const detailMatch = url.pathname.match(/^\/admin\/users\/([^/]+)\/detail$/);
+    if (request.method === 'GET' && detailMatch) {
+      const targetUid = decodeURIComponent(detailMatch[1]);
+      try {
+        const authHeader = request.headers.get('Authorization');
+        const projectId = env.FIREBASE_PROJECT_ID || 'j-planning';
+
+        await verifyAdminClaim(authHeader, projectId);
+
+        const controlClient = getControlPlaneClient(env);
+        if (!controlClient) {
+          return jsonResponse(
+            {
+              error: 'CONTROL_PLANE_UNAVAILABLE',
+              message: 'Control Plane veritabanı yapılandırması eksik.',
+            },
+            503,
+            corsHeaders
+          );
+        }
+
+        // 1. Control Plane'den kullanıcı meta bilgilerini al
+        const userRowRes = await controlClient.execute({
+          sql: 'SELECT uid, email, display_name, db_name, created_at, last_login_at, task_count, jp_balance, is_disabled, updated_at FROM admin_users_index WHERE uid = ? LIMIT 1;',
+          args: [targetUid],
+        });
+
+        const userMeta = userRowRes.rows[0] || {
+          uid: targetUid,
+          email: null,
+          display_name: null,
+          db_name: getDbNameForUser(targetUid),
+          created_at: Date.now(),
+          last_login_at: Date.now(),
+          task_count: 0,
+          jp_balance: 0,
+          is_disabled: 0,
+        };
+
+        const targetDbName = userMeta.db_name || getDbNameForUser(targetUid);
+
+        // 2. Yalnızca bu kullanıcıya özel Turso DB'ye geçici bağlan
+        const sessionInfo = await ensureUserDatabase(targetDbName, env);
+        const userDbClient = createClient({
+          url: sessionInfo.dbUrl,
+          authToken: sessionInfo.token,
+        });
+
+        // 3. Salt okunur verileri çek (Görevler maks 50, Ödüller maks 50, Kategoriler, Cüzdan)
+        const [tasksRes, rewardsRes, categoriesRes, walletRes, countsRes] = await Promise.all([
+          userDbClient
+            .execute(
+              'SELECT id, title, description, notes, categoryId, priority, period, subtaskCount, isArchived, createdAt FROM tasks ORDER BY createdAt DESC LIMIT 50;'
+            )
+            .catch(() => ({ rows: [] })),
+          userDbClient
+            .execute(
+              'SELECT id, title, description, cost, isRedeemed, redeemedAt, createdAt FROM rewards ORDER BY createdAt DESC LIMIT 50;'
+            )
+            .catch(() => ({ rows: [] })),
+          userDbClient
+            .execute('SELECT id, name, color, createdAt FROM categories;')
+            .catch(() => ({ rows: [] })),
+          userDbClient
+            .execute('SELECT COALESCE(balance, 0) AS balance FROM wallet LIMIT 1;')
+            .catch(() => ({ rows: [{ balance: 0 }] })),
+          userDbClient
+            .execute('SELECT COUNT(*) AS total_tasks FROM tasks;')
+            .catch(() => ({ rows: [{ total_tasks: 0 }] })),
+        ]);
+
+        const realTaskCount = Number(countsRes.rows[0]?.total_tasks || tasksRes.rows.length);
+        const realJpBalance = Number(walletRes.rows[0]?.balance || 0);
+        const now = Date.now();
+
+        // 4. Drill-Down Sync: Control Plane özet sayaçlarını gerçek verilerle güncelle (fire-and-forget)
+        controlClient
+          .execute({
+            sql: 'UPDATE admin_users_index SET task_count = ?, jp_balance = ?, updated_at = ? WHERE uid = ?;',
+            args: [realTaskCount, realJpBalance, now, targetUid],
+          })
+          .catch((syncErr) => console.warn('[Worker Drill-down Sync Error]:', syncErr.message));
+
+        return jsonResponse(
+          {
+            success: true,
+            user: {
+              ...userMeta,
+              task_count: realTaskCount,
+              jp_balance: realJpBalance,
+            },
+            tasks: tasksRes.rows,
+            rewards: rewardsRes.rows,
+            categories: categoriesRes.rows,
+            wallet: {
+              balance: realJpBalance,
+            },
+            summary: {
+              totalTasks: realTaskCount,
+              jpBalance: realJpBalance,
+              rewardCount: rewardsRes.rows.length,
+              syncedAt: now,
+            },
+          },
+          200,
+          corsHeaders
+        );
+      } catch (err) {
+        console.error('[Worker /admin/users/:uid/detail Error]:', err);
+
+        if (err.isForbidden) {
+          return jsonResponse(
+            {
+              error: 'FORBIDDEN',
+              message: 'Yetkisiz erişim: Bu işlem için yönetici (admin) yetkisi gereklidir.',
+            },
+            403,
+            corsHeaders
+          );
+        }
+
+        const isAuthError =
+          err.name?.startsWith('JWT') ||
+          err.name?.startsWith('JWS') ||
+          err.name?.startsWith('JWE') ||
+          err.code?.startsWith('ERR_JWT') ||
+          err.code?.startsWith('ERR_JWS') ||
+          err.code?.startsWith('ERR_JWE') ||
+          err.name === 'JWTExpired' ||
+          err.name === 'JWTClaimValidationFailed' ||
+          err.name === 'JWSSignatureVerificationFailed' ||
+          err.name === 'JWSInvalid' ||
+          err.message?.includes('Authorization') ||
+          err.message?.includes('Token') ||
+          err.message?.includes('token') ||
+          err.message?.includes('JWT') ||
+          err.message?.includes('jwt');
+
+        if (isAuthError) {
+          return jsonResponse(
+            {
+              error: 'UNAUTHORIZED',
+              message: 'Oturum doğrulanamadı veya süresi doldu.',
+            },
+            401,
+            corsHeaders
+          );
+        }
+
+        return jsonResponse(
+          {
+            error: 'INTERNAL_ERROR',
+            message: 'Kullanıcı detayları alınamadı.',
+            detail: err.message,
+          },
+          500,
+          corsHeaders
+        );
+      }
+    }
+
+    // PATCH /admin/users/:uid/status (Kullanıcı Askıya Alma / Aktifleştirme)
+    const statusMatch = url.pathname.match(/^\/admin\/users\/([^/]+)\/status$/);
+    if (request.method === 'PATCH' && statusMatch) {
+      const targetUid = decodeURIComponent(statusMatch[1]);
+      try {
+        const authHeader = request.headers.get('Authorization');
+        const projectId = env.FIREBASE_PROJECT_ID || 'j-planning';
+
+        await verifyAdminClaim(authHeader, projectId);
+
+        const body = await request.json();
+        const isDisabled =
+          body.isDisabled === true || body.isDisabled === 1 || body.isDisabled === '1' ? 1 : 0;
+
+        const controlClient = getControlPlaneClient(env);
+        if (!controlClient) {
+          return jsonResponse(
+            {
+              error: 'CONTROL_PLANE_UNAVAILABLE',
+              message: 'Control Plane veritabanı yapılandırması eksik.',
+            },
+            503,
+            corsHeaders
+          );
+        }
+
+        const now = Date.now();
+        await controlClient.execute({
+          sql: 'UPDATE admin_users_index SET is_disabled = ?, updated_at = ? WHERE uid = ?;',
+          args: [isDisabled, now, targetUid],
+        });
+
+        return jsonResponse(
+          {
+            success: true,
+            uid: targetUid,
+            isDisabled: Boolean(isDisabled),
+            message: isDisabled ? 'Kullanıcı hesabı askıya alındı.' : 'Kullanıcı hesabı aktifleştirildi.',
+          },
+          200,
+          corsHeaders
+        );
+      } catch (err) {
+        console.error('[Worker /admin/users/:uid/status Error]:', err);
+
+        if (err.isForbidden) {
+          return jsonResponse(
+            {
+              error: 'FORBIDDEN',
+              message: 'Yetkisiz erişim.',
+            },
+            403,
+            corsHeaders
+          );
+        }
+
+        return jsonResponse(
+          {
+            error: 'INTERNAL_ERROR',
+            message: 'Kullanıcı durumu güncellenemedi.',
+            detail: err.message,
+          },
+          500,
+          corsHeaders
+        );
+      }
+    }
+
     // POST /session (Firebase Token -> Turso DB & Scoped Token)
     if (request.method === 'POST' && url.pathname === '/session') {
       try {
@@ -647,13 +936,37 @@ export default {
         // 1. Firebase Token Doğrulama
         const { uid, payload } = await verifyFirebaseToken(authHeader, projectId);
 
-        // 2. Kullanıcıya özel DB adı
+        // 2. Kullanıcı Askıya Alınmış mı? (Control Plane Denetimi)
+        const controlClient = getControlPlaneClient(env);
+        if (controlClient) {
+          try {
+            const checkRes = await controlClient.execute({
+              sql: 'SELECT is_disabled FROM admin_users_index WHERE uid = ? LIMIT 1;',
+              args: [uid],
+            });
+            if (checkRes.rows.length > 0 && Number(checkRes.rows[0].is_disabled) === 1) {
+              return jsonResponse(
+                {
+                  error: 'ACCOUNT_DISABLED',
+                  message:
+                    'Hesabınız yönetici tarafından askıya alınmıştır. Lütfen destek ekibi ile iletişime geçin.',
+                },
+                403,
+                corsHeaders
+              );
+            }
+          } catch (checkErr) {
+            console.warn('[Worker /session Disabled Check Warning]:', checkErr.message);
+          }
+        }
+
+        // 3. Kullanıcıya özel DB adı
         const dbName = getDbNameForUser(uid);
 
-        // 3. DB kontrolü / oluşturma & scoped token üretimi
+        // 4. DB kontrolü / oluşturma & scoped token üretimi
         const sessionInfo = await ensureUserDatabase(dbName, env);
 
-        // 4. Control Plane sync (Fire-and-forget, ana akışı geciktirmez)
+        // 5. Control Plane sync (Fire-and-forget, ana akışı geciktirmez)
         const syncPromise = syncUserToControlPlane(env, {
           uid,
           email: payload.email,

@@ -1,22 +1,31 @@
 {
-  "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "jplanning-auth-worker",
-  "main": "src/index.js",
-  "compatibility_date": "2025-02-01",
-  "compatibility_flags": [
-    "nodejs_compat"
-  ],
-  "vars": {
-    "TURSO_ORG": "ysftrasci",
-    "TURSO_GROUP": "jplanning",
-    "FIREBASE_PROJECT_ID": "j-planning",
-    "ALLOWED_ORIGINS": "http://localhost:5173,http://localhost:3000,https://j-planning-web.vercel.app,https://j-planning.vercel.app,https://j-planning.web.app,https://j-planning.firebaseapp.com"
-  },
-  "rules": [
-    {
-      "type": "Text",
-      "globs": ["**/*.sql"],
-      "fallthrough": true
-    }
-  ]
+	"$schema": "node_modules/wrangler/config-schema.json",
+	"name": "jplanning-auth-worker",
+	"main": "src/index.js",
+	"compatibility_date": "2025-02-01",
+	"compatibility_flags": [
+		"nodejs_compat"
+	],
+	"vars": {
+		"TURSO_ORG": "ysftrasci",
+		"TURSO_GROUP": "jplanning",
+		"TURSO_CONTROL_DB_URL": "libsql://jplanning-control-ysftrasci.aws-eu-west-1.turso.io",
+		"FIREBASE_PROJECT_ID": "j-planning",
+		"ALLOWED_ORIGINS": "http://localhost:5173,http://localhost:3000,https://j-planning-web.vercel.app,https://j-planning.vercel.app,https://j-planning.web.app,https://j-planning.firebaseapp.com"
+	},
+	"rules": [
+		{
+			"type": "Text",
+			"globs": [
+				"**/*.sql"
+			],
+			"fallthrough": true
+		}
+	],
+	"kv_namespaces": [
+		{
+			"binding": "RATE_LIMIT_KV",
+			"id": "b2195fea088645879cd799e6f1a3db23"
+		}
+	]
 }

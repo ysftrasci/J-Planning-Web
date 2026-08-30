@@ -15,6 +15,7 @@ import {
   Database,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
+import { auth } from '../../services/firebase';
 import './AdminStatsPage.css';
 
 export default function AdminStatsPage() {
@@ -31,7 +32,14 @@ export default function AdminStatsPage() {
     setError(null);
 
     try {
-      const idToken = await user.getIdToken();
+      const activeUser = auth.currentUser || user;
+      const idToken = typeof activeUser.getIdToken === 'function' 
+        ? await activeUser.getIdToken() 
+        : await user?.getIdToken?.();
+
+      if (!idToken) {
+        throw new Error('Kullanıcı oturum tokenı alınamadı.');
+      }
       const response = await fetch(`${workerUrl}/admin/stats`, {
         method: 'GET',
         headers: {

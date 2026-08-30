@@ -16,6 +16,8 @@ import {
   Filter,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
+import { auth } from '../../services/firebase';
+import AdminUserDetailModal from './AdminUserDetailModal';
 import './AdminUsersPage.css';
 
 export default function AdminUsersPage() {
@@ -28,6 +30,7 @@ export default function AdminUsersPage() {
   const [order, setOrder] = useState('desc');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [selectedUserForDetail, setSelectedUserForDetail] = useState(null);
 
   const workerUrl = import.meta.env.VITE_WORKER_URL || 'https://jplanning-auth-worker.ysftrasci.workers.dev';
 
@@ -46,7 +49,14 @@ export default function AdminUsersPage() {
     setError(null);
 
     try {
-      const idToken = await user.getIdToken();
+      const activeUser = auth.currentUser || user;
+      const idToken = typeof activeUser.getIdToken === 'function' 
+        ? await activeUser.getIdToken() 
+        : await user?.getIdToken?.();
+
+      if (!idToken) {
+        throw new Error('Kullanıcı oturum tokenı alınamadı.');
+      }
       const params = new URLSearchParams({
         page: pagination.page.toString(),
         limit: pagination.limit.toString(),
@@ -309,11 +319,12 @@ export default function AdminUsersPage() {
                   </td>
 
                   {/* Durum */}
+                    {/* Durum */}
                   <td>
                     {u.is_disabled === 1 ? (
                       <span className="status-badge disabled">
                         <XCircle size={12} />
-                        <span>Pasif</span>
+                        <span>Askıda</span>
                       </span>
                     ) : (
                       <span className="status-badge active">
@@ -321,6 +332,18 @@ export default function AdminUsersPage() {
                         <span>Aktif</span>
                       </span>
                     )}
+                  </td>
+
+                  {/* İşlemler / Detay */}
+                  <td>
+                    <button
+                      type="button"
+                      className="admin-inspect-btn"
+                      onClick={() => setSelectedUserForDetail(u)}
+                      title="Kullanıcı Görev ve Ödül Detaylarını İncele"
+                    >
+                      <span>İncele</span>
+                    </button>
                   </td>
                 </tr>
               ))}
@@ -363,6 +386,19 @@ export default function AdminUsersPage() {
             </button>
           </div>
         </div>
+      )}
+
+      {/* Faz 3 Kullanıcı Detay Modalı */}
+      {selectedUserForDetail && (
+        <AdminUserDetailModal
+          userMeta={selectedUserForDetail}
+          onClose={() => setSelectedUserForDetail(null)}
+          onUserStatusChanged={(targetUid, newStatus) => {
+            setUsers((prev) =>
+              prev.map((usr) => (usr.uid === targetUid ? { ...usr, is_disabled: newStatus } : usr))
+            );
+          }}
+        />
       )}
     </div>
   );
