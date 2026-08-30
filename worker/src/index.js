@@ -396,6 +396,248 @@ export default {
       }
     }
 
+    // GET /admin/users (Kullanıcı listesi ve sayfalama)
+    if (request.method === 'GET' && url.pathname === '/admin/users') {
+      try {
+        const authHeader = request.headers.get('Authorization');
+        const projectId = env.FIREBASE_PROJECT_ID || 'j-planning';
+
+        await verifyAdminClaim(authHeader, projectId);
+
+        const client = getControlPlaneClient(env);
+        if (!client) {
+          return jsonResponse(
+            {
+              error: 'CONTROL_PLANE_UNAVAILABLE',
+              message: 'Control Plane veritabanı yapılandırması eksik.',
+            },
+            503,
+            corsHeaders
+          );
+        }
+
+        const rawPage = parseInt(url.searchParams.get('page'), 10);
+        const rawLimit = parseInt(url.searchParams.get('limit'), 10);
+        const page = isNaN(rawPage) || rawPage < 1 ? 1 : rawPage;
+        const limit = isNaN(rawLimit) || rawLimit < 1 ? 20 : Math.min(100, rawLimit);
+        const search = (url.searchParams.get('search') || '').trim();
+        const sortBy = ['created_at', 'last_login_at', 'task_count', 'jp_balance', 'email'].includes(
+          url.searchParams.get('sortBy')
+        )
+          ? url.searchParams.get('sortBy')
+          : 'last_login_at';
+        const order = url.searchParams.get('order')?.toUpperCase() === 'ASC' ? 'ASC' : 'DESC';
+
+        const offset = (page - 1) * limit;
+
+        let query =
+          'SELECT uid, email, display_name, db_name, created_at, last_login_at, task_count, jp_balance, is_disabled, updated_at FROM admin_users_index';
+        let countQuery = 'SELECT COUNT(*) as total FROM admin_users_index';
+        const args = [];
+        const countArgs = [];
+
+        if (search) {
+          const searchPattern = `%${search}%`;
+          const searchClause = ' WHERE email LIKE ? OR display_name LIKE ? OR uid LIKE ?';
+          query += searchClause;
+          countQuery += searchClause;
+          args.push(searchPattern, searchPattern, searchPattern);
+          countArgs.push(searchPattern, searchPattern, searchPattern);
+        }
+
+        query += ` ORDER BY ${sortBy} ${order} LIMIT ? OFFSET ?`;
+        args.push(limit, offset);
+
+        const [rowsRes, countRes] = await Promise.all([
+          client.execute({ sql: query, args }),
+          client.execute({ sql: countQuery, args: countArgs }),
+        ]);
+
+        const total = Number(countRes.rows[0]?.total || 0);
+        const totalPages = Math.ceil(total / limit) || 1;
+
+        return jsonResponse(
+          {
+            success: true,
+            users: rowsRes.rows,
+            pagination: {
+              page,
+              limit,
+              total,
+              totalPages,
+            },
+          },
+          200,
+          corsHeaders
+        );
+      } catch (err) {
+        console.warn('[Worker /admin/users Error]:', err.message);
+
+        if (err.isForbidden) {
+          return jsonResponse(
+            {
+              error: 'FORBIDDEN',
+              message: 'Yetkisiz erişim: Bu işlem için yönetici (admin) yetkisi gereklidir.',
+            },
+            403,
+            corsHeaders
+          );
+        }
+
+        const isAuthError =
+          err.name?.startsWith('JWT') ||
+          err.name?.startsWith('JWS') ||
+          err.name?.startsWith('JWE') ||
+          err.code?.startsWith('ERR_JWT') ||
+          err.code?.startsWith('ERR_JWS') ||
+          err.code?.startsWith('ERR_JWE') ||
+          err.name === 'JWTExpired' ||
+          err.name === 'JWTClaimValidationFailed' ||
+          err.name === 'JWSSignatureVerificationFailed' ||
+          err.name === 'JWSInvalid' ||
+          err.message?.includes('Authorization') ||
+          err.message?.includes('Token') ||
+          err.message?.includes('token') ||
+          err.message?.includes('JWT') ||
+          err.message?.includes('jwt');
+
+        if (isAuthError) {
+          return jsonResponse(
+            {
+              error: 'UNAUTHORIZED',
+              message: 'Oturum doğrulanamadı veya süresi doldu.',
+            },
+            401,
+            corsHeaders
+          );
+        }
+
+        return jsonResponse(
+          {
+            error: 'INTERNAL_ERROR',
+            message: 'Kullanıcı listesi alınırken hata oluştu.',
+            detail: err.message,
+          },
+          500,
+          corsHeaders
+        );
+      }
+    }
+
+    // GET /admin/stats (Genel metrikler ve istatistikler)
+    if (request.method === 'GET' && url.pathname === '/admin/stats') {
+      try {
+        const authHeader = request.headers.get('Authorization');
+        const projectId = env.FIREBASE_PROJECT_ID || 'j-planning';
+
+        await verifyAdminClaim(authHeader, projectId);
+
+        const client = getControlPlaneClient(env);
+        if (!client) {
+          return jsonResponse(
+            {
+              error: 'CONTROL_PLANE_UNAVAILABLE',
+              message: 'Control Plane veritabanı yapılandırması eksik.',
+            },
+            503,
+            corsHeaders
+          );
+        }
+
+        const now = Date.now();
+        const sevenDaysAgo = now - 7 * 24 * 60 * 60 * 1000;
+        const thirtyDaysAgo = now - 30 * 24 * 60 * 60 * 1000;
+
+        const statsQuery = `
+          SELECT
+            COUNT(*) AS total_users,
+            SUM(CASE WHEN last_login_at >= ? THEN 1 ELSE 0 END) AS active_7d,
+            SUM(CASE WHEN last_login_at >= ? THEN 1 ELSE 0 END) AS active_30d,
+            SUM(CASE WHEN is_disabled = 1 THEN 1 ELSE 0 END) AS disabled_users,
+            COALESCE(SUM(task_count), 0) AS total_tasks,
+            COALESCE(SUM(jp_balance), 0) AS total_jp
+          FROM admin_users_index;
+        `;
+
+        const res = await client.execute({
+          sql: statsQuery,
+          args: [sevenDaysAgo, thirtyDaysAgo],
+        });
+
+        const row = res.rows[0] || {};
+
+        return jsonResponse(
+          {
+            success: true,
+            stats: {
+              totalUsers: Number(row.total_users || 0),
+              active7d: Number(row.active_7d || 0),
+              active30d: Number(row.active_30d || 0),
+              disabledUsers: Number(row.disabled_users || 0),
+              totalTasks: Number(row.total_tasks || 0),
+              totalJP: Number(row.total_jp || 0),
+              summaryNotice:
+                'task_count ve jp_balance özet sayaçları Faz 3 kullanıcı drill-down aşamasında gerçek zamanlı eşitlenecektir.',
+              serverTimestamp: now,
+            },
+          },
+          200,
+          corsHeaders
+        );
+      } catch (err) {
+        console.warn('[Worker /admin/stats Error]:', err.message);
+
+        if (err.isForbidden) {
+          return jsonResponse(
+            {
+              error: 'FORBIDDEN',
+              message: 'Yetkisiz erişim: Bu işlem için yönetici (admin) yetkisi gereklidir.',
+            },
+            403,
+            corsHeaders
+          );
+        }
+
+        const isAuthError =
+          err.name?.startsWith('JWT') ||
+          err.name?.startsWith('JWS') ||
+          err.name?.startsWith('JWE') ||
+          err.code?.startsWith('ERR_JWT') ||
+          err.code?.startsWith('ERR_JWS') ||
+          err.code?.startsWith('ERR_JWE') ||
+          err.name === 'JWTExpired' ||
+          err.name === 'JWTClaimValidationFailed' ||
+          err.name === 'JWSSignatureVerificationFailed' ||
+          err.name === 'JWSInvalid' ||
+          err.message?.includes('Authorization') ||
+          err.message?.includes('Token') ||
+          err.message?.includes('token') ||
+          err.message?.includes('JWT') ||
+          err.message?.includes('jwt');
+
+        if (isAuthError) {
+          return jsonResponse(
+            {
+              error: 'UNAUTHORIZED',
+              message: 'Oturum doğrulanamadı veya süresi doldu.',
+            },
+            401,
+            corsHeaders
+          );
+        }
+
+        return jsonResponse(
+          {
+            error: 'INTERNAL_ERROR',
+            message: 'İstatistikler alınırken hata oluştu.',
+            detail: err.message,
+          },
+          500,
+          corsHeaders
+        );
+      }
+    }
+
     // POST /session (Firebase Token -> Turso DB & Scoped Token)
     if (request.method === 'POST' && url.pathname === '/session') {
       try {

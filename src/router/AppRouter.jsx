@@ -23,6 +23,9 @@ import VerifyEmailPage from '../pages/VerifyEmailPage.jsx';
 import DailyNotesPage from '../pages/DailyNotesPage.jsx';
 import AccountDeletionPendingModal from '../components/AccountDeletionPendingModal.jsx';
 import AdminPlaceholderPage from '../pages/admin/AdminPlaceholderPage.jsx';
+import AdminLayout from '../pages/admin/AdminLayout.jsx';
+import AdminUsersPage from '../pages/admin/AdminUsersPage.jsx';
+import AdminStatsPage from '../pages/admin/AdminStatsPage.jsx';
 import { useAuth } from '../context/AuthContext.jsx';
 
 function LoadingScreen() {
@@ -138,15 +141,20 @@ export default function AppRouter() {
           </RequireUnverified>
         }
       />
-      {/* Yönetici Paneli Rotası */}
+      {/* Yönetici Paneli Rotaları (RequireAdmin ile tam korumalı) */}
       <Route
         path="admin"
         element={
           <RequireAdmin>
-            <AdminPlaceholderPage />
+            <AdminLayout />
           </RequireAdmin>
         }
-      />
+      >
+        <Route index element={<AdminUsersPage />} />
+        <Route path="users" element={<AdminUsersPage />} />
+        <Route path="stats" element={<AdminStatsPage />} />
+        <Route path="ping" element={<AdminPlaceholderPage />} />
+      </Route>
       <Route
         element={
           <RequireAuth>

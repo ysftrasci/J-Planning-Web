@@ -1,0 +1,227 @@
+/* J-Planning — Admin İstatistik Sayfası Stilleri */
+
+.admin-stats-container {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.stats-page-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+/* İstatistik Grid */
+.stats-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 18px;
+}
+
+.stat-card {
+  background: var(--color-surface, #ffffff);
+  border-radius: 12px;
+  border: 1px solid var(--color-border, #e2e8f0);
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.02);
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.stat-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.05);
+}
+
+.stat-card.primary {
+  border-color: rgba(59, 130, 246, 0.3);
+  background: linear-gradient(180deg, var(--color-surface, #ffffff) 0%, rgba(59, 130, 246, 0.02) 100%);
+}
+
+.stat-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 12px;
+}
+
+.stat-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-text-secondary, #64748b);
+}
+
+.stat-icon-badge {
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.stat-icon-badge.blue {
+  background: rgba(59, 130, 246, 0.1);
+  color: #3B82F6;
+}
+
+.stat-icon-badge.green {
+  background: rgba(16, 185, 129, 0.1);
+  color: #10B981;
+}
+
+.stat-icon-badge.purple {
+  background: rgba(139, 92, 246, 0.1);
+  color: #8B5CF6;
+}
+
+.stat-icon-badge.amber {
+  background: rgba(245, 158, 11, 0.1);
+  color: #F59E0B;
+}
+
+.stat-icon-badge.gold {
+  background: rgba(201, 138, 44, 0.12);
+  color: #C98A2C;
+}
+
+.stat-icon-badge.red {
+  background: rgba(239, 68, 68, 0.1);
+  color: #EF4444;
+}
+
+.stat-number {
+  font-size: 28px;
+  font-weight: 700;
+  letter-spacing: -0.5px;
+  color: var(--color-text-primary, #0f172a);
+  margin-bottom: 14px;
+}
+
+.stat-footer {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--color-text-secondary, #64748b);
+  border-top: 1px solid var(--color-border, #f1f5f9);
+  padding-top: 12px;
+}
+
+.rate-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 4px;
+  background: rgba(16, 185, 129, 0.12);
+  color: #059669;
+  font-weight: 600;
+}
+
+.sync-note-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 4px;
+  background: rgba(201, 138, 44, 0.12);
+  color: #b17723;
+  font-weight: 600;
+  font-size: 11px;
+}
+
+/* Sistem Durumu Kartı */
+.system-status-card {
+  background: var(--color-surface, #ffffff);
+  border-radius: 12px;
+  border: 1px solid var(--color-border, #e2e8f0);
+  padding: 22px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.02);
+}
+
+.sys-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 20px;
+}
+
+.sys-icon {
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  background: rgba(201, 138, 44, 0.1);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.sys-header h3 {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 700;
+}
+
+.sys-header p {
+  margin: 2px 0 0 0;
+  font-size: 13px;
+  color: var(--color-text-secondary, #64748b);
+}
+
+.sys-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 16px;
+}
+
+.sys-item {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 14px;
+  border-radius: 8px;
+  background: var(--color-surface-hover, #f8fafc);
+  border: 1px solid var(--color-border, #f1f5f9);
+}
+
+.sys-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-text-secondary, #64748b);
+}
+
+.sys-value-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--color-text-primary, #0f172a);
+}
+
+.status-dot.online {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #10B981;
+  box-shadow: 0 0 6px rgba(16, 185, 129, 0.6);
+  flex-shrink: 0;
+}
+
+/* Skeleton loader */
+.skeleton-stat {
+  height: 140px;
+  background: linear-gradient(90deg, #f1f5f9 25%, #e2e8f0 50%, #f1f5f9 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite;
+}
+
+.stats-error-box {
+  padding: 32px 16px;
+  text-align: center;
+  color: #DC2626;
+  background: rgba(239, 68, 68, 0.05);
+  border-radius: 12px;
+}
