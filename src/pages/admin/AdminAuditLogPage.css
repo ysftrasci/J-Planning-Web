@@ -1,0 +1,364 @@
+/* J-Planning Admin Aktivite Geçmişi (Audit Log) Stilleri */
+
+.admin-audit-container {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+.admin-audit-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 1rem;
+}
+
+.admin-audit-header h2 {
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: var(--text-primary, #ffffff);
+  margin: 0;
+}
+
+.admin-subtitle {
+  font-size: 0.85rem;
+  color: var(--text-muted, #94a3b8);
+  margin-top: 0.25rem;
+}
+
+.audit-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.audit-filter-box {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  background: var(--surface-color, #1e293b);
+  border: 1px solid var(--border-color, #334155);
+  border-radius: 8px;
+  padding: 0.4rem 0.75rem;
+  color: var(--text-muted, #94a3b8);
+}
+
+.audit-filter-box select {
+  background: transparent;
+  border: none;
+  color: var(--text-primary, #f1f5f9);
+  font-size: 0.85rem;
+  outline: none;
+  cursor: pointer;
+}
+
+.audit-filter-box select option {
+  background: #1e293b;
+  color: #f1f5f9;
+}
+
+.audit-refresh-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.5rem 0.85rem;
+  border-radius: 8px;
+  border: 1px solid var(--border-color, #334155);
+  background: var(--surface-color, #1e293b);
+  color: var(--text-primary, #f1f5f9);
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.audit-refresh-btn:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.spin {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  100% {
+    transform: rotate(360deg);
+  }
+}
+
+/* Table */
+.audit-table-wrapper {
+  background: var(--card-bg, #0f172a);
+  border: 1px solid var(--border-color, #1e293b);
+  border-radius: 12px;
+  overflow-x: auto;
+}
+
+.audit-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+  text-align: left;
+}
+
+.audit-table th {
+  background: rgba(0, 0, 0, 0.3);
+  padding: 0.85rem 1rem;
+  font-weight: 600;
+  color: var(--text-muted, #94a3b8);
+  border-bottom: 1px solid var(--border-color, #1e293b);
+  white-space: nowrap;
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.audit-table td {
+  padding: 0.85rem 1rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+  vertical-align: middle;
+}
+
+.audit-table tr:last-child td {
+  border-bottom: none;
+}
+
+/* Sütun Hizalamaları & Genişlikleri */
+.audit-table .col-date {
+  width: 175px;
+  min-width: 165px;
+  white-space: nowrap;
+}
+
+.audit-table .col-admin {
+  width: 200px;
+  min-width: 180px;
+}
+
+.audit-table .col-target {
+  width: 150px;
+  min-width: 130px;
+}
+
+.audit-table .col-action {
+  width: 170px;
+  min-width: 160px;
+}
+
+.audit-table .col-diff {
+  min-width: 260px;
+}
+
+.audit-table .col-status {
+  width: 110px;
+  min-width: 100px;
+}
+
+.audit-date-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  color: var(--text-muted, #94a3b8);
+  font-size: 0.8rem;
+  white-space: nowrap;
+}
+
+.admin-user-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  background: rgba(99, 102, 241, 0.1);
+  color: #818cf8;
+  padding: 0.25rem 0.5rem;
+  border-radius: 6px;
+  font-size: 0.8rem;
+}
+
+.target-uid-tag {
+  color: #38bdf8;
+  background: rgba(56, 189, 248, 0.1);
+  padding: 0.2rem 0.45rem;
+  border-radius: 4px;
+  font-size: 0.75rem;
+}
+
+/* Action Badges */
+.audit-action-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.25rem 0.55rem;
+  border-radius: 6px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.action-task {
+  background: rgba(59, 130, 246, 0.15);
+  color: #60a5fa;
+  border: 1px solid rgba(59, 130, 246, 0.3);
+}
+
+.action-wallet {
+  background: rgba(245, 158, 11, 0.15);
+  color: #fbbf24;
+  border: 1px solid rgba(245, 158, 11, 0.3);
+}
+
+.action-reward {
+  background: rgba(236, 72, 153, 0.15);
+  color: #f472b6;
+  border: 1px solid rgba(236, 72, 153, 0.3);
+}
+
+.action-status {
+  background: rgba(239, 68, 68, 0.15);
+  color: #f87171;
+  border: 1px solid rgba(239, 68, 68, 0.3);
+}
+
+/* Diff Cell */
+.diff-cell {
+  max-width: 380px;
+}
+
+.diff-container {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 0.75rem;
+}
+
+.diff-field-row {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+  line-height: 1.4;
+}
+
+.diff-field-name {
+  color: var(--text-muted, #94a3b8);
+  font-weight: 600;
+}
+
+.diff-reason {
+  color: #fbbf24;
+  margin-bottom: 0.2rem;
+}
+
+.diff-old {
+  color: #f87171;
+  word-break: break-all;
+}
+
+.diff-new {
+  color: #34d399;
+  word-break: break-all;
+}
+
+.diff-arrow {
+  color: var(--text-muted, #94a3b8);
+  font-size: 0.7rem;
+}
+
+/* Status Pill */
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.2rem 0.5rem;
+  border-radius: 9999px;
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.status-pill.success {
+  background: rgba(16, 185, 129, 0.15);
+  color: #34d399;
+}
+
+.status-pill.failed {
+  background: rgba(239, 68, 68, 0.15);
+  color: #f87171;
+}
+
+/* Pagination */
+.audit-pagination-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.75rem 0.5rem;
+  flex-wrap: wrap;
+  gap: 1rem;
+}
+
+.pagination-info {
+  font-size: 0.85rem;
+  color: var(--text-muted, #94a3b8);
+}
+
+.pagination-buttons {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.pagination-nav-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.45rem 0.85rem;
+  border-radius: 6px;
+  border: 1px solid var(--border-color, #334155);
+  background: var(--surface-color, #1e293b);
+  color: var(--text-primary, #f1f5f9);
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.pagination-nav-btn:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.pagination-nav-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.page-indicator {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--text-primary, #f1f5f9);
+}
+
+.audit-loading-state,
+.audit-error-state,
+.audit-empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.75rem;
+  padding: 4rem 1rem;
+  color: var(--text-muted, #94a3b8);
+  text-align: center;
+}
+
+.audit-error-state {
+  color: #f87171;
+}
+
+.admin-retry-btn {
+  background: #4f46e5;
+  color: white;
+  border: none;
+  padding: 0.5rem 1rem;
+  border-radius: 6px;
+  cursor: pointer;
+  font-weight: 600;
+}

@@ -3,7 +3,6 @@ import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { ShieldCheck, Activity, Users, Database, ArrowLeft, RefreshCw, CheckCircle2, AlertCircle } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
-import { auth } from '../../services/firebase';
 import './AdminPlaceholderPage.css';
 
 export default function AdminPlaceholderPage() {
@@ -18,14 +17,7 @@ export default function AdminPlaceholderPage() {
     setPingStatus({ loading: true, data: null, error: null });
 
     try {
-      const activeUser = auth.currentUser || user;
-      const idToken = typeof activeUser.getIdToken === 'function' 
-        ? await activeUser.getIdToken() 
-        : await user?.getIdToken?.();
-
-      if (!idToken) {
-        throw new Error('Kullanıcı oturum tokenı alınamadı.');
-      }
+      const idToken = await user.getIdToken();
       const response = await fetch(`${workerUrl}/admin/ping`, {
         method: 'GET',
         headers: {

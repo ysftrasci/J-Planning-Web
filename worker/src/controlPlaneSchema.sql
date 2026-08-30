@@ -21,11 +21,18 @@ CREATE INDEX IF NOT EXISTS idx_admin_users_last_login ON admin_users_index(last_
 CREATE TABLE IF NOT EXISTS admin_audit_log (
     id TEXT PRIMARY KEY,
     admin_uid TEXT NOT NULL,
+    admin_email TEXT,
     target_user_uid TEXT,
     action TEXT NOT NULL,
+    old_value TEXT,
+    new_value TEXT,
+    status TEXT DEFAULT 'SUCCESS',
+    error_message TEXT,
     detail TEXT,
     created_at INTEGER NOT NULL
 );
 
 CREATE INDEX IF NOT EXISTS idx_admin_audit_created ON admin_audit_log(created_at);
 CREATE INDEX IF NOT EXISTS idx_admin_audit_admin ON admin_audit_log(admin_uid);
+CREATE INDEX IF NOT EXISTS idx_admin_audit_target ON admin_audit_log(target_user_uid);
+CREATE INDEX IF NOT EXISTS idx_admin_audit_action ON admin_audit_log(action);

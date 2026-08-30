@@ -92,7 +92,7 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  background: var(--color-surface-hover, #f8fafc);
+  background: var(--color-surface, #ffffff);
   border: 1px solid var(--color-border, #cbd5e1);
   border-radius: 8px;
   padding: 0 12px;
@@ -104,7 +104,7 @@
 }
 
 .search-icon {
-  color: var(--color-text-secondary, #94a3b8);
+  color: var(--color-text-muted, #94a3b8);
 }
 
 .search-input {
@@ -116,11 +116,15 @@
   color: var(--color-text-primary, #0f172a);
 }
 
+.search-input::placeholder {
+  color: var(--color-text-muted, #94a3b8);
+}
+
 .clear-search-btn {
   background: none;
   border: none;
   font-size: 18px;
-  color: var(--color-text-secondary, #94a3b8);
+  color: var(--color-text-muted, #94a3b8);
   cursor: pointer;
   padding: 0 4px;
 }
@@ -160,6 +164,11 @@
   cursor: pointer;
 }
 
+.control-select option {
+  background: var(--color-surface, #ffffff);
+  color: var(--color-text-primary, #1e293b);
+}
+
 /* Tablo */
 .table-responsive-wrapper {
   background: var(--color-surface, #ffffff);
@@ -192,12 +201,39 @@
 }
 
 .table-data-row {
-  border-bottom: 1px solid var(--color-border, #f1f5f9);
-  transition: background 0.1s ease;
+  border-bottom: 1px solid var(--color-border, rgba(255, 255, 255, 0.06));
+  transition: background 0.15s ease;
+}
+
+.clickable-row {
+  cursor: pointer;
 }
 
 .table-data-row:hover {
-  background: var(--color-surface-hover, #f8fafc);
+  background: rgba(255, 255, 255, 0.05) !important;
+}
+
+.admin-inspect-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-radius: 6px;
+  border: 1px solid rgba(99, 102, 241, 0.35);
+  background: rgba(99, 102, 241, 0.12);
+  color: #818cf8;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  white-space: nowrap;
+}
+
+.admin-inspect-btn:hover {
+  background: #6366f1;
+  color: #ffffff;
+  border-color: #6366f1;
+  box-shadow: 0 2px 8px rgba(99, 102, 241, 0.4);
 }
 
 .admin-table td {
@@ -326,6 +362,7 @@
   0% {
     background-position: 200% 0;
   }
+
   100% {
     background-position: -200% 0;
   }
@@ -417,41 +454,12 @@
   cursor: not-allowed;
 }
 
+.page-indicator {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-text-primary, #0f172a);
+}
+
 .font-mono {
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-}
-
-/* İncele Butonu */
-.admin-inspect-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 6px 14px;
-  border-radius: 6px;
-  border: 1px solid var(--color-border, #cbd5e1);
-  background: var(--color-surface, #ffffff);
-  color: #6366f1;
-  font-size: 12px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all 0.2s ease;
-}
-
-.admin-inspect-btn:hover {
-  background: #6366f1;
-  color: white;
-  border-color: #6366f1;
-  box-shadow: 0 2px 6px rgba(99, 102, 241, 0.25);
-}
-
-.dark .admin-inspect-btn {
-  background: rgba(99, 102, 241, 0.1);
-  border-color: rgba(99, 102, 241, 0.3);
-  color: #818cf8;
-}
-
-.dark .admin-inspect-btn:hover {
-  background: #6366f1;
-  color: white;
-  border-color: #6366f1;
 }

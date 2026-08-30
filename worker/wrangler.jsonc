@@ -9,7 +9,6 @@
 	"vars": {
 		"TURSO_ORG": "ysftrasci",
 		"TURSO_GROUP": "jplanning",
-		"TURSO_CONTROL_DB_URL": "libsql://jplanning-control-ysftrasci.aws-eu-west-1.turso.io",
 		"FIREBASE_PROJECT_ID": "j-planning",
 		"ALLOWED_ORIGINS": "http://localhost:5173,http://localhost:3000,https://j-planning-web.vercel.app,https://j-planning.vercel.app,https://j-planning.web.app,https://j-planning.firebaseapp.com"
 	},

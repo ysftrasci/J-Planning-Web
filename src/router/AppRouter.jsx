@@ -26,6 +26,7 @@ import AdminPlaceholderPage from '../pages/admin/AdminPlaceholderPage.jsx';
 import AdminLayout from '../pages/admin/AdminLayout.jsx';
 import AdminUsersPage from '../pages/admin/AdminUsersPage.jsx';
 import AdminStatsPage from '../pages/admin/AdminStatsPage.jsx';
+import AdminAuditLogPage from '../pages/admin/AdminAuditLogPage.jsx';
 import { useAuth } from '../context/AuthContext.jsx';
 
 function LoadingScreen() {
@@ -153,6 +154,7 @@ export default function AppRouter() {
         <Route index element={<AdminUsersPage />} />
         <Route path="users" element={<AdminUsersPage />} />
         <Route path="stats" element={<AdminStatsPage />} />
+        <Route path="audit-logs" element={<AdminAuditLogPage />} />
         <Route path="ping" element={<AdminPlaceholderPage />} />
       </Route>
       <Route

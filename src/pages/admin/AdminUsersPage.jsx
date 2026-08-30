@@ -1,4 +1,4 @@
-// J-Planning — Admin Kullanıcı Listesi Sayfası (Faz 2)
+// J-Planning — Admin Kullanıcı Listesi Sayfası
 import { useState, useEffect, useCallback } from 'react';
 import {
   Search,
@@ -14,6 +14,7 @@ import {
   Info,
   ArrowUpDown,
   Filter,
+  Eye,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { auth } from '../../services/firebase';
@@ -30,7 +31,7 @@ export default function AdminUsersPage() {
   const [order, setOrder] = useState('desc');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [selectedUserForDetail, setSelectedUserForDetail] = useState(null);
+  const [selectedUser, setSelectedUser] = useState(null);
 
   const workerUrl = import.meta.env.VITE_WORKER_URL || 'https://jplanning-auth-worker.ysftrasci.workers.dev';
 
@@ -49,14 +50,10 @@ export default function AdminUsersPage() {
     setError(null);
 
     try {
-      const activeUser = auth.currentUser || user;
-      const idToken = typeof activeUser.getIdToken === 'function' 
-        ? await activeUser.getIdToken() 
-        : await user?.getIdToken?.();
-
-      if (!idToken) {
-        throw new Error('Kullanıcı oturum tokenı alınamadı.');
-      }
+      const idToken = typeof user?.getIdToken === 'function'
+        ? await user.getIdToken()
+        : (auth.currentUser ? await auth.currentUser.getIdToken() : null);
+      if (!idToken) throw new Error('Oturum tokenı alınamadı.');
       const params = new URLSearchParams({
         page: pagination.page.toString(),
         limit: pagination.limit.toString(),
@@ -257,11 +254,17 @@ export default function AdminUsersPage() {
                 <th>Görevler</th>
                 <th>JP Bakiyesi</th>
                 <th>Durum</th>
+                <th>İşlem</th>
               </tr>
             </thead>
             <tbody>
               {users.map((u) => (
-                <tr key={u.uid} className="table-data-row">
+                <tr
+                  key={u.uid}
+                  className="table-data-row clickable-row"
+                  onClick={() => setSelectedUser(u)}
+                  title="Kullanıcı detayını görüntülemek ve düzenlemek için tıklayın"
+                >
                   {/* Kullanıcı Bilgisi */}
                   <td>
                     <div className="user-cell">
@@ -319,12 +322,11 @@ export default function AdminUsersPage() {
                   </td>
 
                   {/* Durum */}
-                    {/* Durum */}
                   <td>
                     {u.is_disabled === 1 ? (
                       <span className="status-badge disabled">
                         <XCircle size={12} />
-                        <span>Askıda</span>
+                        <span>Pasif</span>
                       </span>
                     ) : (
                       <span className="status-badge active">
@@ -334,14 +336,18 @@ export default function AdminUsersPage() {
                     )}
                   </td>
 
-                  {/* İşlemler / Detay */}
+                  {/* İşlem (İncele Butonu) */}
                   <td>
                     <button
                       type="button"
                       className="admin-inspect-btn"
-                      onClick={() => setSelectedUserForDetail(u)}
-                      title="Kullanıcı Görev ve Ödül Detaylarını İncele"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setSelectedUser(u);
+                      }}
+                      title="Kullanıcıyı İncele & Düzenle"
                     >
+                      <Eye size={14} />
                       <span>İncele</span>
                     </button>
                   </td>
@@ -388,15 +394,18 @@ export default function AdminUsersPage() {
         </div>
       )}
 
-      {/* Faz 3 Kullanıcı Detay Modalı */}
-      {selectedUserForDetail && (
+      {/* Kullanıcı Detay & Düzenleme Modalı (Faz 3 + Faz 4) */}
+      {selectedUser && (
         <AdminUserDetailModal
-          userMeta={selectedUserForDetail}
-          onClose={() => setSelectedUserForDetail(null)}
-          onUserStatusChanged={(targetUid, newStatus) => {
+          userMeta={selectedUser}
+          onClose={() => setSelectedUser(null)}
+          onUserStatusChanged={(uid, newStatus) => {
             setUsers((prev) =>
-              prev.map((usr) => (usr.uid === targetUid ? { ...usr, is_disabled: newStatus } : usr))
+              prev.map((usr) => (usr.uid === uid ? { ...usr, is_disabled: newStatus } : usr))
             );
+            if (selectedUser?.uid === uid) {
+              setSelectedUser((prev) => ({ ...prev, is_disabled: newStatus }));
+            }
           }}
         />
       )}

@@ -30,6 +30,7 @@
   --color-danger-soft: #FDE8EF;
 
   --color-border: #EEDEE4;
+  --color-surface-hover: #F4ECEF;
   --color-overlay: rgba(45, 30, 36, 0.45);
 
   /* Arkadaş görevleri — Bebek Mavisi (Baby Blue) & Pastel Lavanta */
@@ -107,6 +108,7 @@
   --color-danger-soft: rgba(239, 68, 68, 0.2);
 
   --color-border: #334155;
+  --color-surface-hover: #334155;
   --color-overlay: rgba(0, 0, 0, 0.75);
 
   --color-friend-received: #38BDF8;

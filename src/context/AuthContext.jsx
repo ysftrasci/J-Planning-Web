@@ -31,7 +31,7 @@ export function AuthProvider({ children }) {
       if (firebaseUser) {
         try {
           setDbError(null);
-          
+
           // Profil, Turso veritabanı ve Admin claim'i paralel başlat
           const [profile, , tokenResult] = await Promise.all([
             ensureUserProfile(firebaseUser).catch((err) => {
@@ -64,10 +64,11 @@ export function AuthProvider({ children }) {
             console.warn('Atanan görevler dinleyicisi başlatılamadı:', assignedErr);
           }
 
-          if (firebaseUser) {
+          // Prototype zincirini ve getIdToken() metodunu koruyarak profile alanını bağla
+          try {
             firebaseUser.profile = profile;
-            setUser(firebaseUser);
-          }
+          } catch (_) {}
+          setUser(firebaseUser);
         } catch (error) {
           console.error('Giriş sonrası veritabanı hazırlığı başarısız:', error);
           setDbError(error.message || 'Veritabanı bağlantısı kurulamadı.');
@@ -92,7 +93,9 @@ export function AuthProvider({ children }) {
     if (!auth.currentUser) return;
     try {
       const profile = await getUserProfile(auth.currentUser.uid);
-      auth.currentUser.profile = profile;
+      try {
+        auth.currentUser.profile = profile;
+      } catch (_) {}
       setUser(auth.currentUser);
     } catch (e) {
       console.warn('Profil yenilenemedi:', e);
@@ -121,7 +124,9 @@ export function AuthProvider({ children }) {
       setDbError(null);
       await initDatabase(auth.currentUser.uid);
       const profile = await getUserProfile(auth.currentUser.uid);
-      auth.currentUser.profile = profile;
+      try {
+        auth.currentUser.profile = profile;
+      } catch (_) {}
       setUser(auth.currentUser);
     } catch (err) {
       setDbError(err.message || 'Yeniden bağlanma başarısız');

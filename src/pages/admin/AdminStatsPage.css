@@ -134,11 +134,11 @@
 
 /* Sistem Durumu Kartı */
 .system-status-card {
-  background: var(--color-surface, #ffffff);
+  background: var(--card-bg, #0f172a);
   border-radius: 12px;
-  border: 1px solid var(--color-border, #e2e8f0);
+  border: 1px solid var(--border-color, #1e293b);
   padding: 22px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.02);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
 }
 
 .sys-header {
@@ -152,7 +152,8 @@
   width: 40px;
   height: 40px;
   border-radius: 10px;
-  background: rgba(201, 138, 44, 0.1);
+  background: rgba(201, 138, 44, 0.15);
+  color: #C98A2C;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -162,12 +163,13 @@
   margin: 0;
   font-size: 17px;
   font-weight: 700;
+  color: var(--text-primary, #ffffff);
 }
 
 .sys-header p {
   margin: 2px 0 0 0;
   font-size: 13px;
-  color: var(--color-text-secondary, #64748b);
+  color: var(--text-muted, #94a3b8);
 }
 
 .sys-grid {
@@ -182,14 +184,14 @@
   gap: 6px;
   padding: 14px;
   border-radius: 8px;
-  background: var(--color-surface-hover, #f8fafc);
-  border: 1px solid var(--color-border, #f1f5f9);
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--border-color, rgba(255, 255, 255, 0.08));
 }
 
 .sys-label {
   font-size: 12px;
   font-weight: 600;
-  color: var(--color-text-secondary, #64748b);
+  color: var(--text-muted, #94a3b8);
 }
 
 .sys-value-row {
@@ -198,7 +200,7 @@
   gap: 8px;
   font-size: 13px;
   font-weight: 500;
-  color: var(--color-text-primary, #0f172a);
+  color: var(--text-primary, #f1f5f9);
 }
 
 .status-dot.online {
@@ -206,7 +208,7 @@
   height: 8px;
   border-radius: 50%;
   background: #10B981;
-  box-shadow: 0 0 6px rgba(16, 185, 129, 0.6);
+  box-shadow: 0 0 8px rgba(16, 185, 129, 0.8);
   flex-shrink: 0;
 }
 

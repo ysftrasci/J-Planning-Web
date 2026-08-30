@@ -1,4 +1,4 @@
-/* J-Planning Admin Kullanıcı Detay Modalı Stilleri */
+/* J-Planning Admin Kullanıcı Detay ve Düzenleme Modalı Stilleri */
 
 .admin-modal-overlay {
   position: fixed;
@@ -29,8 +29,8 @@
   border: 1px solid var(--border-color, #374151);
   border-radius: 1rem;
   width: 100%;
-  max-width: 900px;
-  max-height: 90vh;
+  max-width: 960px;
+  max-height: 92vh;
   display: flex;
   flex-direction: column;
   box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
@@ -231,6 +231,12 @@
 .summary-item .icon-rewards { color: #ec4899; }
 .summary-item .icon-time { color: #10b981; }
 
+.summary-val-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
 .summary-val {
   font-size: 1rem;
   font-weight: 700;
@@ -240,6 +246,54 @@
 .summary-lbl {
   font-size: 0.75rem;
   color: var(--text-muted, #9ca3af);
+}
+
+.admin-edit-mini-btn {
+  background: rgba(245, 158, 11, 0.15);
+  border: 1px solid rgba(245, 158, 11, 0.3);
+  color: #fbbf24;
+  padding: 0.2rem 0.4rem;
+  border-radius: 4px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease;
+}
+
+.admin-edit-mini-btn:hover {
+  background: #f59e0b;
+  color: #000;
+}
+
+/* Cüzdan Düzenleme Kutusu */
+.admin-wallet-edit-box {
+  padding: 1rem 1.5rem;
+  background: rgba(245, 158, 11, 0.05);
+  border-bottom: 1px solid rgba(245, 158, 11, 0.2);
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.wallet-edit-title {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.9rem;
+  color: #fbbf24;
+}
+
+.wallet-edit-inputs {
+  display: flex;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.wallet-edit-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
 }
 
 /* Tabs */
@@ -280,7 +334,7 @@
   padding: 1.5rem;
   overflow-y: auto;
   flex: 1;
-  min-height: 280px;
+  min-height: 300px;
 }
 
 .admin-modal-loading,
@@ -341,7 +395,7 @@
 }
 
 .task-title-cell {
-  max-width: 260px;
+  max-width: 240px;
 }
 
 .task-title {
@@ -353,6 +407,176 @@
   font-size: 0.75rem;
   color: var(--text-muted, #9ca3af);
   margin-top: 0.15rem;
+}
+
+.admin-edit-row-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.35rem 0.65rem;
+  border-radius: 6px;
+  border: 1px solid var(--border-color, #374151);
+  background: rgba(255, 255, 255, 0.05);
+  color: #818cf8;
+  font-size: 0.75rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.admin-edit-row-btn:hover {
+  background: #6366f1;
+  color: white;
+  border-color: #6366f1;
+}
+
+/* Form Styles */
+.admin-edit-form-card {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--border-color, #374151);
+  border-radius: 8px;
+  padding: 1.25rem;
+  margin-bottom: 1.5rem;
+}
+
+.edit-form-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 1rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  padding-bottom: 0.5rem;
+}
+
+.edit-form-header h3 {
+  font-size: 0.95rem;
+  font-weight: 700;
+  margin: 0;
+  color: #818cf8;
+}
+
+.btn-close-edit {
+  background: transparent;
+  border: none;
+  color: var(--text-muted, #9ca3af);
+  cursor: pointer;
+}
+
+.edit-form-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1rem;
+}
+
+.form-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.form-group.full-width {
+  grid-column: 1 / -1;
+}
+
+.form-group.flex-2 {
+  flex: 2;
+}
+
+.form-group label {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--text-muted, #9ca3af);
+}
+
+.form-group input,
+.form-group select,
+.form-group textarea {
+  background: rgba(0, 0, 0, 0.3);
+  border: 1px solid var(--border-color, #374151);
+  border-radius: 6px;
+  padding: 0.5rem 0.75rem;
+  color: white;
+  font-size: 0.85rem;
+  outline: none;
+}
+
+.form-group input:focus,
+.form-group select:focus,
+.form-group textarea:focus {
+  border-color: #6366f1;
+}
+
+.edit-form-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.75rem;
+  margin-top: 1.25rem;
+}
+
+.btn-cancel {
+  background: transparent;
+  border: 1px solid var(--border-color, #374151);
+  color: var(--text-muted, #9ca3af);
+  padding: 0.45rem 1rem;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+.btn-save {
+  background: #6366f1;
+  color: white;
+  border: none;
+  padding: 0.45rem 1.25rem;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.8rem;
+  font-weight: 600;
+  transition: all 0.2s ease;
+}
+
+.btn-save:hover:not(:disabled) {
+  background: #4f46e5;
+}
+
+.btn-save:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.admin-assigned-task-notice {
+  background: rgba(245, 158, 11, 0.1);
+  border: 1px solid rgba(245, 158, 11, 0.3);
+  border-radius: 8px;
+  padding: 0.75rem 1rem;
+  margin-bottom: 1rem;
+  display: flex;
+  align-items: flex-start;
+  gap: 0.6rem;
+  color: #fbbf24;
+  font-size: 0.8rem;
+  line-height: 1.45;
+}
+
+.admin-assigned-task-notice svg {
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.task-title-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.assigned-badge {
+  background: rgba(168, 85, 247, 0.15);
+  color: #c084fc;
+  border: 1px solid rgba(168, 85, 247, 0.3);
+  font-size: 0.7rem;
+  padding: 0.1rem 0.4rem;
 }
 
 .admin-badge {
@@ -475,9 +699,41 @@
   background: var(--btn-secondary-hover, #4b5563);
 }
 
+.admin-edit-row-btn {
+  background: rgba(99, 102, 241, 0.15);
+  border: 1px solid rgba(99, 102, 241, 0.3);
+  color: #818cf8;
+  padding: 0.25rem 0.55rem;
+  border-radius: 6px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  transition: all 0.2s ease;
+}
+
+.admin-edit-row-btn:hover:not(:disabled) {
+  background: #6366f1;
+  color: #ffffff;
+}
+
+.admin-edit-row-btn:disabled,
+.admin-edit-row-btn.disabled-assigned {
+  background: rgba(107, 114, 128, 0.1);
+  border: 1px solid rgba(107, 114, 128, 0.2);
+  color: #6b7280;
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
 @media (max-width: 640px) {
   .admin-modal-summary-bar {
     grid-template-columns: repeat(2, 1fr);
+  }
+  .edit-form-grid {
+    grid-template-columns: 1fr;
   }
   .admin-modal-header {
     flex-direction: column;

@@ -40,7 +40,7 @@ function getCorsHeaders(request, env) {
     origin.startsWith('http://127.0.0.1:');
 
   const headers = {
-    'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+    'Access-Control-Allow-Methods': 'GET, POST, PATCH, OPTIONS',
     'Access-Control-Allow-Headers': 'Content-Type, Authorization',
     'Access-Control-Max-Age': '86400',
   };
@@ -160,6 +160,80 @@ async function syncUserToControlPlane(env, { uid, email, displayName, dbName }) 
     });
   } catch (err) {
     console.error('[Worker Control Plane Sync Hatası]:', err.message);
+  }
+}
+
+/**
+ * admin_audit_log tablosunun tüm Faz 4 kolonları ile hazır olmasını sağlar (Migration)
+ */
+let auditSchemaInitialized = false;
+async function ensureAuditLogSchema(client) {
+  if (auditSchemaInitialized || !client) return;
+  try {
+    await client.execute(`
+      CREATE TABLE IF NOT EXISTS admin_audit_log (
+        id TEXT PRIMARY KEY,
+        admin_uid TEXT NOT NULL,
+        admin_email TEXT,
+        target_user_uid TEXT,
+        action TEXT NOT NULL,
+        old_value TEXT,
+        new_value TEXT,
+        status TEXT DEFAULT 'SUCCESS',
+        error_message TEXT,
+        detail TEXT,
+        created_at INTEGER NOT NULL
+      );
+    `);
+    const cols = ['admin_email', 'old_value', 'new_value', 'status', 'error_message', 'detail'];
+    for (const col of cols) {
+      await client.execute(`ALTER TABLE admin_audit_log ADD COLUMN ${col} TEXT;`).catch(() => {});
+    }
+    auditSchemaInitialized = true;
+  } catch (e) {
+    console.warn('[Audit Log Schema Warning]:', e.message);
+  }
+}
+
+/**
+ * Admin tarafından yapılan değişiklikleri Control Plane DB'deki admin_audit_log tablosuna kaydeder.
+ * Append-only çalışır; kayıtlar asla silinemez veya güncellenemez.
+ */
+async function logAdminAudit(env, { adminUid, adminEmail, targetUid, action, oldValue, newValue, status = 'SUCCESS', errorMessage = null }) {
+  try {
+    const client = getControlPlaneClient(env);
+    if (!client) {
+      return;
+    }
+
+    await ensureAuditLogSchema(client);
+
+    const id = crypto.randomUUID ? crypto.randomUUID() : `audit_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    const now = Date.now();
+
+    const sql = `
+      INSERT INTO admin_audit_log (
+        id, admin_uid, admin_email, target_user_uid, action, old_value, new_value, status, error_message, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+    `;
+
+    await client.execute({
+      sql,
+      args: [
+        id,
+        adminUid,
+        adminEmail || null,
+        targetUid,
+        action,
+        oldValue ? JSON.stringify(oldValue) : null,
+        newValue ? JSON.stringify(newValue) : null,
+        status,
+        errorMessage || null,
+        now,
+      ],
+    });
+  } catch (err) {
+    console.warn('[Worker Audit Log Kayıt Hatası]:', err.message);
   }
 }
 
@@ -295,51 +369,6 @@ async function ensureUserDatabase(dbName, env) {
   };
 }
 
-// Rate Limiter: KV binding varsa KV ile, yoksa in-memory sliding-window fallback
-const memoryRateLimitMap = new Map();
-
-async function isRateLimited(request, env, identifier = null) {
-  const ip = request.headers.get('CF-Connecting-IP') || request.headers.get('x-forwarded-for') || '127.0.0.1';
-  const keyId = identifier || ip;
-  const now = Date.now();
-  const minuteWindow = Math.floor(now / 60000);
-  const limit = 40; // dakikada maks 40 istek
-
-  // 1. Cloudflare KV varsa kullan
-  if (env.RATE_LIMIT_KV) {
-    try {
-      const kvKey = `rl:${keyId}:${minuteWindow}`;
-      const countStr = await env.RATE_LIMIT_KV.get(kvKey);
-      const count = countStr ? parseInt(countStr, 10) : 0;
-      if (count >= limit) {
-        return true;
-      }
-      await env.RATE_LIMIT_KV.put(kvKey, (count + 1).toString(), { expirationTtl: 65 });
-      return false;
-    } catch (_) {
-      // KV hatası durumunda in-memory'e düş
-    }
-  }
-
-  // 2. In-Memory fallback (lokal test ve tekil isolate için)
-  const userRecord = memoryRateLimitMap.get(keyId) || { count: 0, resetAt: now + 60000 };
-  if (now > userRecord.resetAt) {
-    userRecord.count = 0;
-    userRecord.resetAt = now + 60000;
-  }
-  userRecord.count++;
-  memoryRateLimitMap.set(keyId, userRecord);
-
-  // Periyodik temizlik (RAM şişmesini önle)
-  if (memoryRateLimitMap.size > 5000) {
-    for (const [k, v] of memoryRateLimitMap.entries()) {
-      if (now > v.resetAt) memoryRateLimitMap.delete(k);
-    }
-  }
-
-  return userRecord.count > limit;
-}
-
 export default {
   async fetch(request, env, ctx) {
     const corsHeaders = getCorsHeaders(request, env);
@@ -365,20 +394,6 @@ export default {
         200,
         corsHeaders
       );
-    }
-
-    // Rate Limiting Kontrolü (Tüm /session ve /admin/* endpoint'leri için)
-    if (url.pathname === '/session' || url.pathname.startsWith('/admin/')) {
-      if (await isRateLimited(request, env)) {
-        return jsonResponse(
-          {
-            error: 'TOO_MANY_REQUESTS',
-            message: 'Çok fazla istek gönderildi. Lütfen bir süre bekleyin.',
-          },
-          429,
-          corsHeaders
-        );
-      }
     }
 
     // GET /admin/ping (Admin yetkisi doğrulama ve sağlık kontrolü)
@@ -750,7 +765,7 @@ export default {
         const [tasksRes, rewardsRes, categoriesRes, walletRes, countsRes] = await Promise.all([
           userDbClient
             .execute(
-              'SELECT id, title, description, notes, categoryId, priority, period, subtaskCount, isArchived, createdAt FROM tasks ORDER BY createdAt DESC LIMIT 50;'
+              'SELECT id, title, description, notes, categoryId, priority, period, subtaskCount, isArchived, assignmentDirection, assignedByName, firestoreAssignmentId, createdAt FROM tasks ORDER BY createdAt DESC LIMIT 50;'
             )
             .catch(() => ({ rows: [] })),
           userDbClient
@@ -819,34 +834,6 @@ export default {
           );
         }
 
-        const isAuthError =
-          err.name?.startsWith('JWT') ||
-          err.name?.startsWith('JWS') ||
-          err.name?.startsWith('JWE') ||
-          err.code?.startsWith('ERR_JWT') ||
-          err.code?.startsWith('ERR_JWS') ||
-          err.code?.startsWith('ERR_JWE') ||
-          err.name === 'JWTExpired' ||
-          err.name === 'JWTClaimValidationFailed' ||
-          err.name === 'JWSSignatureVerificationFailed' ||
-          err.name === 'JWSInvalid' ||
-          err.message?.includes('Authorization') ||
-          err.message?.includes('Token') ||
-          err.message?.includes('token') ||
-          err.message?.includes('JWT') ||
-          err.message?.includes('jwt');
-
-        if (isAuthError) {
-          return jsonResponse(
-            {
-              error: 'UNAUTHORIZED',
-              message: 'Oturum doğrulanamadı veya süresi doldu.',
-            },
-            401,
-            corsHeaders
-          );
-        }
-
         return jsonResponse(
           {
             error: 'INTERNAL_ERROR',
@@ -867,7 +854,7 @@ export default {
         const authHeader = request.headers.get('Authorization');
         const projectId = env.FIREBASE_PROJECT_ID || 'j-planning';
 
-        await verifyAdminClaim(authHeader, projectId);
+        const { uid: adminUid, payload } = await verifyAdminClaim(authHeader, projectId);
 
         const body = await request.json();
         const isDisabled =
@@ -889,6 +876,17 @@ export default {
         await controlClient.execute({
           sql: 'UPDATE admin_users_index SET is_disabled = ?, updated_at = ? WHERE uid = ?;',
           args: [isDisabled, now, targetUid],
+        });
+
+        // Audit Log Kaydı (Faz 4 — Await ile garantilenir)
+        await logAdminAudit(env, {
+          adminUid,
+          adminEmail: payload.email,
+          targetUid,
+          action: 'TOGGLE_STATUS',
+          oldValue: { is_disabled: !isDisabled ? 1 : 0 },
+          newValue: { is_disabled: isDisabled },
+          status: 'SUCCESS',
         });
 
         return jsonResponse(
@@ -924,6 +922,440 @@ export default {
           500,
           corsHeaders
         );
+      }
+    }
+
+    // PATCH /admin/users/:uid/tasks/:taskId (Faz 4 — Görev Düzenleme)
+    const taskEditMatch = url.pathname.match(/^\/admin\/users\/([^/]+)\/tasks\/([^/]+)$/);
+    if (request.method === 'PATCH' && taskEditMatch) {
+      const targetUid = decodeURIComponent(taskEditMatch[1]);
+      const taskId = decodeURIComponent(taskEditMatch[2]);
+      try {
+        const authHeader = request.headers.get('Authorization');
+        const projectId = env.FIREBASE_PROJECT_ID || 'j-planning';
+
+        const { uid: adminUid, payload } = await verifyAdminClaim(authHeader, projectId);
+
+        const body = await request.json();
+        const { title, description, notes, priority, period, isArchived } = body;
+
+        // Whitelist girdi denetimi
+        const allowedPriorities = ['HIGH', 'MEDIUM', 'LOW', 'ZERO'];
+        const allowedPeriods = ['DAILY', 'WEEKLY', 'MONTHLY', 'ONCE'];
+
+        if (priority && !allowedPriorities.includes(String(priority).toUpperCase())) {
+          return jsonResponse({ error: 'INVALID_INPUT', message: 'Geçersiz öncelik değeri.' }, 400, corsHeaders);
+        }
+        if (period && !allowedPeriods.includes(String(period).toUpperCase())) {
+          return jsonResponse({ error: 'INVALID_INPUT', message: 'Geçersiz periyot değeri.' }, 400, corsHeaders);
+        }
+
+        // Kullanıcının gerçek db_name bilgisini Control Plane'den bul
+        let targetDbName = getDbNameForUser(targetUid);
+        const controlClient = getControlPlaneClient(env);
+        if (controlClient) {
+          const userMetaRes = await controlClient.execute({
+            sql: 'SELECT db_name FROM admin_users_index WHERE uid = ? LIMIT 1;',
+            args: [targetUid],
+          }).catch(() => null);
+          if (userMetaRes?.rows?.[0]?.db_name) {
+            targetDbName = String(userMetaRes.rows[0].db_name);
+          }
+        }
+
+        const sessionInfo = await ensureUserDatabase(targetDbName, env);
+        const userDbClient = createClient({
+          url: sessionInfo.dbUrl,
+          authToken: sessionInfo.token,
+        });
+
+        // 1. Eski kaydı oku
+        const oldRes = await userDbClient.execute({
+          sql: 'SELECT id, title, description, notes, priority, period, isArchived FROM tasks WHERE id = ? LIMIT 1;',
+          args: [taskId],
+        });
+
+        if (oldRes.rows.length === 0) {
+          return jsonResponse({ error: 'NOT_FOUND', message: 'Düzenlenecek görev bulunamadı.' }, 404, corsHeaders);
+        }
+
+        const oldTask = oldRes.rows[0];
+
+        // 2. Dinamik güncelleme sorgusu (sadece gelen whitelist alanları güncelle)
+        const updateFields = [];
+        const updateArgs = [];
+
+        if (title !== undefined) {
+          updateFields.push('title = ?');
+          updateArgs.push(String(title).trim().slice(0, 300));
+        }
+        if (description !== undefined) {
+          updateFields.push('description = ?');
+          updateArgs.push(description ? String(description).trim().slice(0, 1000) : null);
+        }
+        if (notes !== undefined) {
+          updateFields.push('notes = ?');
+          updateArgs.push(notes ? String(notes).trim().slice(0, 1000) : null);
+        }
+        if (priority !== undefined) {
+          updateFields.push('priority = ?');
+          updateArgs.push(String(priority).toUpperCase());
+        }
+        if (period !== undefined) {
+          updateFields.push('period = ?');
+          updateArgs.push(String(period).toUpperCase());
+        }
+        if (isArchived !== undefined) {
+          updateFields.push('isArchived = ?');
+          updateArgs.push(isArchived === 1 || isArchived === true ? 1 : 0);
+        }
+
+        if (updateFields.length === 0) {
+          return jsonResponse({ error: 'NO_CHANGES', message: 'Güncellenecek geçerli bir alan belirtilmedi.' }, 400, corsHeaders);
+        }
+
+        updateArgs.push(taskId);
+        await userDbClient.execute({
+          sql: `UPDATE tasks SET ${updateFields.join(', ')} WHERE id = ?;`,
+          args: updateArgs,
+        });
+
+        // 3. Değiştirilemez Audit Log Kaydı (Await ile garantilenir)
+        await logAdminAudit(env, {
+          adminUid,
+          adminEmail: payload.email,
+          targetUid,
+          action: 'UPDATE_TASK',
+          oldValue: oldTask,
+          newValue: { ...oldTask, ...body, id: taskId },
+          status: 'SUCCESS',
+        });
+
+        return jsonResponse(
+          {
+            success: true,
+            taskId,
+            message: 'Görev başarıyla güncellendi.',
+          },
+          200,
+          corsHeaders
+        );
+      } catch (err) {
+        console.error('[Worker /admin/users/:uid/tasks/:taskId Error]:', err);
+        if (err.isForbidden) {
+          return jsonResponse({ error: 'FORBIDDEN', message: 'Yetkisiz erişim.' }, 403, corsHeaders);
+        }
+        return jsonResponse({ error: 'INTERNAL_ERROR', message: 'Görev güncellenemedi.', detail: err.message }, 500, corsHeaders);
+      }
+    }
+
+    // PATCH /admin/users/:uid/wallet (Faz 4 — Cüzdan JP Bakiyesi Düzenleme)
+    const walletEditMatch = url.pathname.match(/^\/admin\/users\/([^/]+)\/wallet$/);
+    if (request.method === 'PATCH' && walletEditMatch) {
+      const targetUid = decodeURIComponent(walletEditMatch[1]);
+      try {
+        const authHeader = request.headers.get('Authorization');
+        const projectId = env.FIREBASE_PROJECT_ID || 'j-planning';
+
+        const { uid: adminUid, payload } = await verifyAdminClaim(authHeader, projectId);
+
+        const body = await request.json();
+        const rawBalance = parseInt(body.balance, 10);
+        const reason = (body.reason || '').trim();
+
+        // 1. Doğrulama: Bakiye >= 0 ve Reason zorunlu (min 3 karakter)
+        if (isNaN(rawBalance) || rawBalance < 0) {
+          return jsonResponse(
+            { error: 'INVALID_INPUT', message: 'Cüzdan bakiyesi negatif olamaz ve geçerli bir sayı olmalıdır.' },
+            400,
+            corsHeaders
+          );
+        }
+
+        if (!reason || reason.length < 3) {
+          return jsonResponse(
+            { error: 'REASON_REQUIRED', message: 'Bakiye değişikliği için en az 3 karakterlik bir gerekçe (reason) belirtilmesi zorunludur.' },
+            400,
+            corsHeaders
+          );
+        }
+
+        // Kullanıcının gerçek db_name bilgisini Control Plane'den bul
+        let targetDbName = getDbNameForUser(targetUid);
+        const controlClient = getControlPlaneClient(env);
+        if (controlClient) {
+          const userMetaRes = await controlClient.execute({
+            sql: 'SELECT db_name FROM admin_users_index WHERE uid = ? LIMIT 1;',
+            args: [targetUid],
+          }).catch(() => null);
+          if (userMetaRes?.rows?.[0]?.db_name) {
+            targetDbName = String(userMetaRes.rows[0].db_name);
+          }
+        }
+
+        const sessionInfo = await ensureUserDatabase(targetDbName, env);
+        const userDbClient = createClient({
+          url: sessionInfo.dbUrl,
+          authToken: sessionInfo.token,
+        });
+
+        // 2. Eski bakiyeyi oku
+        const oldWalletRes = await userDbClient
+          .execute('SELECT balance FROM wallet WHERE userId = \'me\' LIMIT 1;')
+          .catch(() => ({ rows: [] }));
+        const oldBalance = Number(oldWalletRes.rows[0]?.balance ?? 0);
+
+        // 3. Kullanıcı DB'sinde wallet tablosunu güncelle (upsert)
+        await userDbClient.execute({
+          sql: "INSERT INTO wallet (userId, balance) VALUES ('me', ?) ON CONFLICT(userId) DO UPDATE SET balance = excluded.balance;",
+          args: [rawBalance],
+        });
+
+        // 4. Control Plane üzerindeki jp_balance sayacını anında güncelle
+        const now = Date.now();
+        if (controlClient) {
+          await controlClient
+            .execute({
+              sql: 'UPDATE admin_users_index SET jp_balance = ?, updated_at = ? WHERE uid = ?;',
+              args: [rawBalance, now, targetUid],
+            })
+            .catch(() => {});
+        }
+
+        // 5. Değiştirilemez Audit Log Kaydı (Await ile garantilenir)
+        await logAdminAudit(env, {
+          adminUid,
+          adminEmail: payload.email,
+          targetUid,
+          action: 'UPDATE_WALLET',
+          oldValue: { balance: oldBalance },
+          newValue: { balance: rawBalance, reason },
+          status: 'SUCCESS',
+        });
+
+        return jsonResponse(
+          {
+            success: true,
+            uid: targetUid,
+            newBalance: rawBalance,
+            reason,
+            message: 'Cüzdan bakiyesi başarıyla güncellendi.',
+          },
+          200,
+          corsHeaders
+        );
+      } catch (err) {
+        console.error('[Worker /admin/users/:uid/wallet Error]:', err);
+        if (err.isForbidden) {
+          return jsonResponse({ error: 'FORBIDDEN', message: 'Yetkisiz erişim.' }, 403, corsHeaders);
+        }
+        return jsonResponse({ error: 'INTERNAL_ERROR', message: 'Cüzdan bakiyesi güncellenemedi.', detail: err.message }, 500, corsHeaders);
+      }
+    }
+
+    // PATCH /admin/users/:uid/rewards/:rewardId (Faz 4 — Ödül Düzenleme)
+    const rewardEditMatch = url.pathname.match(/^\/admin\/users\/([^/]+)\/rewards\/([^/]+)$/);
+    if (request.method === 'PATCH' && rewardEditMatch) {
+      const targetUid = decodeURIComponent(rewardEditMatch[1]);
+      const rewardId = decodeURIComponent(rewardEditMatch[2]);
+      try {
+        const authHeader = request.headers.get('Authorization');
+        const projectId = env.FIREBASE_PROJECT_ID || 'j-planning';
+
+        const { uid: adminUid, payload } = await verifyAdminClaim(authHeader, projectId);
+
+        const body = await request.json();
+        const { title, cost, isRedeemed } = body;
+
+        if (cost !== undefined) {
+          const rawCost = parseInt(cost, 10);
+          if (isNaN(rawCost) || rawCost < 0) {
+            return jsonResponse(
+              { error: 'INVALID_INPUT', message: 'Ödül maliyeti negatif olamaz.' },
+              400,
+              corsHeaders
+            );
+          }
+        }
+
+        // Kullanıcının gerçek db_name bilgisini Control Plane'den bul
+        let targetDbName = getDbNameForUser(targetUid);
+        const controlClient = getControlPlaneClient(env);
+        if (controlClient) {
+          const userMetaRes = await controlClient.execute({
+            sql: 'SELECT db_name FROM admin_users_index WHERE uid = ? LIMIT 1;',
+            args: [targetUid],
+          }).catch(() => null);
+          if (userMetaRes?.rows?.[0]?.db_name) {
+            targetDbName = String(userMetaRes.rows[0].db_name);
+          }
+        }
+
+        const sessionInfo = await ensureUserDatabase(targetDbName, env);
+        const userDbClient = createClient({
+          url: sessionInfo.dbUrl,
+          authToken: sessionInfo.token,
+        });
+
+        // 1. Eski kaydı oku
+        const oldRewardRes = await userDbClient.execute({
+          sql: 'SELECT id, title, cost, isRedeemed, redeemedAt FROM rewards WHERE id = ? LIMIT 1;',
+          args: [rewardId],
+        });
+
+        if (oldRewardRes.rows.length === 0) {
+          return jsonResponse({ error: 'NOT_FOUND', message: 'Düzenlenecek ödül bulunamadı.' }, 404, corsHeaders);
+        }
+
+        const oldReward = oldRewardRes.rows[0];
+
+        // 2. Dinamik güncelleme
+        const updateFields = [];
+        const updateArgs = [];
+
+        if (title !== undefined) {
+          updateFields.push('title = ?');
+          updateArgs.push(String(title).trim().slice(0, 300));
+        }
+        if (cost !== undefined) {
+          updateFields.push('cost = ?');
+          updateArgs.push(parseInt(cost, 10));
+        }
+        if (isRedeemed !== undefined) {
+          const redeemedInt = isRedeemed === 1 || isRedeemed === true ? 1 : 0;
+          updateFields.push('isRedeemed = ?');
+          updateArgs.push(redeemedInt);
+          if (redeemedInt === 1 && !oldReward.redeemedAt) {
+            updateFields.push('redeemedAt = ?');
+            updateArgs.push(Date.now());
+          }
+        }
+
+        if (updateFields.length === 0) {
+          return jsonResponse({ error: 'NO_CHANGES', message: 'Güncellenecek alan belirtilmedi.' }, 400, corsHeaders);
+        }
+
+        updateArgs.push(rewardId);
+        await userDbClient.execute({
+          sql: `UPDATE rewards SET ${updateFields.join(', ')} WHERE id = ?;`,
+          args: updateArgs,
+        });
+
+        // 3. Audit Log Kaydı (Await ile garantilenir)
+        await logAdminAudit(env, {
+          adminUid,
+          adminEmail: payload.email,
+          targetUid,
+          action: 'UPDATE_REWARD',
+          oldValue: oldReward,
+          newValue: { ...oldReward, ...body, id: rewardId },
+          status: 'SUCCESS',
+        });
+
+        return jsonResponse(
+          {
+            success: true,
+            rewardId,
+            message: 'Ödül başarıyla güncellendi.',
+          },
+          200,
+          corsHeaders
+        );
+      } catch (err) {
+        console.error('[Worker /admin/users/:uid/rewards/:rewardId Error]:', err);
+        if (err.isForbidden) {
+          return jsonResponse({ error: 'FORBIDDEN', message: 'Yetkisiz erişim.' }, 403, corsHeaders);
+        }
+        return jsonResponse({ error: 'INTERNAL_ERROR', message: 'Ödül güncellenemedi.', detail: err.message }, 500, corsHeaders);
+      }
+    }
+
+    // GET /admin/audit-logs (Faz 4 — Değiştirilemez Aktivite Geçmişi Listesi)
+    if (request.method === 'GET' && url.pathname === '/admin/audit-logs') {
+      try {
+        const authHeader = request.headers.get('Authorization');
+        const projectId = env.FIREBASE_PROJECT_ID || 'j-planning';
+
+        await verifyAdminClaim(authHeader, projectId);
+
+        const client = getControlPlaneClient(env);
+        if (!client) {
+          return jsonResponse(
+            {
+              error: 'CONTROL_PLANE_UNAVAILABLE',
+              message: 'Control Plane veritabanı yapılandırması eksik.',
+            },
+            503,
+            corsHeaders
+          );
+        }
+
+        await ensureAuditLogSchema(client);
+
+        const rawPage = parseInt(url.searchParams.get('page'), 10);
+        const rawLimit = parseInt(url.searchParams.get('limit'), 10);
+        const page = isNaN(rawPage) || rawPage < 1 ? 1 : rawPage;
+        const limit = isNaN(rawLimit) || rawLimit < 1 ? 20 : Math.min(100, rawLimit);
+        const targetUid = url.searchParams.get('targetUid');
+        const action = url.searchParams.get('action');
+
+        const offset = (page - 1) * limit;
+
+        let query =
+          'SELECT id, admin_uid, admin_email, target_user_uid, action, old_value, new_value, status, error_message, created_at FROM admin_audit_log';
+        let countQuery = 'SELECT COUNT(*) as total FROM admin_audit_log';
+        const args = [];
+        const countArgs = [];
+        const whereClauses = [];
+
+        if (targetUid) {
+          whereClauses.push('target_user_uid = ?');
+          args.push(targetUid);
+          countArgs.push(targetUid);
+        }
+        if (action) {
+          whereClauses.push('action = ?');
+          args.push(action);
+          countArgs.push(action);
+        }
+
+        if (whereClauses.length > 0) {
+          const whereSql = ` WHERE ${whereClauses.join(' AND ')}`;
+          query += whereSql;
+          countQuery += whereSql;
+        }
+
+        query += ' ORDER BY created_at DESC LIMIT ? OFFSET ?;';
+        args.push(limit, offset);
+
+        const [rowsRes, countRes] = await Promise.all([
+          client.execute({ sql: query, args }),
+          client.execute({ sql: countQuery, args: countArgs }),
+        ]);
+
+        const total = Number(countRes.rows[0]?.total || 0);
+        const totalPages = Math.ceil(total / limit) || 1;
+
+        return jsonResponse(
+          {
+            success: true,
+            logs: rowsRes.rows,
+            pagination: {
+              page,
+              limit,
+              total,
+              totalPages,
+            },
+          },
+          200,
+          corsHeaders
+        );
+      } catch (err) {
+        console.error('[Worker /admin/audit-logs Error]:', err);
+        if (err.isForbidden) {
+          return jsonResponse({ error: 'FORBIDDEN', message: 'Yetkisiz erişim.' }, 403, corsHeaders);
+        }
+        return jsonResponse({ error: 'INTERNAL_ERROR', message: 'Audit loglar alınamadı.', detail: err.message }, 500, corsHeaders);
       }
     }
 
@@ -977,7 +1409,7 @@ export default {
         if (ctx?.waitUntil) {
           ctx.waitUntil(syncPromise);
         } else {
-          syncPromise.catch(() => {});
+          syncPromise.catch(() => { });
         }
 
         return jsonResponse(

@@ -82,17 +82,6 @@ export default function AdminLayout() {
           </NavLink>
 
           <NavLink
-            to="/admin/users"
-            className={({ isActive }) =>
-              `admin-nav-item ${isActive ? 'active' : ''}`
-            }
-            onClick={() => setSidebarOpen(false)}
-          >
-            <Users size={18} />
-            <span>Kullanıcı Listesi</span>
-          </NavLink>
-
-          <NavLink
             to="/admin/stats"
             className={({ isActive }) =>
               `admin-nav-item ${isActive ? 'active' : ''}`
@@ -103,14 +92,19 @@ export default function AdminLayout() {
             <span>Genel İstatistikler</span>
           </NavLink>
 
+          <NavLink
+            to="/admin/audit-logs"
+            className={({ isActive }) =>
+              `admin-nav-item ${isActive ? 'active' : ''}`
+            }
+            onClick={() => setSidebarOpen(false)}
+          >
+            <History size={18} />
+            <span>Aktivite Geçmişi</span>
+          </NavLink>
+
           <div className="nav-section-title" style={{ marginTop: '20px' }}>
             GELECEK FAZLAR
-          </div>
-
-          <div className="admin-nav-item disabled" title="Faz 4'te aktif edilecek">
-            <History size={18} />
-            <span>Aktivite Logları</span>
-            <span className="nav-badge">Faz 4</span>
           </div>
 
           <div className="admin-nav-item disabled" title="Faz 5'te aktif edilecek">

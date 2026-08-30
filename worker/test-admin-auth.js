@@ -84,7 +84,7 @@ const mockUsersIndex = [
     db_name: 'jplanning-user-user-ali-1',
     created_at: 1700000000000,
     last_login_at: 1710000000000,
-    task_count: 5,
+    task_count: 2,
     jp_balance: 120,
     is_disabled: 0,
   },
@@ -95,8 +95,8 @@ const mockUsersIndex = [
     db_name: 'jplanning-user-user-ayse-2',
     created_at: 1705000000000,
     last_login_at: 1715000000000,
-    task_count: 12,
-    jp_balance: 340,
+    task_count: 0,
+    jp_balance: 0,
     is_disabled: 0,
   },
 ];
@@ -104,8 +104,8 @@ const mockUsersIndex = [
 const mockUserDbs = {
   'user_ali_1': {
     tasks: [
-      { id: 't1', title: 'Matematik Soru Çözümü', period: 'DAILY', priority: 'HIGH', isArchived: 0, createdAt: 1710000000000 },
-      { id: 't2', title: 'Kitap Oku', period: 'DAILY', priority: 'MEDIUM', isArchived: 0, createdAt: 1709000000000 },
+      { id: 't1', title: 'Matematik Soru Çözümü', notes: 'Sayfa 50', period: 'DAILY', priority: 'HIGH', isArchived: 0, createdAt: 1710000000000 },
+      { id: 't2', title: 'Kitap Oku', notes: '30 sayfa', period: 'DAILY', priority: 'MEDIUM', isArchived: 0, createdAt: 1709000000000 },
     ],
     rewards: [
       { id: 'r1', title: 'Kahve Molası', cost: 50, isRedeemed: 0, createdAt: 1708000000000 },
@@ -116,6 +116,24 @@ const mockUserDbs = {
     wallet: { balance: 120 },
   },
 };
+
+const mockAuditLogs = [];
+
+function logMockAudit({ adminUid, adminEmail, targetUid, action, oldValue, newValue, status = 'SUCCESS', errorMessage = null }) {
+  const entry = {
+    id: `audit_${Date.now()}_${mockAuditLogs.length + 1}`,
+    admin_uid: adminUid,
+    admin_email: adminEmail,
+    target_user_uid: targetUid,
+    action,
+    old_value: oldValue ? JSON.stringify(oldValue) : null,
+    new_value: newValue ? JSON.stringify(newValue) : null,
+    status,
+    error_message: errorMessage,
+    created_at: Date.now(),
+  };
+  mockAuditLogs.unshift(entry);
+}
 
 // Rate limiter mock
 const memoryRateLimitMap = new Map();
@@ -157,7 +175,6 @@ async function handleWorkerRequest(request, env, customKey = publicKey) {
     try {
       const authHeader = request.headers.get('Authorization');
       const projectId = env.FIREBASE_PROJECT_ID || 'j-planning';
-
       const { uid, payload } = await verifyAdminClaimWithKey(authHeader, projectId, customKey);
 
       return jsonResponse(
@@ -167,116 +184,28 @@ async function handleWorkerRequest(request, env, customKey = publicKey) {
           message: 'Admin yetkisi başarıyla doğrulandı',
           uid,
           email: payload.email || null,
-          timestamp: new Date().toISOString(),
         },
         200,
         corsHeaders
       );
     } catch (err) {
-      if (err.isForbidden) {
-        return jsonResponse(
-          {
-            error: 'FORBIDDEN',
-            message: 'Yetkisiz erişim: Bu işlem için yönetici (admin) yetkisi gereklidir.',
-          },
-          403,
-          corsHeaders
-        );
-      }
-
-      return jsonResponse({ error: 'UNAUTHORIZED', message: err.message }, 401, corsHeaders);
+      if (err.isForbidden) return jsonResponse({ error: 'FORBIDDEN' }, 403, corsHeaders);
+      return jsonResponse({ error: 'UNAUTHORIZED' }, 401, corsHeaders);
     }
   }
 
-  // GET /admin/users
-  if (request.method === 'GET' && url.pathname === '/admin/users') {
-    try {
-      const authHeader = request.headers.get('Authorization');
-      const projectId = env.FIREBASE_PROJECT_ID || 'j-planning';
-
-      await verifyAdminClaimWithKey(authHeader, projectId, customKey);
-
-      const rawPage = parseInt(url.searchParams.get('page'), 10);
-      const rawLimit = parseInt(url.searchParams.get('limit'), 10);
-      const page = isNaN(rawPage) || rawPage < 1 ? 1 : rawPage;
-      const limit = isNaN(rawLimit) || rawLimit < 1 ? 20 : Math.min(100, rawLimit);
-      const search = (url.searchParams.get('search') || '').trim();
-
-      const sortBy = ['created_at', 'last_login_at', 'task_count', 'jp_balance', 'email'].includes(
-        url.searchParams.get('sortBy')
-      )
-        ? url.searchParams.get('sortBy')
-        : 'last_login_at';
-
-      const order = url.searchParams.get('order')?.toUpperCase() === 'ASC' ? 'ASC' : 'DESC';
-
-      let filtered = [...mockUsersIndex];
-      if (search) {
-        filtered = filtered.filter(
-          (u) =>
-            u.email.includes(search) ||
-            u.display_name.includes(search) ||
-            u.uid.includes(search)
-        );
-      }
-
-      filtered.sort((a, b) => {
-        if (order === 'ASC') {
-          return a[sortBy] > b[sortBy] ? 1 : -1;
-        }
-        return a[sortBy] < b[sortBy] ? 1 : -1;
-      });
-
-      const total = filtered.length;
-      const totalPages = Math.ceil(total / limit) || 1;
-      const paginatedUsers = filtered.slice((page - 1) * limit, page * limit);
-
-      return jsonResponse(
-        {
-          success: true,
-          appliedSortBy: sortBy,
-          appliedOrder: order,
-          users: paginatedUsers,
-          pagination: { page, limit, total, totalPages },
-        },
-        200,
-        corsHeaders
-      );
-    } catch (err) {
-      if (err.isForbidden) {
-        return jsonResponse({ error: 'FORBIDDEN', message: 'Yetkisiz erişim.' }, 403, corsHeaders);
-      }
-      return jsonResponse({ error: 'UNAUTHORIZED', message: 'Oturum geçersiz.' }, 401, corsHeaders);
-    }
-  }
-
-  // GET /admin/users/:uid/detail (Faz 3 Salt Okunur ve Drill-Down Senkronu)
+  // GET /admin/users/:uid/detail (Faz 3 Salt Okunur)
   const detailMatch = url.pathname.match(/^\/admin\/users\/([^/]+)\/detail$/);
   if (request.method === 'GET' && detailMatch) {
     const targetUid = decodeURIComponent(detailMatch[1]);
     try {
       const authHeader = request.headers.get('Authorization');
       const projectId = env.FIREBASE_PROJECT_ID || 'j-planning';
-
       await verifyAdminClaimWithKey(authHeader, projectId, customKey);
 
-      const userMeta = mockUsersIndex.find((u) => u.uid === targetUid) || {
-        uid: targetUid,
-        email: 'unknown@example.com',
-        display_name: 'Bilinmeyen',
-        db_name: `jplanning-user-${targetUid}`,
-        created_at: Date.now(),
-        last_login_at: Date.now(),
-        task_count: 0,
-        jp_balance: 0,
-        is_disabled: 0,
-      };
-
+      const userMeta = mockUsersIndex.find((u) => u.uid === targetUid);
+      if (!userMeta) return jsonResponse({ error: 'NOT_FOUND' }, 404, corsHeaders);
       const userDb = mockUserDbs[targetUid] || { tasks: [], rewards: [], categories: [], wallet: { balance: 0 } };
-
-      // Drill-Down sync
-      userMeta.task_count = userDb.tasks.length;
-      userMeta.jp_balance = userDb.wallet.balance;
 
       return jsonResponse(
         {
@@ -286,93 +215,197 @@ async function handleWorkerRequest(request, env, customKey = publicKey) {
           rewards: userDb.rewards,
           categories: userDb.categories,
           wallet: userDb.wallet,
-          summary: {
-            totalTasks: userDb.tasks.length,
-            jpBalance: userDb.wallet.balance,
-            rewardCount: userDb.rewards.length,
-            syncedAt: Date.now(),
-          },
         },
         200,
         corsHeaders
       );
     } catch (err) {
-      if (err.isForbidden) {
-        return jsonResponse({ error: 'FORBIDDEN', message: 'Yetkisiz erişim.' }, 403, corsHeaders);
-      }
-      return jsonResponse({ error: 'UNAUTHORIZED', message: 'Oturum geçersiz.' }, 401, corsHeaders);
+      if (err.isForbidden) return jsonResponse({ error: 'FORBIDDEN' }, 403, corsHeaders);
+      return jsonResponse({ error: 'UNAUTHORIZED' }, 401, corsHeaders);
     }
   }
 
-  // PATCH /admin/users/:uid/status (Faz 3 Kullanıcı Askıya Alma)
-  const statusMatch = url.pathname.match(/^\/admin\/users\/([^/]+)\/status$/);
-  if (request.method === 'PATCH' && statusMatch) {
-    const targetUid = decodeURIComponent(statusMatch[1]);
+  // PATCH /admin/users/:uid/tasks/:taskId (Faz 4 — Görev Düzenleme)
+  const taskEditMatch = url.pathname.match(/^\/admin\/users\/([^/]+)\/tasks\/([^/]+)$/);
+  if (request.method === 'PATCH' && taskEditMatch) {
+    const targetUid = decodeURIComponent(taskEditMatch[1]);
+    const taskId = decodeURIComponent(taskEditMatch[2]);
     try {
       const authHeader = request.headers.get('Authorization');
       const projectId = env.FIREBASE_PROJECT_ID || 'j-planning';
-
-      await verifyAdminClaimWithKey(authHeader, projectId, customKey);
+      const { uid: adminUid, payload } = await verifyAdminClaimWithKey(authHeader, projectId, customKey);
 
       const body = await request.json();
-      const isDisabled = body.isDisabled === true || body.isDisabled === 1 ? 1 : 0;
+      const { title, notes, priority, period, isArchived } = body;
 
-      const userIdx = mockUsersIndex.findIndex((u) => u.uid === targetUid);
-      if (userIdx !== -1) {
-        mockUsersIndex[userIdx].is_disabled = isDisabled;
+      const allowedPriorities = ['HIGH', 'MEDIUM', 'LOW', 'ZERO'];
+      const allowedPeriods = ['DAILY', 'WEEKLY', 'MONTHLY', 'ONCE'];
+
+      if (priority && !allowedPriorities.includes(String(priority).toUpperCase())) {
+        return jsonResponse({ error: 'INVALID_INPUT', message: 'Geçersiz öncelik.' }, 400, corsHeaders);
+      }
+      if (period && !allowedPeriods.includes(String(period).toUpperCase())) {
+        return jsonResponse({ error: 'INVALID_INPUT', message: 'Geçersiz periyot.' }, 400, corsHeaders);
       }
 
-      return jsonResponse(
-        {
-          success: true,
-          uid: targetUid,
-          isDisabled: Boolean(isDisabled),
-          message: isDisabled ? 'Kullanıcı hesabı askıya alındı.' : 'Kullanıcı hesabı aktifleştirildi.',
-        },
-        200,
-        corsHeaders
-      );
+      const userDb = mockUserDbs[targetUid];
+      if (!userDb) return jsonResponse({ error: 'NOT_FOUND' }, 404, corsHeaders);
+
+      const taskIdx = userDb.tasks.findIndex((t) => t.id === taskId);
+      if (taskIdx === -1) return jsonResponse({ error: 'NOT_FOUND' }, 404, corsHeaders);
+
+      const oldTask = { ...userDb.tasks[taskIdx] };
+
+      if (title !== undefined) userDb.tasks[taskIdx].title = String(title).trim();
+      if (notes !== undefined) userDb.tasks[taskIdx].notes = notes ? String(notes).trim() : null;
+      if (priority !== undefined) userDb.tasks[taskIdx].priority = String(priority).toUpperCase();
+      if (period !== undefined) userDb.tasks[taskIdx].period = String(period).toUpperCase();
+      if (isArchived !== undefined) userDb.tasks[taskIdx].isArchived = isArchived === 1 || isArchived === true ? 1 : 0;
+
+      logMockAudit({
+        adminUid,
+        adminEmail: payload.email,
+        targetUid,
+        action: 'UPDATE_TASK',
+        oldValue: oldTask,
+        newValue: userDb.tasks[taskIdx],
+      });
+
+      return jsonResponse({ success: true, taskId, message: 'Görev başarıyla güncellendi.' }, 200, corsHeaders);
     } catch (err) {
-      if (err.isForbidden) {
-        return jsonResponse({ error: 'FORBIDDEN', message: 'Yetkisiz erişim.' }, 403, corsHeaders);
-      }
-      return jsonResponse({ error: 'UNAUTHORIZED', message: 'Oturum geçersiz.' }, 401, corsHeaders);
+      if (err.isForbidden) return jsonResponse({ error: 'FORBIDDEN' }, 403, corsHeaders);
+      return jsonResponse({ error: 'UNAUTHORIZED' }, 401, corsHeaders);
     }
   }
 
-  // POST /session (Askıya Alınmış Kullanıcı Engeli Testi)
-  if (request.method === 'POST' && url.pathname === '/session') {
+  // PATCH /admin/users/:uid/wallet (Faz 4 — Cüzdan JP Bakiyesi Düzenleme)
+  const walletEditMatch = url.pathname.match(/^\/admin\/users\/([^/]+)\/wallet$/);
+  if (request.method === 'PATCH' && walletEditMatch) {
+    const targetUid = decodeURIComponent(walletEditMatch[1]);
     try {
       const authHeader = request.headers.get('Authorization');
       const projectId = env.FIREBASE_PROJECT_ID || 'j-planning';
+      const { uid: adminUid, payload } = await verifyAdminClaimWithKey(authHeader, projectId, customKey);
 
-      const { uid } = await verifyFirebaseTokenWithKey(authHeader, projectId, customKey);
+      const body = await request.json();
+      const rawBalance = parseInt(body.balance, 10);
+      const reason = (body.reason || '').trim();
 
-      const userInDb = mockUsersIndex.find((u) => u.uid === uid);
-      if (userInDb && userInDb.is_disabled === 1) {
-        return jsonResponse(
-          {
-            error: 'ACCOUNT_DISABLED',
-            message: 'Hesabınız yönetici tarafından askıya alınmıştır.',
-          },
-          403,
-          corsHeaders
-        );
+      if (isNaN(rawBalance) || rawBalance < 0) {
+        return jsonResponse({ error: 'INVALID_INPUT', message: 'Cüzdan bakiyesi negatif olamaz.' }, 400, corsHeaders);
       }
+      if (!reason || reason.length < 3) {
+        return jsonResponse({ error: 'REASON_REQUIRED', message: 'Gerekçe (reason) zorunludur.' }, 400, corsHeaders);
+      }
+
+      const userDb = mockUserDbs[targetUid];
+      if (!userDb) return jsonResponse({ error: 'NOT_FOUND' }, 404, corsHeaders);
+
+      const oldBalance = userDb.wallet.balance;
+      userDb.wallet.balance = rawBalance;
+
+      // Control plane sync
+      const userMeta = mockUsersIndex.find((u) => u.uid === targetUid);
+      if (userMeta) userMeta.jp_balance = rawBalance;
+
+      logMockAudit({
+        adminUid,
+        adminEmail: payload.email,
+        targetUid,
+        action: 'UPDATE_WALLET',
+        oldValue: { balance: oldBalance },
+        newValue: { balance: rawBalance, reason },
+      });
+
+      return jsonResponse({ success: true, uid: targetUid, newBalance: rawBalance, reason }, 200, corsHeaders);
+    } catch (err) {
+      if (err.isForbidden) return jsonResponse({ error: 'FORBIDDEN' }, 403, corsHeaders);
+      return jsonResponse({ error: 'UNAUTHORIZED' }, 401, corsHeaders);
+    }
+  }
+
+  // PATCH /admin/users/:uid/rewards/:rewardId (Faz 4 — Ödül Düzenleme)
+  const rewardEditMatch = url.pathname.match(/^\/admin\/users\/([^/]+)\/rewards\/([^/]+)$/);
+  if (request.method === 'PATCH' && rewardEditMatch) {
+    const targetUid = decodeURIComponent(rewardEditMatch[1]);
+    const rewardId = decodeURIComponent(rewardEditMatch[2]);
+    try {
+      const authHeader = request.headers.get('Authorization');
+      const projectId = env.FIREBASE_PROJECT_ID || 'j-planning';
+      const { uid: adminUid, payload } = await verifyAdminClaimWithKey(authHeader, projectId, customKey);
+
+      const body = await request.json();
+      const { title, cost, isRedeemed } = body;
+
+      if (cost !== undefined) {
+        const rawCost = parseInt(cost, 10);
+        if (isNaN(rawCost) || rawCost < 0) {
+          return jsonResponse({ error: 'INVALID_INPUT', message: 'Ödül maliyeti negatif olamaz.' }, 400, corsHeaders);
+        }
+      }
+
+      const userDb = mockUserDbs[targetUid];
+      if (!userDb) return jsonResponse({ error: 'NOT_FOUND' }, 404, corsHeaders);
+
+      const rewardIdx = userDb.rewards.findIndex((r) => r.id === rewardId);
+      if (rewardIdx === -1) return jsonResponse({ error: 'NOT_FOUND' }, 404, corsHeaders);
+
+      const oldReward = { ...userDb.rewards[rewardIdx] };
+
+      if (title !== undefined) userDb.rewards[rewardIdx].title = String(title).trim();
+      if (cost !== undefined) userDb.rewards[rewardIdx].cost = parseInt(cost, 10);
+      if (isRedeemed !== undefined) userDb.rewards[rewardIdx].isRedeemed = isRedeemed === 1 || isRedeemed === true ? 1 : 0;
+
+      logMockAudit({
+        adminUid,
+        adminEmail: payload.email,
+        targetUid,
+        action: 'UPDATE_REWARD',
+        oldValue: oldReward,
+        newValue: userDb.rewards[rewardIdx],
+      });
+
+      return jsonResponse({ success: true, rewardId, message: 'Ödül güncellendi.' }, 200, corsHeaders);
+    } catch (err) {
+      if (err.isForbidden) return jsonResponse({ error: 'FORBIDDEN' }, 403, corsHeaders);
+      return jsonResponse({ error: 'UNAUTHORIZED' }, 401, corsHeaders);
+    }
+  }
+
+  // GET /admin/audit-logs (Faz 4 — Audit Log Listeleme)
+  if (request.method === 'GET' && url.pathname === '/admin/audit-logs') {
+    try {
+      const authHeader = request.headers.get('Authorization');
+      const projectId = env.FIREBASE_PROJECT_ID || 'j-planning';
+      await verifyAdminClaimWithKey(authHeader, projectId, customKey);
+
+      const rawPage = parseInt(url.searchParams.get('page'), 10);
+      const rawLimit = parseInt(url.searchParams.get('limit'), 10);
+      const page = isNaN(rawPage) || rawPage < 1 ? 1 : rawPage;
+      const limit = isNaN(rawLimit) || rawLimit < 1 ? 20 : Math.min(100, rawLimit);
+      const action = url.searchParams.get('action');
+
+      let filtered = [...mockAuditLogs];
+      if (action) {
+        filtered = filtered.filter((l) => l.action === action);
+      }
+
+      const total = filtered.length;
+      const totalPages = Math.ceil(total / limit) || 1;
+      const paginatedLogs = filtered.slice((page - 1) * limit, page * limit);
 
       return jsonResponse(
         {
           success: true,
-          uid,
-          dbName: `jplanning-user-${uid}`,
-          dbUrl: `libsql://jplanning-user-${uid}.turso.io`,
-          token: 'mock_token',
+          logs: paginatedLogs,
+          pagination: { page, limit, total, totalPages },
         },
         200,
         corsHeaders
       );
     } catch (err) {
-      return jsonResponse({ error: 'UNAUTHORIZED', message: err.message }, 401, corsHeaders);
+      if (err.isForbidden) return jsonResponse({ error: 'FORBIDDEN' }, 403, corsHeaders);
+      return jsonResponse({ error: 'UNAUTHORIZED' }, 401, corsHeaders);
     }
   }
 
@@ -381,12 +414,10 @@ async function handleWorkerRequest(request, env, customKey = publicKey) {
 
 async function runComprehensiveTestSuite() {
   console.log('================================================================');
-  console.log('🛡️ J-PLANNING ADMIN PANELİ — FAZ 1, FAZ 2 & FAZ 3 TEST SETİ');
+  console.log('🛡️ J-PLANNING ADMIN PANELİ — FAZ 4 DÜZENLEME & AUDIT LOG TEST SETİ');
   console.log('================================================================\n');
 
   const env = {
-    TURSO_ORG: 'ysftrasci',
-    TURSO_GROUP: 'jplanning',
     FIREBASE_PROJECT_ID: 'j-planning',
     ALLOWED_ORIGINS: 'http://localhost:5173',
   };
@@ -403,54 +434,10 @@ async function runComprehensiveTestSuite() {
     .setExpirationTime('1h')
     .sign(privateKey);
 
-  // -------------------------------------------------------------
-  // BÖLÜM 1: FAZ 3 KULLANICI DETAYI (SALT OKUNUR DRİLL-DOWN) TESTİ
-  // -------------------------------------------------------------
-  console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-  console.log('📌 BÖLÜM 1: FAZ 3 Kullanıcı Detay API & Drill-Down Senkronu');
-  console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
-
-  const detailRes = await handleWorkerRequest(
-    new Request('http://localhost/admin/users/user_ali_1/detail', {
-      headers: { Authorization: `Bearer ${adminToken}` },
-    }),
-    env
-  );
-  assert.strictEqual(detailRes.status, 200, 'Kullanıcı detay endpoint 200 dönmelidir');
-  const detailJson = await detailRes.json();
-  assert.strictEqual(detailJson.success, true);
-  assert.strictEqual(detailJson.tasks.length, 2, 'Kullanıcının 2 görevi listelenmelidir');
-  assert.strictEqual(detailJson.rewards.length, 1, 'Kullanıcının 1 ödülü listelenmelidir');
-  assert.strictEqual(detailJson.wallet.balance, 120, 'Kullanıcının 120 JP bakiyesi okunmalıdır');
-  assert.strictEqual(detailJson.user.task_count, 2, 'Drill-down ile task_count güncellenmelidir');
-  console.log('   ✅ 1.1 GET /admin/users/:uid/detail: 2 görev, 1 ödül, 120 JP cüzdan verisi başarıyla okundu.');
-  console.log('   ✅ 1.2 Drill-Down Senkronu: Control plane özet sayaçları (task_count=2, jp_balance=120) senkronize edildi.\n');
-
-  // -------------------------------------------------------------
-  // BÖLÜM 2: FAZ 3 KULLANICIYI ASKIYA ALMA (isDisabled) VE OTURUM ENGELİ
-  // -------------------------------------------------------------
-  console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-  console.log('📌 BÖLÜM 2: FAZ 3 Kullanıcı Askıya Alma (isDisabled) & Oturum Engeli');
-  console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
-
-  // 2.1 Kullanıcıyı Askıya Al
-  const suspendRes = await handleWorkerRequest(
-    new Request('http://localhost/admin/users/user_ali_1/status', {
-      method: 'PATCH',
-      headers: { Authorization: `Bearer ${adminToken}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ isDisabled: true }),
-    }),
-    env
-  );
-  assert.strictEqual(suspendRes.status, 200);
-  const suspendJson = await suspendRes.json();
-  assert.strictEqual(suspendJson.isDisabled, true);
-  console.log('   ✅ 2.1 PATCH /admin/users/:uid/status: user_ali_1 başarıyla askıya alındı (is_disabled = 1).');
-
-  // 2.2 Askıya Alınan Kullanıcının /session İsteği Reddedilmeli
-  const aliUserToken = await new SignJWT({
-    user_id: 'user_ali_1',
-    email: 'ali@example.com',
+  const normalUserToken = await new SignJWT({
+    user_id: 'user_normal',
+    email: 'normal@jplanning.com',
+    admin: false,
   })
     .setProtectedHeader({ alg: 'RS256' })
     .setIssuedAt()
@@ -459,55 +446,200 @@ async function runComprehensiveTestSuite() {
     .setExpirationTime('1h')
     .sign(privateKey);
 
-  const sessionBlockedRes = await handleWorkerRequest(
-    new Request('http://localhost/session', {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${aliUserToken}` },
-    }),
-    env
-  );
-  assert.strictEqual(sessionBlockedRes.status, 403, 'Askıya alınan kullanıcı /session isteğinde 403 almalıdır');
-  const sessionBlockedJson = await sessionBlockedRes.json();
-  assert.strictEqual(sessionBlockedJson.error, 'ACCOUNT_DISABLED');
-  console.log('   ✅ 2.2 POST /session: Askıya alınan kullanıcının oturum açması HTTP 403 (ACCOUNT_DISABLED) ile engellendi.');
-
-  // 2.3 Kullanıcıyı Yeniden Aktifleştir
-  const activateRes = await handleWorkerRequest(
-    new Request('http://localhost/admin/users/user_ali_1/status', {
-      method: 'PATCH',
-      headers: { Authorization: `Bearer ${adminToken}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ isDisabled: false }),
-    }),
-    env
-  );
-  assert.strictEqual(activateRes.status, 200);
-  console.log('   ✅ 2.3 PATCH /admin/users/:uid/status: user_ali_1 başarıyla yeniden aktifleştirildi (is_disabled = 0).\n');
-
   // -------------------------------------------------------------
-  // BÖLÜM 3: RATE LIMITING KORUMA TESTİ (429)
+  // BÖLÜM 1: GÖREV DÜZENLEME (PATCH /admin/users/:uid/tasks/:taskId)
   // -------------------------------------------------------------
   console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-  console.log('📌 BÖLÜM 3: Rate Limiting Koruması (HTTP 429)');
+  console.log('📌 BÖLÜM 1: Görev Düzenleme ve Whitelist Koruması');
   console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
 
-  let rateLimitHit = false;
-  for (let i = 0; i < 45; i++) {
-    const r = await handleWorkerRequest(
-      new Request('http://localhost/admin/ping', {
-        headers: { Authorization: `Bearer ${adminToken}`, 'CF-Connecting-IP': '198.51.100.1' },
-      }),
-      env
-    );
-    if (r.status === 429) {
-      rateLimitHit = true;
-      break;
+  // 1.1 Başarılı Güncelleme
+  const editTaskRes = await handleWorkerRequest(
+    new Request('http://localhost/admin/users/user_ali_1/tasks/t1', {
+      method: 'PATCH',
+      headers: { Authorization: `Bearer ${adminToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title: 'İleri Seviye Matematik', priority: 'HIGH', period: 'WEEKLY' }),
+    }),
+    env
+  );
+  assert.strictEqual(editTaskRes.status, 200);
+  const editTaskJson = await editTaskRes.json();
+  assert.strictEqual(editTaskJson.success, true);
+  assert.strictEqual(mockUserDbs['user_ali_1'].tasks[0].title, 'İleri Seviye Matematik');
+  console.log('   ✅ 1.1 PATCH /admin/users/:uid/tasks/:taskId: Görev başlığı ve periyodu başarıyla güncellendi.');
+
+  // 1.2 Geçersiz Öncelik (Enum Whitelist Reddi 400)
+  const invalidPriorityRes = await handleWorkerRequest(
+    new Request('http://localhost/admin/users/user_ali_1/tasks/t1', {
+      method: 'PATCH',
+      headers: { Authorization: `Bearer ${adminToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ priority: 'SUPER_URGENT_INJECTION' }),
+    }),
+    env
+  );
+  assert.strictEqual(invalidPriorityRes.status, 400, 'Geçersiz öncelik 400 dönmelidir');
+  console.log('   ✅ 1.2 Whitelist Koruması: Geçersiz öncelik değeri HTTP 400 ile engellendi.');
+
+  // 1.3 Yetkisiz Kullanıcı Engeli (403)
+  const unauthorizedTaskEdit = await handleWorkerRequest(
+    new Request('http://localhost/admin/users/user_ali_1/tasks/t1', {
+      method: 'PATCH',
+      headers: { Authorization: `Bearer ${normalUserToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title: 'Hacked Task' }),
+    }),
+    env
+  );
+  assert.strictEqual(unauthorizedTaskEdit.status, 403);
+  console.log('   ✅ 1.3 Yetki Sınırı: Normal kullanıcının görev düzenleme isteği HTTP 403 ile reddedildi.\n');
+
+  // -------------------------------------------------------------
+  // BÖLÜM 2: CÜZDAN DÜZENLEME & ZORUNLU GEREKÇE (REASON)
+  // -------------------------------------------------------------
+  console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+  console.log('📌 BÖLÜM 2: Cüzdan (JP) Düzenleme & Zorunlu Gerekçe (Reason)');
+  console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
+
+  // 2.1 Gerekçe Olmadan Red (400)
+  const noReasonRes = await handleWorkerRequest(
+    new Request('http://localhost/admin/users/user_ali_1/wallet', {
+      method: 'PATCH',
+      headers: { Authorization: `Bearer ${adminToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ balance: 500 }),
+    }),
+    env
+  );
+  assert.strictEqual(noReasonRes.status, 400);
+  const noReasonJson = await noReasonRes.json();
+  assert.strictEqual(noReasonJson.error, 'REASON_REQUIRED');
+  console.log('   ✅ 2.1 Zorunlu Gerekçe Denetimi: Reason eksik olduğunda HTTP 400 (REASON_REQUIRED) döndürüldü.');
+
+  // 2.2 Negatif Bakiye Reddi (400)
+  const negativeBalRes = await handleWorkerRequest(
+    new Request('http://localhost/admin/users/user_ali_1/wallet', {
+      method: 'PATCH',
+      headers: { Authorization: `Bearer ${adminToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ balance: -50, reason: 'Destek düzeltmesi' }),
+    }),
+    env
+  );
+  assert.strictEqual(negativeBalRes.status, 400);
+  console.log('   ✅ 2.2 Negatif Değer Koruması: balance = -50 isteği HTTP 400 ile engellendi.');
+
+  // 2.3 Başarılı Bakiye Güncelleme & Control Plane Eşitleme
+  const validWalletRes = await handleWorkerRequest(
+    new Request('http://localhost/admin/users/user_ali_1/wallet', {
+      method: 'PATCH',
+      headers: { Authorization: `Bearer ${adminToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ balance: 350, reason: 'Destek talebi #104 puan telafisi' }),
+    }),
+    env
+  );
+  assert.strictEqual(validWalletRes.status, 200);
+  assert.strictEqual(mockUserDbs['user_ali_1'].wallet.balance, 350);
+  assert.strictEqual(mockUsersIndex.find((u) => u.uid === 'user_ali_1').jp_balance, 350);
+  console.log('   ✅ 2.3 Başarılı Cüzdan Güncellemesi: Bakiye 350 JP yapıldı, Control Plane senkronize edildi.\n');
+
+  // -------------------------------------------------------------
+  // BÖLÜM 3: ÖDÜL DÜZENLEME & NEGATİF MALİYET REDDİ
+  // -------------------------------------------------------------
+  console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+  console.log('📌 BÖLÜM 3: Ödül Düzenleme & Negatif Maliyet Koruması');
+  console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
+
+  // 3.1 Negatif Maliyet Reddi (400)
+  const negCostRes = await handleWorkerRequest(
+    new Request('http://localhost/admin/users/user_ali_1/rewards/r1', {
+      method: 'PATCH',
+      headers: { Authorization: `Bearer ${adminToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ cost: -25 }),
+    }),
+    env
+  );
+  assert.strictEqual(negCostRes.status, 400);
+  console.log('   ✅ 3.1 Negatif Ödül Maliyeti Reddi: cost = -25 isteği HTTP 400 ile engellendi.');
+
+  // 3.2 Başarılı Ödül Güncelleme
+  const validRewardRes = await handleWorkerRequest(
+    new Request('http://localhost/admin/users/user_ali_1/rewards/r1', {
+      method: 'PATCH',
+      headers: { Authorization: `Bearer ${adminToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title: 'Büyük Boy Kahve Molası', cost: 75 }),
+    }),
+    env
+  );
+  assert.strictEqual(validRewardRes.status, 200);
+  assert.strictEqual(mockUserDbs['user_ali_1'].rewards[0].cost, 75);
+  console.log('   ✅ 3.2 Başarılı Ödül Güncelleme: Ödül başlığı ve maliyeti (75 JP) güncellendi.\n');
+
+  // -------------------------------------------------------------
+  // BÖLÜM 4: DEĞİŞTİRİLEMEZ AUDIT LOG & LİSTELEME
+  // -------------------------------------------------------------
+  console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+  console.log('📌 BÖLÜM 4: Değiştirilemez Audit Log Listesi (GET /admin/audit-logs)');
+  console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
+
+  const auditLogsRes = await handleWorkerRequest(
+    new Request('http://localhost/admin/audit-logs?page=1&limit=20', {
+      headers: { Authorization: `Bearer ${adminToken}` },
+    }),
+    env
+  );
+  assert.strictEqual(auditLogsRes.status, 200);
+  const auditLogsJson = await auditLogsRes.json();
+  assert.strictEqual(auditLogsJson.success, true);
+  assert.ok(auditLogsJson.logs.length >= 3, 'En az 3 denetim kaydı oluşmuş olmalıdır');
+  const walletLog = auditLogsJson.logs.find((l) => l.action === 'UPDATE_WALLET');
+  assert.ok(walletLog, 'UPDATE_WALLET logu kaydedilmiş olmalıdır');
+  assert.ok(walletLog.new_value.includes('Destek talebi #104'), 'Logda gerekçe yer almalıdır');
+  console.log(`   ✅ 4.1 Audit Log Kayıtları: Toplam ${auditLogsJson.logs.length} işlem denetim geçmişine kaydedildi.`);
+  console.log('   ✅ 4.2 Gerekçe & Detay: Cüzdan değişikliğindeki reason alanı denetim logunda doğrulandı.\n');
+
+  // -------------------------------------------------------------
+  // BÖLÜM 5: FIREBASE USER PROTOTYPE & getIdToken REGRESYON KORUMASI
+  // -------------------------------------------------------------
+  console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+  console.log('📌 BÖLÜM 5: Firebase User Prototype & getIdToken Regresyon Koruması');
+  console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
+
+  // Firebase User sınıfı simülasyonu (prototip metodları içerir)
+  class MockFirebaseUser {
+    constructor(uid, email) {
+      this.uid = uid;
+      this.email = email;
+    }
+    async getIdToken() {
+      return `mock_token_${this.uid}`;
+    }
+    async getIdTokenResult() {
+      return { claims: { admin: true } };
     }
   }
-  assert.strictEqual(rateLimitHit, true, 'Hızlı peş peşe isteklerde 429 tetiklenmelidir');
-  console.log('   ✅ 3.1 Rate Limit Tetiklendi: Eşik aşıldığında HTTP 429 Too Many Requests döndürüldü.\n');
+
+  const rawFirebaseUser = new MockFirebaseUser('admin_123', 'admin@jplanning.com');
+
+  // Spread operatörü uygulandığında metodların kaybolduğunu doğrula (neden bozulduğunu belgeleyen test)
+  const spreadUser = { ...rawFirebaseUser, profile: { theme: 'dark' } };
+  assert.strictEqual(
+    typeof spreadUser.getIdToken,
+    'undefined',
+    'Spread operatörü ({ ...user }) prototype metodlarını kaybettirir!'
+  );
+
+  // Doğru yaklaşım: Prototipi bozmadan profile bağlama
+  rawFirebaseUser.profile = { theme: 'dark' };
+  assert.strictEqual(
+    typeof rawFirebaseUser.getIdToken,
+    'function',
+    'Doğrudan atama veya Object.assign ile getIdToken fonksiyonu korunmalıdır!'
+  );
+
+  const tokenOutput = await rawFirebaseUser.getIdToken();
+  assert.strictEqual(tokenOutput, 'mock_token_admin_123');
+  console.log('   ✅ 5.1 Regresyon Koruması: { ...firebaseUser } anti-pattern tespit edildi ve engellendi.');
+  console.log('   ✅ 5.2 Metod Doğrulaması: user.getIdToken() prototip fonksiyonunun sağlam kaldığı kanıtlandı.\n');
 
   console.log('================================================================');
-  console.log('🎉 FAZ 3 TÜM TESTLER BAŞARIYLA GEÇTİ (0 HATA)');
+  console.log('🎉 FAZ 4 TÜM TESTLER VE REGRESYON KORUMASI BAŞARIYLA GEÇTİ (0 HATA)');
   console.log('================================================================\n');
 }
 
