@@ -1,5 +1,17 @@
 # J-Planning — Admin Panel Yol Haritası
 
+## Durum Özeti (Güncel)
+
+**Faz 1, Faz 2, Faz 3 ve Faz 4 tamamlanmıştır** (Git commit'leri: Aşama 21, 22, 23, 24 — hepsi yerelde, henüz push edilmedi).
+
+Admin panel şu an itibarıyla: yetkilendirme + control plane altyapısı, kullanıcı listesi + istatistikler, kullanıcı detayı (salt okunur, drill-down senkronu + rate limiting), ve görev/ödül/cüzdan düzenleme + değiştirilemez audit log özelliklerinin tamamına sahiptir.
+
+**Faz 5 (Rol Yönetimi)** roadmap'te tanımlı kalmaya devam ediyor ama kendi tetikleyici eşiği gerçekleşmeden (kullanıcı sayısı ~80-100'e yaklaşması ya da ikinci bir admin ihtiyacı doğması) başlatılmayacak — şu an itibarıyla ne kodlanmış ne de planlanmıştır.
+
+Faz 4 sonrası bulunan ek istekler (görev silme, kullanıcı ID değiştirme, çoklu hesap oturum sızıntısı, askıya alınan kullanıcının anlık atılması, e-posta doğrulama akışı) ayrı bir "Güncelleme Turu" olarak ele alınacak, bu doküman güncellendiğinde eklenecektir.
+
+---
+
 ## Bağlam ve Karar Alınan Mimari
 
 - Mevcut sistem: Her kullanıcının kendi izole Turso (libSQL) veritabanı var (`jplanning-user-{uid}`), Firebase Auth ile kimlik doğrulama, tek bir Cloudflare Worker (`/session` endpoint'i) bu ilişkiyi yönetiyor.
