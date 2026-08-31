@@ -1,7 +1,6 @@
 // J-Planning — Admin Aktivite Geçmişi (Audit Log) Sayfası (Faz 4)
 import { useState, useEffect, useCallback } from 'react';
 import {
-  ShieldAlert,
   Clock,
   User,
   ChevronLeft,
@@ -16,6 +15,7 @@ import {
   ListTodo,
   Gift,
   Lock,
+  Trash2,
 } from 'lucide-react';
 import { auth } from '../../services/firebase';
 import './AdminAuditLogPage.css';
@@ -26,6 +26,7 @@ export default function AdminAuditLogPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [filterAction, setFilterAction] = useState('');
+  const [expandedLogs, setExpandedLogs] = useState({});
 
   const workerUrl = import.meta.env.VITE_WORKER_URL || 'https://jplanning-auth-worker.ysftrasci.workers.dev';
 
@@ -115,6 +116,12 @@ export default function AdminAuditLogPage() {
             <Lock size={13} /> Durum (Askıya Alma)
           </span>
         );
+      case 'USER_SELF_DELETED':
+        return (
+          <span className="audit-action-badge action-self-delete">
+            <Trash2 size={13} /> Hesap Silme (Kullanıcı)
+          </span>
+        );
       default:
         return <span className="audit-action-badge action-default">{action}</span>;
     }
@@ -129,10 +136,45 @@ export default function AdminAuditLogPage() {
     }
   };
 
-  const renderValueDiff = (oldValStr, newValStr) => {
+  const renderValueDiff = (oldValStr, newValStr, action, logId) => {
     const oldObj = parseJsonSafe(oldValStr);
     const newObj = parseJsonSafe(newValStr);
 
+    // 1. Özel Durum: Kullanıcının kendi hesabını silmesi (USER_SELF_DELETED)
+    if (action === 'USER_SELF_DELETED') {
+      const isExpanded = !!expandedLogs[logId];
+      return (
+        <div className="diff-self-delete">
+          <div className="diff-self-delete-title">
+            <Trash2 size={13} />
+            <span>Kullanıcı hesabını ve veritabanını kalıcı olarak sildi</span>
+          </div>
+          {oldObj?.email && (
+            <div className="diff-self-delete-email">
+              <strong>E-posta:</strong> {oldObj.email}
+            </div>
+          )}
+          {oldObj?.dbName && (
+            <>
+              <button
+                type="button"
+                className="diff-tech-btn"
+                onClick={() => setExpandedLogs((prev) => ({ ...prev, [logId]: !prev[logId] }))}
+              >
+                {isExpanded ? 'Teknik Detayı Gizle ▲' : 'Teknik Detay (dbName) ▼'}
+              </button>
+              {isExpanded && (
+                <div className="diff-tech-details font-mono">
+                  <div><strong>Veritabanı:</strong> {oldObj.dbName}</div>
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      );
+    }
+
+    // 2. Standart Nesne Değişiklik Karşılaştırması
     if (typeof oldObj === 'object' && typeof newObj === 'object' && oldObj && newObj) {
       const reason = newObj.reason;
       const allKeys = Array.from(new Set([...Object.keys(oldObj), ...Object.keys(newObj)]));
@@ -194,6 +236,7 @@ export default function AdminAuditLogPage() {
       );
     }
 
+    // 3. Fallback: Bilinmeyen / beklenmedik işlem tipleri için güvenli metin gösterimi
     return (
       <div className="diff-container font-mono">
         <span className="diff-old">{String(oldValStr || '—')}</span>
@@ -210,7 +253,7 @@ export default function AdminAuditLogPage() {
         <div>
           <h2>Aktivite Geçmişi & Audit Log</h2>
           <p className="admin-subtitle">
-            Yöneticiler tarafından gerçekleştirilen tüm düzenleme ve müdahalelerin değiştirilemez denetim kayıtları.
+            Yöneticiler ve kullanıcılar tarafından gerçekleştirilen kritik işlemlerin değiştirilemez denetim kayıtları.
           </p>
         </div>
 
@@ -229,6 +272,7 @@ export default function AdminAuditLogPage() {
               <option value="UPDATE_TASK">Görev Düzenlemeleri</option>
               <option value="UPDATE_REWARD">Ödül Düzenlemeleri</option>
               <option value="TOGGLE_STATUS">Hesap Askıya Alma</option>
+              <option value="USER_SELF_DELETED">Hesap Silme (Kullanıcı)</option>
             </select>
           </div>
 
@@ -297,7 +341,7 @@ export default function AdminAuditLogPage() {
                     <span className="target-uid-tag font-mono">{log.target_user_uid}</span>
                   </td>
                   <td>{getActionBadge(log.action)}</td>
-                  <td className="diff-cell">{renderValueDiff(log.old_value, log.new_value)}</td>
+                  <td className="diff-cell">{renderValueDiff(log.old_value, log.new_value, log.action, log.id)}</td>
                   <td>
                     {log.status === 'SUCCESS' ? (
                       <span className="status-pill success">
