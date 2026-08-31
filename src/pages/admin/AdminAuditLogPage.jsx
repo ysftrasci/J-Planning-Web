@@ -26,7 +26,6 @@ export default function AdminAuditLogPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [filterAction, setFilterAction] = useState('');
-  const [expandedLogs, setExpandedLogs] = useState({});
 
   const workerUrl = import.meta.env.VITE_WORKER_URL || 'https://jplanning-auth-worker.ysftrasci.workers.dev';
 
@@ -136,40 +135,18 @@ export default function AdminAuditLogPage() {
     }
   };
 
-  const renderValueDiff = (oldValStr, newValStr, action, logId) => {
+  const renderValueDiff = (oldValStr, newValStr, action) => {
     const oldObj = parseJsonSafe(oldValStr);
     const newObj = parseJsonSafe(newValStr);
 
     // 1. Özel Durum: Kullanıcının kendi hesabını silmesi (USER_SELF_DELETED)
     if (action === 'USER_SELF_DELETED') {
-      const isExpanded = !!expandedLogs[logId];
       return (
         <div className="diff-self-delete">
           <div className="diff-self-delete-title">
             <Trash2 size={13} />
             <span>Kullanıcı hesabını ve veritabanını kalıcı olarak sildi</span>
           </div>
-          {oldObj?.email && (
-            <div className="diff-self-delete-email">
-              <strong>E-posta:</strong> {oldObj.email}
-            </div>
-          )}
-          {oldObj?.dbName && (
-            <>
-              <button
-                type="button"
-                className="diff-tech-btn"
-                onClick={() => setExpandedLogs((prev) => ({ ...prev, [logId]: !prev[logId] }))}
-              >
-                {isExpanded ? 'Teknik Detayı Gizle ▲' : 'Teknik Detay (dbName) ▼'}
-              </button>
-              {isExpanded && (
-                <div className="diff-tech-details font-mono">
-                  <div><strong>Veritabanı:</strong> {oldObj.dbName}</div>
-                </div>
-              )}
-            </>
-          )}
         </div>
       );
     }
@@ -315,7 +292,7 @@ export default function AdminAuditLogPage() {
             <thead>
               <tr>
                 <th className="col-date">Tarih / Saat</th>
-                <th className="col-admin">Yönetici</th>
+                <th className="col-admin">İşlemi Yapan</th>
                 <th className="col-target">Hedef Kullanıcı</th>
                 <th className="col-action">İşlem Türü</th>
                 <th className="col-diff">Değişiklik Detayı (Fark)</th>
@@ -334,14 +311,18 @@ export default function AdminAuditLogPage() {
                   <td>
                     <div className="admin-user-tag font-mono">
                       <User size={13} />
-                      <span>{log.admin_email || log.admin_uid}</span>
+                      <span>
+                        {log.action === 'USER_SELF_DELETED'
+                          ? `Kullanıcı (${log.admin_email || log.admin_uid})`
+                          : log.admin_email || log.admin_uid}
+                      </span>
                     </div>
                   </td>
                   <td>
                     <span className="target-uid-tag font-mono">{log.target_user_uid}</span>
                   </td>
                   <td>{getActionBadge(log.action)}</td>
-                  <td className="diff-cell">{renderValueDiff(log.old_value, log.new_value, log.action, log.id)}</td>
+                  <td className="diff-cell">{renderValueDiff(log.old_value, log.new_value, log.action)}</td>
                   <td>
                     {log.status === 'SUCCESS' ? (
                       <span className="status-pill success">

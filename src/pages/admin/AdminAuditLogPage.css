@@ -308,39 +308,6 @@
   gap: 6px;
 }
 
-.diff-self-delete-email {
-  color: var(--color-text-secondary, #64748b);
-  font-size: 12px;
-}
-
-.diff-tech-btn {
-  background: transparent;
-  border: 1px solid var(--color-border, #cbd5e1);
-  color: var(--color-text-secondary, #64748b);
-  border-radius: 4px;
-  padding: 2px 6px;
-  font-size: 11px;
-  cursor: pointer;
-  width: fit-content;
-  margin-top: 2px;
-  transition: all 0.15s ease;
-}
-
-.diff-tech-btn:hover {
-  background: var(--color-surface-hover, #f1f5f9);
-  color: var(--color-text-primary, #0f172a);
-}
-
-.diff-tech-details {
-  margin-top: 4px;
-  padding: 6px 8px;
-  background: var(--color-bg, #f8fafc);
-  border: 1px solid var(--color-border, #e2e8f0);
-  border-radius: 6px;
-  font-size: 11px;
-  color: var(--color-text-secondary, #64748b);
-}
-
 /* Status Pill */
 .status-pill {
   display: inline-flex;
