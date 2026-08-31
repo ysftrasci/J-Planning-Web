@@ -1,6 +1,6 @@
 // J-Planning — Service Worker (PWA Çevrimdışı Çalışma Desteği)
 
-const CACHE_NAME = 'j-planning-v5-turso';
+const CACHE_NAME = 'j-planning-v6-turso';
 
 // Service Worker Kurulumu & Önbelleğe alma
 self.addEventListener('install', (event) => {

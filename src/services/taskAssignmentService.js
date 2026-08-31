@@ -93,51 +93,72 @@ export async function deleteAssignedTask(firestoreAssignmentId) {
 }
 
 // Atanan kişi: kendisine gelen, henüz kabul edilmemiş görevleri dinler.
-export function listenPendingTasksAssignedToMe(currentUserUid, callback) {
+export function listenPendingTasksAssignedToMe(currentUserUid, callback, onError) {
   const q = query(
     assignedTasksRef,
     where('assignedToUid', '==', currentUserUid),
     where('status', '==', 'PENDING')
   );
-  return onSnapshot(q, async (snap) => {
-    const rawTasks = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-    // assignedByName, atama anındaki ismi saklar (snapshot) — göstermeden
-    // önce arkadaşın güncel profilinden ismi tazele.
-    const enriched = await Promise.all(
-      rawTasks.map(async (task) => {
-        try {
-          const profile = await getUserProfile(task.assignedByUid);
-          if (profile?.displayName) {
-            return { ...task, assignedByName: profile.displayName };
+  return onSnapshot(
+    q,
+    async (snap) => {
+      const rawTasks = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+      // assignedByName, atama anındaki ismi saklar (snapshot) — göstermeden
+      // önce arkadaşın güncel profilinden ismi tazele.
+      const enriched = await Promise.all(
+        rawTasks.map(async (task) => {
+          try {
+            const profile = await getUserProfile(task.assignedByUid);
+            if (profile?.displayName) {
+              return { ...task, assignedByName: profile.displayName };
+            }
+          } catch (e) {
+            // Profil okunamazsa elimizdeki isimle devam et.
           }
-        } catch (e) {
-          // Profil okunamazsa elimizdeki isimle devam et.
-        }
-        return task;
-      })
-    );
-    callback(enriched);
-  });
+          return task;
+        })
+      );
+      callback(enriched);
+    },
+    (error) => {
+      console.error('[TaskAssignment] listenPendingTasks error:', error);
+      if (onError) onError(error);
+    }
+  );
 }
 
 // Atanan kişi: kabul ettiği (aktif) atanmış görevleri dinler.
-export function listenAcceptedTasksAssignedToMe(currentUserUid, callback) {
+export function listenAcceptedTasksAssignedToMe(currentUserUid, callback, onError) {
   const q = query(
     assignedTasksRef,
     where('assignedToUid', '==', currentUserUid),
     where('status', '==', 'ACCEPTED')
   );
-  return onSnapshot(q, (snap) => {
-    callback(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
-  });
+  return onSnapshot(
+    q,
+    (snap) => {
+      callback(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
+    },
+    (error) => {
+      console.error('[TaskAssignment] listenAcceptedTasks error:', error);
+      if (onError) onError(error);
+    }
+  );
 }
 
 // Atayan kişi: kendisinin atadığı görevlerin durumunu izler (tamamlandı mı, ne zaman).
-export function listenTasksIAssigned(currentUserUid, callback) {
+export function listenTasksIAssigned(currentUserUid, callback, onError) {
   const q = query(assignedTasksRef, where('assignedByUid', '==', currentUserUid));
-  return onSnapshot(q, (snap) => {
-    callback(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
-  });
+  return onSnapshot(
+    q,
+    (snap) => {
+      callback(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
+    },
+    (error) => {
+      console.error('[TaskAssignment] listenTasksIAssigned error:', error);
+      if (onError) onError(error);
+    }
+  );
 }
 
 // Atanan kişi görevi tamamladığında/geri aldığında, atayan kişinin gerçek

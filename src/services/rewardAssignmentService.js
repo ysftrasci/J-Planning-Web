@@ -49,13 +49,20 @@ export async function rejectAssignedReward(rewardId) {
   await deleteDoc(doc(db, 'assignedRewards', rewardId));
 }
 
-export function listenPendingRewardsAssignedToMe(currentUserUid, callback) {
+export function listenPendingRewardsAssignedToMe(currentUserUid, callback, onError) {
   const q = query(
     assignedRewardsRef,
     where('assignedToUid', '==', currentUserUid),
     where('status', '==', 'PENDING')
   );
-  return onSnapshot(q, (snap) => {
-    callback(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
-  });
+  return onSnapshot(
+    q,
+    (snap) => {
+      callback(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
+    },
+    (error) => {
+      console.error('[RewardAssignment] listenPendingRewards error:', error);
+      if (onError) onError(error);
+    }
+  );
 }

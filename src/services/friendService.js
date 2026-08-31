@@ -156,7 +156,7 @@ export async function removeFriend(friendshipId) {
 // değiştirirse bu eski bilgi Firestore'da donuk kalır. Bu yüzden isim/foto
 // göstermeden önce, her arkadaşın GÜNCEL profilini (users/{uid}) ayrıca
 // çekip üzerine yazıyoruz.
-export function listenFriends(currentUserUid, callback) {
+export function listenFriends(currentUserUid, callback, onError) {
   const qFrom = query(
     friendshipsRef,
     where('fromUid', '==', currentUserUid),
@@ -209,14 +209,28 @@ export function listenFriends(currentUserUid, callback) {
     callback(enriched);
   };
 
-  const unsubFrom = onSnapshot(qFrom, (snap) => {
-    fromResults = snap.docs.map((d) => ({ id: d.id, data: d.data() }));
-    emit();
-  });
-  const unsubTo = onSnapshot(qTo, (snap) => {
-    toResults = snap.docs.map((d) => ({ id: d.id, data: d.data() }));
-    emit();
-  });
+  const unsubFrom = onSnapshot(
+    qFrom,
+    (snap) => {
+      fromResults = snap.docs.map((d) => ({ id: d.id, data: d.data() }));
+      emit();
+    },
+    (error) => {
+      console.error('[FriendService] listenFriendships qFrom error:', error);
+      if (onError) onError(error);
+    }
+  );
+  const unsubTo = onSnapshot(
+    qTo,
+    (snap) => {
+      toResults = snap.docs.map((d) => ({ id: d.id, data: d.data() }));
+      emit();
+    },
+    (error) => {
+      console.error('[FriendService] listenFriendships qTo error:', error);
+      if (onError) onError(error);
+    }
+  );
 
   return () => {
     unsubFrom();
@@ -225,27 +239,41 @@ export function listenFriends(currentUserUid, callback) {
 }
 
 // Gerçek zamanlı dinleyici: kullanıcıya gelen bekleyen istekler.
-export function listenPendingReceivedRequests(currentUserUid, callback) {
+export function listenPendingReceivedRequests(currentUserUid, callback, onError) {
   const q = query(
     friendshipsRef,
     where('toUid', '==', currentUserUid),
     where('status', '==', 'PENDING')
   );
-  return onSnapshot(q, (snap) => {
-    const requests = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-    callback(requests);
-  });
+  return onSnapshot(
+    q,
+    (snap) => {
+      const requests = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+      callback(requests);
+    },
+    (error) => {
+      console.error('[FriendService] listenPendingReceivedRequests error:', error);
+      if (onError) onError(error);
+    }
+  );
 }
 
 // Gerçek zamanlı dinleyici: kullanıcının gönderdiği bekleyen istekler.
-export function listenPendingSentRequests(currentUserUid, callback) {
+export function listenPendingSentRequests(currentUserUid, callback, onError) {
   const q = query(
     friendshipsRef,
     where('fromUid', '==', currentUserUid),
     where('status', '==', 'PENDING')
   );
-  return onSnapshot(q, (snap) => {
-    const requests = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-    callback(requests);
-  });
+  return onSnapshot(
+    q,
+    (snap) => {
+      const requests = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+      callback(requests);
+    },
+    (error) => {
+      console.error('[FriendService] listenPendingSentRequests error:', error);
+      if (onError) onError(error);
+    }
+  );
 }
