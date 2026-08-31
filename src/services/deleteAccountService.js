@@ -169,7 +169,10 @@ export async function deleteAccountCompletely({ uid, password }) {
     // 3) Firestore alt verilerini temizle
     await deleteAllFirestoreData(uid);
 
-    // 4) Yerel tarayıcı verisini temizle
+    // 4) users/{uid} profil dokümanını sil (Kullanıcı henüz kimliği doğrulanmışken silinmeli!)
+    await deleteUserProfileDoc(uid);
+
+    // 5) Yerel tarayıcı verisini temizle
     try {
       await deleteUserDatabase(uid);
       if (typeof localStorage !== 'undefined') {
@@ -185,11 +188,8 @@ export async function deleteAccountCompletely({ uid, password }) {
     }
   }
 
-  // 5) Firebase Authentication hesabının kendisini sil
+  // 6) En son adım: Firebase Authentication hesabının kendisini sil
   await deleteUser(user);
-
-  // 6) Başarılı olursa users/{uid} profil dokümanını sil
-  await deleteUserProfileDoc(uid);
 }
 
 export async function abandonAccountDeletionAndReset(uid) {
