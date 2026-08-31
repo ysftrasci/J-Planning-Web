@@ -409,6 +409,33 @@ async function handleWorkerRequest(request, env, customKey = publicKey) {
     }
   }
 
+  // DELETE /account (Faz 4 Güncelleme Turu 2. Madde — Kullanıcı Hesap Silme)
+  if (request.method === 'DELETE' && url.pathname === '/account') {
+    try {
+      const authHeader = request.headers.get('Authorization');
+      const projectId = env.FIREBASE_PROJECT_ID || 'j-planning';
+      const { uid, payload } = await verifyFirebaseTokenWithKey(authHeader, projectId, customKey);
+
+      // Mock user DB ve control plane kaydını sil
+      delete mockUserDbs[uid];
+      const idx = mockUsersIndex.findIndex((u) => u.uid === uid);
+      if (idx !== -1) mockUsersIndex.splice(idx, 1);
+
+      logMockAudit({
+        adminUid: uid,
+        adminEmail: payload.email,
+        targetUid: uid,
+        action: 'USER_SELF_DELETED',
+        oldValue: { uid, email: payload.email },
+        newValue: null,
+      });
+
+      return jsonResponse({ success: true, message: 'Kullanıcı hesabı ve veritabanı silindi.' }, 200, corsHeaders);
+    } catch (err) {
+      return jsonResponse({ error: 'UNAUTHORIZED' }, 401, corsHeaders);
+    }
+  }
+
   return jsonResponse({ error: 'NOT_FOUND' }, 404, corsHeaders);
 }
 
@@ -638,8 +665,38 @@ async function runComprehensiveTestSuite() {
   console.log('   ✅ 5.1 Regresyon Koruması: { ...firebaseUser } anti-pattern tespit edildi ve engellendi.');
   console.log('   ✅ 5.2 Metod Doğrulaması: user.getIdToken() prototip fonksiyonunun sağlam kaldığı kanıtlandı.\n');
 
+  // -------------------------------------------------------------
+  // BÖLÜM 6: KULLANICI HESAP SİLME (DELETE /account)
+  // -------------------------------------------------------------
+  console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+  console.log('📌 BÖLÜM 6: Kullanıcı Hesap Silme & Temizlik (DELETE /account)');
+  console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
+
+  // 6.1 Normal kullanıcı kendi hesabını siler
+  const deleteAccRes = await handleWorkerRequest(
+    new Request('http://localhost/account', {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${normalUserToken}` },
+    }),
+    env
+  );
+  assert.strictEqual(deleteAccRes.status, 200);
+  assert.strictEqual(mockUserDbs['user_normal'], undefined, 'Kullanıcının veritabanı silinmiş olmalıdır');
+  assert.strictEqual(mockUsersIndex.find((u) => u.uid === 'user_normal'), undefined, 'Control plane kaydı silinmiş olmalıdır');
+  console.log('   ✅ 6.1 DELETE /account: Kullanıcı veritabanı ve control plane kaydı başarıyla silindi.');
+
+  // 6.2 Token olmadan hesap silme isteği reddedilir (HTTP 401)
+  const unauthDeleteRes = await handleWorkerRequest(
+    new Request('http://localhost/account', {
+      method: 'DELETE',
+    }),
+    env
+  );
+  assert.strictEqual(unauthDeleteRes.status, 401);
+  console.log('   ✅ 6.2 Yetkisiz İstek Engellendi: Token olmadan DELETE /account HTTP 401 döndürdü.\n');
+
   console.log('================================================================');
-  console.log('🎉 FAZ 4 TÜM TESTLER VE REGRESYON KORUMASI BAŞARIYLA GEÇTİ (0 HATA)');
+  console.log('🎉 FAZ 4 & GÜNCELLEME TURU TÜM TESTLER BAŞARIYLA GEÇTİ (0 HATA)');
   console.log('================================================================\n');
 }
 

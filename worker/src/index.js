@@ -1359,6 +1359,108 @@ export default {
       }
     }
 
+    // DELETE /account (Kullanıcı Kendi Hesabını Sildiğinde Turso DB ve Control Plane Kaydını Temizleme)
+    if ((request.method === 'DELETE' && url.pathname === '/account') || (request.method === 'POST' && url.pathname === '/account/delete')) {
+      try {
+        const authHeader = request.headers.get('Authorization');
+        const projectId = env.FIREBASE_PROJECT_ID || 'j-planning';
+
+        // 1. Firebase Token Doğrulama
+        const { uid, payload } = await verifyFirebaseToken(authHeader, projectId);
+
+        const dbName = getDbNameForUser(uid);
+
+        // 2. Turso Platform API üzerinden kullanıcının veritabanını sil
+        try {
+          const deleteDbRes = await callTursoPlatformApi(`/databases/${dbName}`, env, {
+            method: 'DELETE',
+          });
+          if (!deleteDbRes.ok && deleteDbRes.status !== 404) {
+            const errText = await deleteDbRes.text();
+            console.warn(`[Worker /account] Turso DB silinirken uyarı (${deleteDbRes.status}):`, errText);
+          } else {
+            console.log(`[Worker /account] ${dbName} Turso DB başarıyla silindi.`);
+          }
+        } catch (tursoErr) {
+          console.warn(`[Worker /account] Turso DB silme hatası (${dbName}):`, tursoErr.message);
+        }
+
+        // 3. Control Plane'deki admin_users_index kaydını sil
+        const controlClient = getControlPlaneClient(env);
+        if (controlClient) {
+          try {
+            await controlClient.execute({
+              sql: 'DELETE FROM admin_users_index WHERE uid = ?;',
+              args: [uid],
+            });
+            console.log(`[Worker /account] ${uid} control plane kaydı silindi.`);
+          } catch (cpErr) {
+            console.warn(`[Worker /account] Control Plane kaydı silinirken hata:`, cpErr.message);
+          }
+        }
+
+        // 4. Audit Log kaydı
+        await logAdminAudit(env, {
+          adminUid: uid,
+          adminEmail: payload.email || null,
+          targetUid: uid,
+          action: 'USER_SELF_DELETED',
+          oldValue: { dbName, email: payload.email },
+          newValue: null,
+          status: 'SUCCESS',
+        });
+
+        return jsonResponse(
+          {
+            success: true,
+            message: 'Kullanıcı veritabanı ve kontrol paneli kaydı başarıyla silindi.',
+          },
+          200,
+          corsHeaders
+        );
+      } catch (err) {
+        console.error('[Worker /account Error]:', err);
+
+        const isAuthError =
+          err.name?.startsWith('JWT') ||
+          err.name?.startsWith('JWS') ||
+          err.name?.startsWith('JWE') ||
+          err.code?.startsWith('ERR_JWT') ||
+          err.code?.startsWith('ERR_JWS') ||
+          err.code?.startsWith('ERR_JWE') ||
+          err.name === 'JWTExpired' ||
+          err.name === 'JWTClaimValidationFailed' ||
+          err.name === 'JWSSignatureVerificationFailed' ||
+          err.name === 'JWSInvalid' ||
+          err.message?.includes('Authorization') ||
+          err.message?.includes('Token') ||
+          err.message?.includes('token') ||
+          err.message?.includes('JWT') ||
+          err.message?.includes('jwt');
+
+        if (isAuthError) {
+          return jsonResponse(
+            {
+              error: 'UNAUTHORIZED',
+              message: 'Oturum doğrulanamadı veya süresi doldu.',
+            },
+            401,
+            corsHeaders
+          );
+        }
+
+        return jsonResponse(
+          {
+            error: 'INTERNAL_ERROR',
+            message: 'Hesap veritabanı silinirken bir hata oluştu.',
+            detail: err.message,
+          },
+          500,
+          corsHeaders
+        );
+      }
+    }
+
     // POST /session (Firebase Token -> Turso DB & Scoped Token)
     if (request.method === 'POST' && url.pathname === '/session') {
       try {

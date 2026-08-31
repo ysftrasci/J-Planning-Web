@@ -107,6 +107,8 @@ export async function reauthenticate(password) {
   await reauthenticateWithCredential(user, credential);
 }
 
+const WORKER_URL = (import.meta.env.VITE_WORKER_URL || 'https://jplanning-auth-worker.ysftrasci.workers.dev').replace(/\/+$/, '');
+
 export async function deleteAccountCompletely({ uid, password }) {
   const user = auth.currentUser;
   if (!user || user.uid !== uid) {
@@ -128,6 +130,31 @@ export async function deleteAccountCompletely({ uid, password }) {
   // 1) Reauthenticate (Şifre doğrulaması en başta yapılır)
   if (password) {
     await reauthenticate(password);
+  }
+
+  // 1.5) Turso DB ve Control Plane kaydını silmek için Worker'a istek at
+  // KRİTİK KURAL: Worker silme işlemi başarısız olursa Firebase Auth kullanıcısı SİLİNMEZ, işlem durdurulur!
+  try {
+    const idToken = await user.getIdToken(true);
+    const response = await fetch(`${WORKER_URL}/account`, {
+      method: 'DELETE',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${idToken}`,
+      },
+    });
+
+    if (!response.ok) {
+      let errMessage = `Veritabanı silinemedi (${response.status})`;
+      try {
+        const errData = await response.json();
+        if (errData.message) errMessage = errData.message;
+      } catch (_) {}
+      throw new Error(`Hesabınız şu anda silinemedi (${errMessage}). Lütfen tekrar deneyin.`);
+    }
+  } catch (workerErr) {
+    console.error('[DeleteAccount] Worker veritabanı silme hatası:', workerErr);
+    throw new Error(workerErr.message || 'Hesabınız şu anda silinemedi. Lütfen internet bağlantınızı kontrol edip tekrar deneyin.');
   }
 
   if (!isAlreadyDeleting) {
