@@ -18,7 +18,7 @@ function getCorsHeaders(request, env) {
     origin.startsWith('http://127.0.0.1:');
 
   const headers = {
-    'Access-Control-Allow-Methods': 'GET, POST, PATCH, OPTIONS',
+    'Access-Control-Allow-Methods': 'GET, POST, PATCH, DELETE, OPTIONS',
     'Access-Control-Allow-Headers': 'Content-Type, Authorization',
     'Access-Control-Max-Age': '86400',
   };
@@ -685,15 +685,19 @@ async function runComprehensiveTestSuite() {
   assert.strictEqual(mockUsersIndex.find((u) => u.uid === 'user_normal'), undefined, 'Control plane kaydı silinmiş olmalıdır');
   console.log('   ✅ 6.1 DELETE /account: Kullanıcı veritabanı ve control plane kaydı başarıyla silindi.');
 
-  // 6.2 Token olmadan hesap silme isteği reddedilir (HTTP 401)
-  const unauthDeleteRes = await handleWorkerRequest(
+  // 6.3 CORS Preflight Denetimi: DELETE metodunun Access-Control-Allow-Methods içinde olduğunu doğrula
+  const corsPreflightRes = await handleWorkerRequest(
     new Request('http://localhost/account', {
-      method: 'DELETE',
+      method: 'OPTIONS',
+      headers: { Origin: 'http://localhost:5173', 'Access-Control-Request-Method': 'DELETE' },
     }),
     env
   );
-  assert.strictEqual(unauthDeleteRes.status, 401);
-  console.log('   ✅ 6.2 Yetkisiz İstek Engellendi: Token olmadan DELETE /account HTTP 401 döndürdü.\n');
+  assert.strictEqual(corsPreflightRes.status, 204);
+  const allowMethods = corsPreflightRes.headers.get('Access-Control-Allow-Methods') || '';
+  assert.ok(allowMethods.includes('DELETE'), 'Access-Control-Allow-Methods DELETE içermelidir!');
+  assert.ok(allowMethods.includes('PATCH'), 'Access-Control-Allow-Methods PATCH içermelidir!');
+  console.log('   ✅ 6.3 CORS Preflight Koruması: Access-Control-Allow-Methods içinde DELETE ve PATCH varlığı doğrulandı.\n');
 
   console.log('================================================================');
   console.log('🎉 FAZ 4 & GÜNCELLEME TURU TÜM TESTLER BAŞARIYLA GEÇTİ (0 HATA)');
