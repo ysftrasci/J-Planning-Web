@@ -8,11 +8,11 @@ import AppButton from '../components/AppButton.jsx';
 import { registerWithEmail, loginWithEmail, sendResetPasswordEmail } from '../services/emailAuth';
 import { getUserProfile } from '../db/userProfileRepository';
 import AccountDeletionPendingModal from '../components/AccountDeletionPendingModal';
-import { signOut as firebaseSignOut } from 'firebase/auth';
-import { auth } from '../services/firebase';
+import { useAuth } from '../context/AuthContext.jsx';
 import './LoginPage.css';
 
 export default function LoginPage() {
+  const { signOut } = useAuth();
   const [mode, setMode] = useState('login'); // 'login' | 'register'
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
@@ -163,7 +163,7 @@ export default function LoginPage() {
             window.alert('Hesabınız kalıcı olarak silindi.');
           }}
           onSignOut={async () => {
-            await firebaseSignOut(auth);
+            await signOut();
             setShowPendingModal(false);
             setPendingUid(null);
           }}

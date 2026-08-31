@@ -94,13 +94,10 @@ async function readFromIndexedDb(uid) {
       }
     }
 
-    // Eğer UID ile tam eşleşen bulunamadıysa, store'daki tüm jplanning anahtarlarını ekle
+    // Eğer UID ile eşleşen bir anahtar bulunamadıysa yabancı veritabanı okuma riskini önlemek için sonlandır
     if (candidateKeys.length === 0) {
-      for (const k of allKeys) {
-        if (String(k).startsWith('jplanning')) {
-          candidateKeys.push(k);
-        }
-      }
+      console.log(`[Migration] IndexedDB deposunda '${uid}' için eşleşen anahtar bulunamadı.`);
+      return null;
     }
 
     const SQL = await getSqlJs();

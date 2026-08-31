@@ -6,7 +6,7 @@ import { createContext, useContext, useEffect, useState } from 'react';
 import { onAuthStateChanged, signOut as firebaseSignOut } from 'firebase/auth';
 import { auth } from '../services/firebase';
 import { ensureUserProfile, getUserProfile } from '../db/userProfileRepository';
-import { initDatabase } from '../db/database';
+import { initDatabase, resetDatabaseSession } from '../db/database';
 import { updateTaskFromAssignment, syncReceivedTasksWithFirestore } from '../db/taskRepository';
 import { listenAcceptedTasksAssignedToMe } from '../services/taskAssignmentService';
 import { unregisterFCMPushToken } from '../services/notificationService';
@@ -76,6 +76,7 @@ export function AuthProvider({ children }) {
           setIsAdmin(false);
         }
       } else {
+        resetDatabaseSession();
         setUser(null);
         setIsAdmin(false);
         setDbError(null);
@@ -142,7 +143,10 @@ export function AuthProvider({ children }) {
         console.warn('Çıkışta push token temizlenemedi:', e);
       }
     }
+    resetDatabaseSession();
     setIsAdmin(false);
+    setUser(null);
+    setDbError(null);
     await firebaseSignOut(auth);
   };
 

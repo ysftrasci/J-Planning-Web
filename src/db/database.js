@@ -148,18 +148,40 @@ export async function initDatabase(uid) {
 }
 
 /**
- * Hesap silme akışında bağlantıyı kapatır.
+ * Çıkış (signOut) veya kullanıcı değişiminde veritabanı bağlantısını kapatır,
+ * bellek değişkenlerini ve sessionStorage önbelleklerini temizler.
  */
-export async function deleteUserDatabase(uid) {
-  try {
-    sessionStorage.removeItem(`jplanning_session_${uid}`);
-  } catch (_) {}
-  if (currentUid === uid && dbInstance) {
+export function resetDatabaseSession(targetUid = null) {
+  if (dbInstance) {
     try {
       dbInstance.close();
     } catch (_) {}
-    dbInstance = null;
-    currentUid = null;
-    currentSession = null;
   }
+  dbInstance = null;
+  currentUid = null;
+  currentSession = null;
+
+  if (typeof sessionStorage !== 'undefined') {
+    try {
+      if (targetUid) {
+        sessionStorage.removeItem(`jplanning_session_${targetUid}`);
+      } else {
+        const keysToRemove = [];
+        for (let i = 0; i < sessionStorage.length; i++) {
+          const key = sessionStorage.key(i);
+          if (key && key.startsWith('jplanning_session_')) {
+            keysToRemove.push(key);
+          }
+        }
+        keysToRemove.forEach((k) => sessionStorage.removeItem(k));
+      }
+    } catch (_) {}
+  }
+}
+
+/**
+ * Hesap silme akışında bağlantıyı kapatır ve oturumu temizler.
+ */
+export async function deleteUserDatabase(uid) {
+  resetDatabaseSession(uid);
 }
