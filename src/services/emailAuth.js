@@ -11,6 +11,7 @@ import {
   sendEmailVerification,
 } from 'firebase/auth';
 import { auth } from './firebase';
+import { ensureUserProfile } from '../db/userProfileRepository';
 
 function friendlyErrorMessage(error) {
   const code = error?.code || '';
@@ -28,10 +29,18 @@ function friendlyErrorMessage(error) {
 }
 
 export async function registerWithEmail(name, email, password) {
+  const cleanName = (name || '').trim();
   try {
     const result = await createUserWithEmailAndPassword(auth, email.trim(), password);
-    if (name?.trim()) {
-      await updateProfile(result.user, { displayName: name.trim() });
+    if (cleanName) {
+      // 1. Firebase Auth displayName güncelle
+      await updateProfile(result.user, { displayName: cleanName }).catch((err) => {
+        console.warn('Auth profil adı güncelleme uyarısı:', err);
+      });
+      // 2. Firestore profilini yarışa bırakmadan DOĞRUDAN bu isimle garanti altına al
+      await ensureUserProfile(result.user, cleanName).catch((err) => {
+        console.warn('İlk profil oluşturma uyarısı:', err);
+      });
     }
     // Güvenlik: hesap oluşur oluşmaz doğrulama e-postası gönderilir.
     // Kullanıcı bu e-postayı doğrulamadan uygulamayı kullanamaz

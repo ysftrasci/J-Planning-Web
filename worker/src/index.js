@@ -140,7 +140,7 @@ async function syncUserToControlPlane(env, { uid, email, displayName, dbName }) 
       )
       ON CONFLICT(uid) DO UPDATE SET
         email = excluded.email,
-        display_name = excluded.display_name,
+        display_name = COALESCE(excluded.display_name, admin_users_index.display_name),
         db_name = excluded.db_name,
         last_login_at = excluded.last_login_at,
         updated_at = excluded.updated_at;

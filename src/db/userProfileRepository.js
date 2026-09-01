@@ -37,19 +37,42 @@ async function generateUniqueUserCode() {
 }
 
 // Kullanıcı ilk giriş yaptığında profil oluşturur, sonraki girişlerde mevcut
-// profili döndürür.
-export async function ensureUserProfile(firebaseUser) {
+// profili döndürür ve gerekiyorsa (ör. 'Kullanıcı' kalmışsa) self-healing ile onarır.
+export async function ensureUserProfile(firebaseUser, fallbackName = null) {
   const userRef = doc(db, 'users', firebaseUser.uid);
   const existing = await getDoc(userRef);
 
+  const rawAuthName = typeof firebaseUser.displayName === 'string' ? firebaseUser.displayName.trim() : '';
+  const rawFallbackName = typeof fallbackName === 'string' ? fallbackName.trim() : '';
+  const bestDisplayName =
+    (rawAuthName && rawAuthName !== 'Kullanıcı')
+      ? rawAuthName
+      : (rawFallbackName && rawFallbackName !== 'Kullanıcı')
+      ? rawFallbackName
+      : rawAuthName || rawFallbackName || null;
+
   if (existing.exists()) {
     const data = existing.data();
+    // SELF-HEALING: Firestore'da isim 'Kullanıcı' kalmışsa veya boşsa,
+    // ve Firebase Auth'tan veya fallback'ten gerçek bir isim gelmişse otomatik onar!
+    const needsHealing =
+      bestDisplayName &&
+      (!data.displayName || data.displayName === 'Kullanıcı' || (bestDisplayName !== 'Kullanıcı' && data.displayName !== bestDisplayName));
+
+    if (needsHealing) {
+      data.displayName = bestDisplayName;
+      data.updatedAt = Date.now();
+      await updateDoc(userRef, { displayName: bestDisplayName, updatedAt: data.updatedAt }).catch((err) => {
+        console.warn('Profil onarım uyarısı:', err);
+      });
+    }
+
     if (data.userCode) {
       await setDoc(
         doc(db, 'userCodes', data.userCode),
         {
           uid: firebaseUser.uid,
-          displayName: data.displayName || firebaseUser.displayName || 'Kullanıcı',
+          displayName: data.displayName || bestDisplayName || 'Kullanıcı',
           photoURL: data.photoURL || firebaseUser.photoURL || null,
           userCode: data.userCode,
         },
@@ -62,7 +85,7 @@ export async function ensureUserProfile(firebaseUser) {
   const userCode = await generateUniqueUserCode();
   const profile = {
     uid: firebaseUser.uid,
-    displayName: firebaseUser.displayName || 'Kullanıcı',
+    displayName: bestDisplayName || 'Kullanıcı',
     photoURL: firebaseUser.photoURL || null,
     userCode,
     createdAt: serverTimestamp(),
