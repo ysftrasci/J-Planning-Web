@@ -51,18 +51,25 @@ export function AuthProvider({ children }) {
         try {
           setDbError(null);
 
-          // 1. Profil, Turso veritabanı ve Admin claim'i paralel başlat
-          const [profile, , tokenResult] = await Promise.all([
+          // 1. Profil ve Admin claim'i al
+          const [profile, tokenResult] = await Promise.all([
             ensureUserProfile(firebaseUser).catch((err) => {
               console.warn('Profil alma uyarısı:', err);
               return null;
             }),
-            initDatabase(firebaseUser.uid),
             firebaseUser.getIdTokenResult().catch((err) => {
               console.warn('Admin claim sorgulanamadı:', err);
               return { claims: {} };
             }),
           ]);
+
+          // Token'da henüz isim yoksa ama profil veya auth nesnesinde isim varsa, taze token al
+          if (!tokenResult?.claims?.name && (firebaseUser.displayName || profile?.displayName)) {
+            await firebaseUser.getIdToken(true).catch(() => {});
+          }
+
+          // 2. Turso veritabanını başlat
+          await initDatabase(firebaseUser.uid);
 
           setIsAdmin(Boolean(tokenResult?.claims?.admin));
 

@@ -37,7 +37,9 @@ export async function registerWithEmail(name, email, password) {
       await updateProfile(result.user, { displayName: cleanName }).catch((err) => {
         console.warn('Auth profil adı güncelleme uyarısı:', err);
       });
-      // 2. Firestore profilini yarışa bırakmadan DOĞRUDAN bu isimle garanti altına al
+      // 2. Token içine name eklenmesi için taze token al
+      await result.user.getIdToken(true).catch(() => {});
+      // 3. Firestore profilini yarışa bırakmadan DOĞRUDAN bu isimle garanti altına al
       await ensureUserProfile(result.user, cleanName).catch((err) => {
         console.warn('İlk profil oluşturma uyarısı:', err);
       });
