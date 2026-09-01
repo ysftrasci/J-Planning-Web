@@ -14,14 +14,17 @@ import { auth } from './firebase';
 
 function friendlyErrorMessage(error) {
   const code = error?.code || '';
+  const message = error?.message || '';
   if (code.includes('email-already-in-use')) return 'Bu e-posta adresiyle zaten bir hesap var.';
   if (code.includes('invalid-email')) return 'Geçerli bir e-posta adresi gir.';
   if (code.includes('weak-password')) return 'Şifre en az 6 karakter olmalı.';
   if (code.includes('user-not-found') || code.includes('invalid-credential')) return 'E-posta veya şifre hatalı.';
   if (code.includes('wrong-password')) return 'E-posta veya şifre hatalı.';
   if (code.includes('network-request-failed')) return 'İnternet bağlantını kontrol et.';
-  if (code.includes('too-many-requests')) return 'Çok fazla deneme yapıldı, lütfen birkaç dakika sonra tekrar dene.';
-  return 'Bir sorun oluştu, tekrar dene.';
+  if (code.includes('too-many-requests') || message.includes('TOO_MANY_ATTEMPTS_TRY_LATER')) {
+    return 'Çok sık e-posta gönderildi. Güvenlik nedeniyle lütfen 1 dakika bekleyip tekrar deneyin.';
+  }
+  return 'Bir sorun oluştu, lütfen tekrar deneyin.';
 }
 
 export async function registerWithEmail(name, email, password) {
@@ -35,6 +38,9 @@ export async function registerWithEmail(name, email, password) {
     // (bkz. router/AppRouter.jsx -> RequireAuth kontrolü).
     try {
       await sendEmailVerification(result.user);
+      if (typeof window !== 'undefined' && window.localStorage && result.user?.uid) {
+        window.localStorage.setItem(`jplanning:last_verify_email_${result.user.uid}`, String(Date.now()));
+      }
     } catch (verificationError) {
       // Doğrulama e-postası gönderilemese bile kayıt işlemini iptal etmeyelim;
       // kullanıcı "doğrulama bekleniyor" ekranındaki "tekrar gönder" ile deneyebilir.
@@ -48,20 +54,18 @@ export async function registerWithEmail(name, email, password) {
 
 // Kullanıcı "doğrulama bekleniyor" ekranındayken doğrulama e-postasını
 // tekrar göndermek istediğinde kullanılır.
-//
-// ÖNEMLİ: Buraya AuthContext'ten gelen "user" nesnesi DEĞİL, mutlaka
-// auth.currentUser (gerçek Firebase User sınıfı örneği) verilmelidir.
-// AuthContext'teki user, { ...firebaseUser, profile } şeklinde spread
-// edilmiş sıradan bir objedir — sendEmailVerification gibi Firebase
-// fonksiyonları gerçek User instance'ı beklediği için spread edilmiş
-// objeyle çağrıldığında sessizce (hata fırlatmadan) işe yaramaz.
 export async function resendVerificationEmail() {
   const currentUser = auth.currentUser;
   if (!currentUser) {
     throw new Error('Giriş yapılmış bir hesap bulunamadı, lütfen tekrar giriş yap.');
   }
   try {
+    // Taze token güvencesi
+    await currentUser.getIdToken(true).catch(() => {});
     await sendEmailVerification(currentUser);
+    if (typeof window !== 'undefined' && window.localStorage && currentUser?.uid) {
+      window.localStorage.setItem(`jplanning:last_verify_email_${currentUser.uid}`, String(Date.now()));
+    }
   } catch (error) {
     throw new Error(friendlyErrorMessage(error));
   }

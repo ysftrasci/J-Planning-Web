@@ -19,6 +19,31 @@ export default function VerifyEmailPage() {
   const [checking, setChecking] = useState(false);
   const [message, setMessage] = useState('');
 
+  const COOLDOWN_SECONDS = 60;
+  const storageKey = user?.uid ? `jplanning:last_verify_email_${user.uid}` : 'jplanning:last_verify_email';
+
+  const getRemainingSeconds = () => {
+    try {
+      const last = localStorage.getItem(storageKey);
+      if (!last) return 0;
+      const elapsed = Math.floor((Date.now() - Number(last)) / 1000);
+      return Math.max(0, COOLDOWN_SECONDS - elapsed);
+    } catch {
+      return 0;
+    }
+  };
+
+  const [cooldown, setCooldown] = useState(getRemainingSeconds);
+
+  // Geri sayım sayacı
+  useEffect(() => {
+    const timer = setInterval(() => {
+      const rem = getRemainingSeconds();
+      setCooldown(rem);
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [storageKey]);
+
   // Kullanıcı mail kutusundan linke tıklayıp bu sekmeye geri döndüğünde otomatik algıla
   useEffect(() => {
     const handleFocus = async () => {
@@ -38,10 +63,12 @@ export default function VerifyEmailPage() {
   }, [refreshAuthUser, navigate, checking, resending]);
 
   const handleResend = async () => {
+    if (cooldown > 0 || resending) return;
     setResending(true);
     setMessage('');
     try {
       await resendVerificationEmail();
+      setCooldown(COOLDOWN_SECONDS);
       setMessage('Doğrulama e-postası tekrar gönderildi. Gelen kutunu (ve spam klasörünü) kontrol et.');
     } catch (e) {
       setMessage(e.message);
@@ -89,9 +116,13 @@ export default function VerifyEmailPage() {
             type="button"
             className="login-link"
             onClick={handleResend}
-            disabled={resending}
+            disabled={resending || cooldown > 0}
           >
-            {resending ? 'Gönderiliyor...' : 'Doğrulama e-postasını tekrar gönder'}
+            {resending
+              ? 'Gönderiliyor...'
+              : cooldown > 0
+              ? `Tekrar göndermek için lütfen bekleyin (${cooldown} sn)`
+              : 'Doğrulama e-postasını tekrar gönder'}
           </button>
           <button type="button" className="login-link" onClick={signOut}>
             Çıkış yap
