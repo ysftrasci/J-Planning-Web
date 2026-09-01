@@ -780,21 +780,23 @@ export default {
             .execute('SELECT COALESCE(balance, 0) AS balance FROM wallet LIMIT 1;')
             .catch(() => ({ rows: [{ balance: 0 }] })),
           userDbClient
-            .execute('SELECT COUNT(*) AS total_tasks FROM tasks;')
+            .execute('SELECT COUNT(*) AS total_tasks FROM tasks WHERE isArchived = 0;')
             .catch(() => ({ rows: [{ total_tasks: 0 }] })),
         ]);
 
-        const realTaskCount = Number(countsRes.rows[0]?.total_tasks || tasksRes.rows.length);
+        const realTaskCount = Number(countsRes.rows[0]?.total_tasks ?? tasksRes.rows.length);
         const realJpBalance = Number(walletRes.rows[0]?.balance || 0);
         const now = Date.now();
 
-        // 4. Drill-Down Sync: Control Plane özet sayaçlarını gerçek verilerle güncelle (fire-and-forget)
-        controlClient
-          .execute({
+        // 4. Drill-Down Sync: Control Plane özet sayaçlarını gerçek verilerle güncelle (AWAIT ile kesin kayıt)
+        try {
+          await controlClient.execute({
             sql: 'UPDATE admin_users_index SET task_count = ?, jp_balance = ?, updated_at = ? WHERE uid = ?;',
             args: [realTaskCount, realJpBalance, now, targetUid],
-          })
-          .catch((syncErr) => console.warn('[Worker Drill-down Sync Error]:', syncErr.message));
+          });
+        } catch (syncErr) {
+          console.warn('[Worker Drill-down Sync Error]:', syncErr.message);
+        }
 
         return jsonResponse(
           {
@@ -1301,20 +1303,35 @@ export default {
 
         const offset = (page - 1) * limit;
 
-        let query =
-          'SELECT id, admin_uid, admin_email, target_user_uid, action, old_value, new_value, status, error_message, created_at FROM admin_audit_log';
-        let countQuery = 'SELECT COUNT(*) as total FROM admin_audit_log';
+        let query = `
+          SELECT 
+            l.id, 
+            l.admin_uid, 
+            l.admin_email, 
+            l.target_user_uid, 
+            l.action, 
+            l.old_value, 
+            l.new_value, 
+            l.status, 
+            l.error_message, 
+            l.created_at,
+            u.email AS target_user_email,
+            u.display_name AS target_user_name
+          FROM admin_audit_log l
+          LEFT JOIN admin_users_index u ON l.target_user_uid = u.uid
+        `;
+        let countQuery = 'SELECT COUNT(*) as total FROM admin_audit_log l';
         const args = [];
         const countArgs = [];
         const whereClauses = [];
 
         if (targetUid) {
-          whereClauses.push('target_user_uid = ?');
+          whereClauses.push('l.target_user_uid = ?');
           args.push(targetUid);
           countArgs.push(targetUid);
         }
         if (action) {
-          whereClauses.push('action = ?');
+          whereClauses.push('l.action = ?');
           args.push(action);
           countArgs.push(action);
         }
@@ -1325,7 +1342,7 @@ export default {
           countQuery += whereSql;
         }
 
-        query += ' ORDER BY created_at DESC LIMIT ? OFFSET ?;';
+        query += ' ORDER BY l.created_at DESC LIMIT ? OFFSET ?;';
         args.push(limit, offset);
 
         const [rowsRes, countRes] = await Promise.all([

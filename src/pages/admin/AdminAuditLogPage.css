@@ -155,8 +155,8 @@
 }
 
 .audit-table .col-target {
-  width: 150px;
-  min-width: 130px;
+  width: 200px;
+  min-width: 170px;
 }
 
 .audit-table .col-action {
@@ -193,12 +193,31 @@
   font-size: 12px;
 }
 
+.target-user-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.target-email-text {
+  color: var(--color-text-primary, #0f172a);
+  font-weight: 500;
+  font-size: 12px;
+}
+
+.target-uid-sub {
+  color: var(--color-text-secondary, #64748b);
+  font-size: 11px;
+  opacity: 0.85;
+}
+
 .target-uid-tag {
   color: #0284c7;
   background: rgba(2, 132, 199, 0.08);
   padding: 4px 8px;
   border-radius: 6px;
   font-size: 12px;
+  width: fit-content;
 }
 
 /* Action Badges */

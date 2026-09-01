@@ -142,10 +142,12 @@ export default function AdminAuditLogPage() {
     // 1. Özel Durum: Kullanıcının kendi hesabını silmesi (USER_SELF_DELETED)
     if (action === 'USER_SELF_DELETED') {
       return (
-        <div className="diff-self-delete">
-          <div className="diff-self-delete-title">
-            <Trash2 size={13} />
-            <span>Kullanıcı hesabını ve veritabanını kalıcı olarak sildi</span>
+        <div className="diff-container font-mono">
+          <div className="diff-field-row">
+            <span className="diff-old" style={{ display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
+              <Trash2 size={13} />
+              <span>Kullanıcı hesabını ve veritabanını kalıcı olarak sildi</span>
+            </span>
           </div>
         </div>
       );
@@ -319,7 +321,24 @@ export default function AdminAuditLogPage() {
                     </div>
                   </td>
                   <td>
-                    <span className="target-uid-tag font-mono">{log.target_user_uid}</span>
+                    {(() => {
+                      const oldObj = parseJsonSafe(log.old_value);
+                      const targetEmail =
+                        log.target_user_email ||
+                        (oldObj && typeof oldObj === 'object' ? oldObj.email : null);
+                      return (
+                        <div className="target-user-cell font-mono">
+                          {targetEmail ? (
+                            <>
+                              <span className="target-email-text">{targetEmail}</span>
+                              <span className="target-uid-sub">{log.target_user_uid}</span>
+                            </>
+                          ) : (
+                            <span className="target-uid-tag">{log.target_user_uid}</span>
+                          )}
+                        </div>
+                      );
+                    })()}
                   </td>
                   <td>{getActionBadge(log.action)}</td>
                   <td className="diff-cell">{renderValueDiff(log.old_value, log.new_value, log.action)}</td>

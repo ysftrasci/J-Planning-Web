@@ -398,7 +398,10 @@ export default function AdminUsersPage() {
       {selectedUser && (
         <AdminUserDetailModal
           userMeta={selectedUser}
-          onClose={() => setSelectedUser(null)}
+          onClose={() => {
+            setSelectedUser(null);
+            fetchUsers();
+          }}
           onUserStatusChanged={(uid, newStatus) => {
             setUsers((prev) =>
               prev.map((usr) => (usr.uid === uid ? { ...usr, is_disabled: newStatus } : usr))
