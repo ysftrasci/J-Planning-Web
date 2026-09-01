@@ -5,7 +5,7 @@
 // (veya sekmeyi yenilediğinde) AuthContext firebaseUser.reload() ile
 // emailVerified durumunu tazeler ve RequireAuth otomatik olarak asıl
 // uygulamaya geçiş yapar.
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import AppButton from '../components/AppButton.jsx';
 import { useAuth } from '../context/AuthContext.jsx';
@@ -18,6 +18,24 @@ export default function VerifyEmailPage() {
   const [resending, setResending] = useState(false);
   const [checking, setChecking] = useState(false);
   const [message, setMessage] = useState('');
+
+  // Kullanıcı mail kutusundan linke tıklayıp bu sekmeye geri döndüğünde otomatik algıla
+  useEffect(() => {
+    const handleFocus = async () => {
+      if (checking || resending) return;
+      try {
+        if (typeof refreshAuthUser === 'function') {
+          const verified = await refreshAuthUser();
+          if (verified) {
+            navigate('/', { replace: true });
+          }
+        }
+      } catch (_) {}
+    };
+
+    window.addEventListener('focus', handleFocus);
+    return () => window.removeEventListener('focus', handleFocus);
+  }, [refreshAuthUser, navigate, checking, resending]);
 
   const handleResend = async () => {
     setResending(true);

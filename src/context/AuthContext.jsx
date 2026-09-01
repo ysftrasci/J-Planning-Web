@@ -179,6 +179,23 @@ export function AuthProvider({ children }) {
     }
   };
 
+  const refreshAuthUser = useCallback(async () => {
+    if (!auth.currentUser) return false;
+    try {
+      await auth.currentUser.reload();
+      const updatedUser = auth.currentUser;
+      const profile = await getUserProfile(updatedUser.uid).catch(() => null);
+      try {
+        updatedUser.profile = profile || user?.profile || null;
+      } catch (_) {}
+      setUser(updatedUser);
+      return Boolean(updatedUser.emailVerified);
+    } catch (err) {
+      console.warn('Kullanıcı durumu yenilenemedi:', err);
+      return false;
+    }
+  }, [user?.profile]);
+
   const refreshAdminStatus = async () => {
     if (!auth.currentUser) {
       setIsAdmin(false);
@@ -218,6 +235,7 @@ export function AuthProvider({ children }) {
         initializing,
         dbError,
         refreshProfile,
+        refreshAuthUser,
         refreshAdminStatus,
         retryDatabaseConnection,
         signOut,
