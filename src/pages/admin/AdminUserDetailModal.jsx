@@ -21,7 +21,8 @@ import {
   Clock,
   Sparkles,
 } from 'lucide-react';
-import { auth } from '../../services/firebase';
+import { auth, db } from '../../services/firebase';
+import { doc, setDoc } from 'firebase/firestore';
 import './AdminUserDetailModal.css';
 
 export default function AdminUserDetailModal({ userMeta, onClose, onUserStatusChanged }) {
@@ -107,6 +108,21 @@ export default function AdminUserDetailModal({ userMeta, onClose, onUserStatusCh
 
       const data = await res.json();
       if (res.ok && data.success) {
+        // Firestore Sinyali: Askıya alma/aktifleştirme durumunu kullanıcıya anında ulaştır
+        try {
+          await setDoc(
+            doc(db, 'users', userMeta.uid),
+            {
+              isDisabled: newDisabled,
+              disabledAt: newDisabled ? Date.now() : null,
+              updatedAt: Date.now(),
+            },
+            { merge: true }
+          );
+        } catch (fsErr) {
+          console.warn('[AdminUserDetailModal Firestore Signal Warning]:', fsErr);
+        }
+
         setStatusMessage({
           type: 'success',
           text: data.message || (newDisabled ? 'Hesap askıya alındı.' : 'Hesap aktifleştirildi.'),

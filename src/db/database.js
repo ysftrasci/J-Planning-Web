@@ -56,10 +56,21 @@ async function requestWorkerSession(forceFreshIdToken = false) {
 
   if (!response.ok) {
     let errMessage = `Worker oturum hatası (${response.status})`;
+    let errCode = null;
     try {
       const errData = await response.json();
       if (errData.message) errMessage = errData.message;
+      if (errData.error) errCode = errData.error;
     } catch (_) {}
+
+    if (response.status === 403 && (errCode === 'ACCOUNT_DISABLED' || errMessage.includes('askıya'))) {
+      resetDatabaseSession();
+      window.dispatchEvent(
+        new CustomEvent('jplanning:force-logout', {
+          detail: { reason: 'ACCOUNT_DISABLED', message: errMessage },
+        })
+      );
+    }
     throw new Error(errMessage);
   }
 

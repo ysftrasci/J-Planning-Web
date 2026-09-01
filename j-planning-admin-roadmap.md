@@ -134,7 +134,27 @@ Faz 4 sonrası bulunan ek istekler (görev silme, kullanıcı ID değiştirme, �
 
 ---
 
-## Not: Atanan Görevlerin Admin Tarafından Düzenlenememesi (Faz 4'te Keşfedildi)
+## Güncelleme Turu (Faz 4 Sonrası, Push Sonrası Bulunanlar)
+
+Bu maddeler admin panelin dört ana fazının dışında, ayrı bir "bakım/iyileştirme" turu olarak ele alınıyor. Öncelik sırasıyla:
+
+1. **[✅ TAMAMLANDI — Kritik, Ana Uygulama] Çoklu hesap oturum sızıntısı:** Aynı cihazda bir hesaptan çıkıp başka bir hesaba giriş yapıldığında, önceki hesabın görevleri/verileri yeni oturumda görünmeye devam ediyordu. Kök neden: `migrationService.js`'teki `readFromIndexedDb` fonksiyonunda, UID eşleşmezse herhangi bir `jplanning*` anahtarını (başka kullanıcıya ait olabilecek) alıp yeni kullanıcının Turso DB'sine kopyalayan tehlikeli bir fallback vardı. Düzeltildi (Aşama 25, commit ve push tamamlandı): fallback kaldırıldı, `signOut()` artık veritabanı bağlantısını ve oturum belleğini/`sessionStorage`'ı temizliyor. Canlıda telefon üzerinden gerçek yeni hesapla doğrulandı.
+2. **[✅ TAMAMLANDI — Veri Tutarlılığı] Silinen hesabın verisi temizlenmiyor:** Kullanıcı kendi hesabını sildiğinde Firebase Auth kaydı siliniyordu ama Turso DB'si ve control plane kaydı kalıyordu. Düzeltildi (Aşama 26, 26.1, 26.2): worker'a `DELETE /account` endpoint'i eklendi (Turso DB + control plane kaydı siliniyor, işlem `USER_SELF_DELETED` olarak audit log'a yazılıyor), CORS'a `DELETE` metodu eklendi, Firestore silme sırası düzeltildi (Auth silinmeden önce Firestore dokümanları siliniyor), canlı Firestore rules'daki `userCodes` silme izni eksikliği bulunup deploy edildi. Canlıda test edildi, audit log'da `USER_SELF_DELETED` kayıtları doğrulandı.
+   - **Ek düzeltmeler (kullanıcının ayrı bir oturumda yaptığı, bu sohbette doğrulanmadı ama kullanıcı tarafından test edildi):** Service worker'ın eski JS bundle'ı cache'lemesi düzeltildi (`vercel.json`'a no-cache header, cache versiyonu yükseltildi); Firestore `onSnapshot` dinleyicilerinde eksik `onError` callback'leri eklendi (hesap silinince SDK'nın sessizce patlamasını önlüyordu).
+   - **Ayrıca yapılan iyileştirmeler (aynı ayrı oturumda):** Aktivite Geçmişi sayfasının tema/kontrast sorunları düzeltildi, `USER_SELF_DELETED` kaydı okunaklı hale getirildi, "Yönetici" kolonu "İşlemi Yapan" olarak düzeltildi (kullanıcı kendi hesabını silince kendi maili yanlışlıkla "Yönetici" gibi görünüyordu), "Hedef Kullanıcı" kolonuna e-posta eklendi. Genel İstatistikler sayfasında "Toplam JP" hesaplamasındaki gerçek bir bug bulundu ve düzeltildi (control plane sorgusunda eksik `await`, ayrıca arşivlenmiş görevlerin sayıma dahil edilmemesi kararlaştırıldı).
+3. **[✅ TAMAMLANDI — Oturum Güvenliği] Askıya alınan kullanıcı anlık atılmıyor:** Admin bir kullanıcıyı askıya aldığında, kullanıcının açık oturumu varsa anında kapatılmıyordu. Düzeltildi (Aşama 27):
+   - **Firestore Sinyali:** Admin panelden `is_disabled` durumu değiştirildiğinde, `users/{uid}` dokümanına `{ isDisabled, disabledAt, updatedAt }` yazılıyor.
+   - **Alan Bazlı Granüler Güvenlik Kuralı:** `firestore.rules` güncellendi ve canlıya deploy edildi (`request.auth.token.admin == true` durumunda adminlerin `users/{userId}` üzerinde sadece `['isDisabled', 'disabledAt', 'updatedAt']` alanlarını güncellemesine izin verildi; kullanıcının profil ve özel verilerine admin yazma izni kısıtlandı).
+   - **İstemci Dinleyicisi & Anlık Boot:** `AuthContext.jsx` içine `users/{uid}` realtime snapshot dinleyicisi eklendi. Askıya alınma sinyali geldiği anda (~100ms) yerel/session belleği temizlenip kullanıcıya uyarı gösterilerek `signOut()` ile `/login` sayfasına yönlendiriliyor. Ayrıca `database.js` 403 `ACCOUNT_DISABLED` durumunda `jplanning:force-logout` olayı fırlatıyor ve pencere odağında (`focus`) oturum kontrolü yapılıyor.
+4. **[Admin Panel Özelliği] Görev silme:** Faz 4'te bilinçli olarak whitelist dışı bırakılmıştı. Henüz ele alınmadı.
+5. **[Admin Panel Özelliği, Dikkat Gerekli] Kullanıcı ID (uid) değiştirme:** Henüz ele alınmadı, ayrı bir teknik değerlendirme gerektiriyor.
+6. **[Ana Uygulama, Düşük Öncelik] E-posta doğrulama akışı tutarsızlığı:** Kayıt sırasında doğrulama e-postası bazen gelmiyor/adım atlanıyor, kullanıcı birkaç kez doğrulama denemesi yapmak zorunda kalıyor. Ayrıca "Doğruladım, devam et" butonunda `TypeError` ve `signInWithPassword 400` hatası gözlemlendi (ayrı oturumda not edildi, henüz düzeltilmedi). Güvenlik riski değil, kullanıcı deneyimi sorunu. Henüz ele alınmadı.
+
+---
+
+
+
+
 
 Faz 4 testleri sırasında bulundu: bir kullanıcıya başka biri tarafından atanan görevler (`assignmentDirection === 'RECEIVED'`), admin panelden düzenlendiğinde değişiklik Turso'ya yazılıyor ama kalıcı olmuyor — çünkü bu görevlerin gerçek kaynağı (source of truth) Firestore'dur, kullanıcının cihazı senkron olduğunda Firestore verisi Turso'nun üzerine tekrar yazılır.
 
