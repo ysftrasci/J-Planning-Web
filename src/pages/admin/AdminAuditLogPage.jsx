@@ -16,6 +16,7 @@ import {
   Gift,
   Lock,
   Trash2,
+  Key,
 } from 'lucide-react';
 import { auth } from '../../services/firebase';
 import './AdminAuditLogPage.css';
@@ -127,6 +128,12 @@ export default function AdminAuditLogPage() {
             <Trash2 size={13} /> Görev Silme (Yönetici)
           </span>
         );
+      case 'UPDATE_USER_CODE':
+        return (
+          <span className="audit-action-badge action-task">
+            <Key size={13} /> Kod Değişikliği (Yönetici)
+          </span>
+        );
       default:
         return <span className="audit-action-badge action-default">{action}</span>;
     }
@@ -176,7 +183,30 @@ export default function AdminAuditLogPage() {
       );
     }
 
-    // 3. Standart Nesne Değişiklik Karşılaştırması
+    // 3. Özel Durum: Kullanıcı Kodu Değişikliği (UPDATE_USER_CODE)
+    if (action === 'UPDATE_USER_CODE') {
+      const oldCode = oldObj?.userCode || 'Yok';
+      const newCode = newObj?.userCode || 'Yok';
+      const reason = newObj?.reason;
+      return (
+        <div className="diff-container font-mono">
+          <div className="diff-field-row">
+            <span className="diff-field-name">Kullanıcı Kodu:</span>
+            <span className="diff-old">{oldCode}</span>
+            <span className="diff-arrow">→</span>
+            <span className="diff-new">{newCode}</span>
+          </div>
+          {reason && (
+            <div className="diff-reason-row">
+              <span className="diff-reason-label">Gerekçe:</span>
+              <span className="diff-reason-text">&quot;{reason}&quot;</span>
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    // 4. Standart Nesne Değişiklik Karşılaştırması
     if (typeof oldObj === 'object' && typeof newObj === 'object' && oldObj && newObj) {
       const reason = newObj.reason;
       const allKeys = Array.from(new Set([...Object.keys(oldObj), ...Object.keys(newObj)]));
@@ -271,6 +301,7 @@ export default function AdminAuditLogPage() {
             >
               <option value="">Tüm İşlemler</option>
               <option value="UPDATE_WALLET">Cüzdan / JP Düzenlemeleri</option>
+              <option value="UPDATE_USER_CODE">Kullanıcı Kodu Düzenlemeleri</option>
               <option value="UPDATE_TASK">Görev Düzenlemeleri</option>
               <option value="DELETE_TASK">Görev Silme (Yönetici)</option>
               <option value="UPDATE_REWARD">Ödül Düzenlemeleri</option>

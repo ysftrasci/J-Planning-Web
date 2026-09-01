@@ -18,24 +18,28 @@ import {
   Edit3,
   Trash2,
   Sparkles,
+  Key,
 } from 'lucide-react';
 import { auth, db } from '../../services/firebase';
-import { doc, setDoc } from 'firebase/firestore';
+import { doc, setDoc, getDoc, writeBatch } from 'firebase/firestore';
 import './AdminUserDetailModal.css';
 
 export default function AdminUserDetailModal({ userMeta, onClose, onUserStatusChanged }) {
   const [activeTab, setActiveTab] = useState('tasks');
   const [loading, setLoading] = useState(true);
   const [detailData, setDetailData] = useState(null);
+  const [profileData, setProfileData] = useState(null);
   const [error, setError] = useState(null);
   const [actionLoading, setActionLoading] = useState(false);
   const [statusMessage, setStatusMessage] = useState(null);
 
-  // Düzenleme Durumları (Faz 4)
+  // Düzenleme Durumları (Faz 4 & Aşama 29)
   const [editingTask, setEditingTask] = useState(null); // Düzenlenen görev objesi
   const [editingReward, setEditingReward] = useState(null); // Düzenlenen ödül objesi
   const [editingWallet, setEditingWallet] = useState(false); // Cüzdan modalı açık mı
   const [walletForm, setWalletForm] = useState({ balance: '', reason: '' });
+  const [editingCode, setEditingCode] = useState(false); // Kullanıcı kodu düzenleme açık mı
+  const [codeForm, setCodeForm] = useState({ newCode: '', reason: '' });
   const [saveLoading, setSaveLoading] = useState(false);
 
   const workerUrl = import.meta.env.VITE_WORKER_URL || 'https://jplanning-auth-worker.ysftrasci.workers.dev';
@@ -50,13 +54,19 @@ export default function AdminUserDetailModal({ userMeta, onClose, onUserStatusCh
       const idToken = typeof activeUser?.getIdToken === 'function' ? await activeUser.getIdToken() : null;
       if (!idToken) throw new Error('Oturum tokenı alınamadı.');
 
-      const res = await fetch(`${workerUrl}/admin/users/${encodeURIComponent(userMeta.uid)}/detail`, {
-        method: 'GET',
-        headers: {
-          Authorization: `Bearer ${idToken}`,
-          'Content-Type': 'application/json',
-        },
-      });
+      const [res, userDoc] = await Promise.all([
+        fetch(`${workerUrl}/admin/users/${encodeURIComponent(userMeta.uid)}/detail`, {
+          method: 'GET',
+          headers: {
+            Authorization: `Bearer ${idToken}`,
+            'Content-Type': 'application/json',
+          },
+        }),
+        getDoc(doc(db, 'users', userMeta.uid)).catch((err) => {
+          console.warn('[AdminUserDetailModal Profile Fetch Warning]:', err);
+          return { exists: () => false };
+        }),
+      ]);
 
       const data = await res.json();
       if (res.ok && data.success) {
@@ -64,6 +74,12 @@ export default function AdminUserDetailModal({ userMeta, onClose, onUserStatusCh
         setWalletForm({ balance: data.wallet?.balance ?? 0, reason: '' });
       } else {
         setError(data.message || 'Kullanıcı detayları getirilemedi.');
+      }
+
+      if (userDoc?.exists?.()) {
+        const prof = userDoc.data();
+        setProfileData(prof);
+        setCodeForm({ newCode: prof?.userCode || '', reason: '' });
       }
     } catch (err) {
       setError(err.message || 'Worker bağlantı hatası.');
@@ -241,6 +257,113 @@ export default function AdminUserDetailModal({ userMeta, onClose, onUserStatusCh
     }
   };
 
+  // Aşama 29: Kullanıcı Kodu Güncelleme (Atomik writeBatch ile)
+  const handleSaveCode = async (e) => {
+    e.preventDefault();
+    const cleanNewCode = (codeForm.newCode || '').trim().toUpperCase();
+    const oldCode = profileData?.userCode || '';
+    const reason = (codeForm.reason || '').trim();
+
+    if (!cleanNewCode || cleanNewCode.length < 3 || cleanNewCode.length > 25) {
+      alert('Kullanıcı kodu 3 ile 25 karakter arasında olmalıdır.');
+      return;
+    }
+
+    if (!/^[A-Z0-9_-]+$/.test(cleanNewCode)) {
+      alert('Kullanıcı kodu yalnızca büyük harf, rakam, tire (-) ve alt çizgi (_) içerebilir.');
+      return;
+    }
+
+    if (cleanNewCode === oldCode) {
+      alert('Yeni kod eski kod ile aynıdır.');
+      return;
+    }
+
+    if (!reason || reason.length < 3) {
+      alert('Lütfen kod değişikliği için en az 3 karakterlik geçerli bir gerekçe yazın.');
+      return;
+    }
+
+    if (
+      !window.confirm(
+        `Kullanıcı kodu "${cleanNewCode}" olarak değiştirilecek.\nEski Kod: "${oldCode || 'Yok'}"\n\nOnaylıyor musunuz?`
+      )
+    ) {
+      return;
+    }
+
+    setSaveLoading(true);
+    setStatusMessage(null);
+
+    try {
+      // 1. Çakışma Kontrolü (Başka kullanıcı kullanıyor mu?)
+      const checkDoc = await getDoc(doc(db, 'userCodes', cleanNewCode));
+      if (checkDoc.exists() && checkDoc.data()?.uid !== userMeta.uid) {
+        throw new Error(`"${cleanNewCode}" kodu zaten başka bir kullanıcı tarafından kullanılıyor (409 Conflict).`);
+      }
+
+      const activeUser = auth.currentUser;
+      const idToken = typeof activeUser?.getIdToken === 'function' ? await activeUser.getIdToken() : null;
+      if (!idToken) throw new Error('Oturum tokenı alınamadı.');
+
+      // 2. Worker Audit Log Kaydı
+      const res = await fetch(`${workerUrl}/admin/users/${encodeURIComponent(userMeta.uid)}/code`, {
+        method: 'PATCH',
+        headers: {
+          Authorization: `Bearer ${idToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          newCode: cleanNewCode,
+          oldCode,
+          reason,
+        }),
+      });
+
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.message || 'Worker denetim kaydı oluşturulamadı.');
+      }
+
+      // 3. Firestore Atomik Batch Write (Hepsi ya da hiçbiri)
+      const batch = writeBatch(db);
+
+      // A. Yeni userCodes dokümanı
+      batch.set(doc(db, 'userCodes', cleanNewCode), {
+        uid: userMeta.uid,
+        displayName: profileData?.displayName || userMeta.display_name || 'Kullanıcı',
+        photoURL: profileData?.photoURL || null,
+        userCode: cleanNewCode,
+      });
+
+      // B. Eski userCodes dokümanını sil
+      if (oldCode && oldCode !== cleanNewCode) {
+        batch.delete(doc(db, 'userCodes', oldCode));
+      }
+
+      // C. users/{uid} profilini güncelle
+      batch.update(doc(db, 'users', userMeta.uid), {
+        userCode: cleanNewCode,
+        updatedAt: Date.now(),
+      });
+
+      // D. Atomik Commit
+      await batch.commit();
+
+      setProfileData((prev) => ({ ...prev, userCode: cleanNewCode }));
+      setEditingCode(false);
+      setStatusMessage({
+        type: 'success',
+        text: `Kullanıcı kodu "${cleanNewCode}" olarak başarıyla güncellendi ve loglandı.`,
+      });
+    } catch (err) {
+      console.error('[AdminUserDetailModal handleSaveCode Error]:', err);
+      setStatusMessage({ type: 'error', text: err.message || 'Kullanıcı kodu güncellenemedi.' });
+    } finally {
+      setSaveLoading(false);
+    }
+  };
+
   // Faz 4: Cüzdan Bakiyesi Güncelleme (Çift Onay ve Zorunlu Gerekçe ile)
   const handleSaveWallet = async (e) => {
     e.preventDefault();
@@ -383,6 +506,21 @@ export default function AdminUserDetailModal({ userMeta, onClose, onUserStatusCh
                 <span className="dot-sep">•</span>
                 <span title="UID" className="admin-mono-text">UID: {userMeta.uid}</span>
                 <span className="dot-sep">•</span>
+                <span title="Kullanıcı Kodu" className="admin-mono-text code-tag">
+                  <Key size={12} /> {profileData?.userCode || 'Kod Yok'}
+                  <button
+                    type="button"
+                    className="btn-inline-code-edit"
+                    onClick={() => {
+                      setCodeForm({ newCode: profileData?.userCode || '', reason: '' });
+                      setEditingCode(true);
+                    }}
+                    title="Kullanıcı Kodunu Düzenle"
+                  >
+                    <Edit3 size={11} />
+                  </button>
+                </span>
+                <span className="dot-sep">•</span>
                 <span title="Veritabanı" className="admin-mono-text db-tag">
                   <Database size={12} /> {currentUserState?.db_name}
                 </span>
@@ -412,6 +550,46 @@ export default function AdminUserDetailModal({ userMeta, onClose, onUserStatusCh
             {statusMessage.type === 'success' ? <CheckCircle2 size={16} /> : <AlertTriangle size={16} />}
             <span>{statusMessage.text}</span>
           </div>
+        )}
+
+        {/* Kullanıcı Kodu Düzenleme Formu Açılır Kutusu (Aşama 29) */}
+        {editingCode && (
+          <form className="admin-wallet-edit-box" onSubmit={handleSaveCode}>
+            <div className="wallet-edit-title">
+              <Key size={16} color="#38bdf8" />
+              <strong>Kullanıcı Kodunu (userCodes & users/{userMeta.uid}) Düzenle</strong>
+            </div>
+            <div className="wallet-edit-inputs">
+              <div className="form-group">
+                <label>Yeni Kullanıcı Kodu:</label>
+                <input
+                  type="text"
+                  placeholder="Örn: JP-MURAD"
+                  value={codeForm.newCode}
+                  onChange={(e) => setCodeForm((p) => ({ ...p, newCode: e.target.value.toUpperCase() }))}
+                  required
+                />
+              </div>
+              <div className="form-group flex-2">
+                <label>Değişiklik Gerekçesi (Zorunlu):</label>
+                <input
+                  type="text"
+                  placeholder="Örn: Özel kullanıcı kodu ataması"
+                  value={codeForm.reason}
+                  onChange={(e) => setCodeForm((p) => ({ ...p, reason: e.target.value }))}
+                  required
+                />
+              </div>
+            </div>
+            <div className="wallet-edit-actions">
+              <button type="button" className="btn-cancel" onClick={() => setEditingCode(false)}>
+                İptal
+              </button>
+              <button type="submit" className="btn-save" disabled={saveLoading}>
+                {saveLoading ? 'Kaydediliyor...' : 'Kodu Güncelle ve Logla'}
+              </button>
+            </div>
+          </form>
         )}
 
         {/* Modal Stats Bar */}

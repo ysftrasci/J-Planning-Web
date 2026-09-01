@@ -1384,6 +1384,59 @@ export default {
       }
     }
 
+    // PATCH /admin/users/:uid/code (Aşama 29 — Kullanıcı Kodu Düzenleme)
+    const codeEditMatch = url.pathname.match(/^\/admin\/users\/([^/]+)\/code$/);
+    if (request.method === 'PATCH' && codeEditMatch) {
+      const targetUid = decodeURIComponent(codeEditMatch[1]);
+      try {
+        const authHeader = request.headers.get('Authorization');
+        const projectId = env.FIREBASE_PROJECT_ID || 'j-planning';
+
+        const { uid: adminUid, payload } = await verifyAdminClaim(authHeader, projectId);
+
+        const body = await request.json();
+        const rawNewCode = (body.newCode || '').trim().toUpperCase();
+        const oldCode = (body.oldCode || '').trim().toUpperCase();
+        const reason = (body.reason || '').trim();
+
+        if (!rawNewCode || rawNewCode.length < 3 || rawNewCode.length > 25) {
+          return jsonResponse({ error: 'INVALID_INPUT', message: 'Kullanıcı kodu 3 ile 25 karakter arasında olmalıdır.' }, 400, corsHeaders);
+        }
+
+        if (!/^[A-Z0-9_-]+$/.test(rawNewCode)) {
+          return jsonResponse({ error: 'INVALID_INPUT', message: 'Kullanıcı kodu sadece harf, rakam, tire ve alt çizgi içerebilir.' }, 400, corsHeaders);
+        }
+
+        // Audit Log Kaydı
+        await logAdminAudit(env, {
+          adminUid,
+          adminEmail: payload.email,
+          targetUid,
+          action: 'UPDATE_USER_CODE',
+          oldValue: { userCode: oldCode || null },
+          newValue: { userCode: rawNewCode, reason: reason || 'Yönetici kod güncellemesi' },
+          status: 'SUCCESS',
+        });
+
+        return jsonResponse(
+          {
+            success: true,
+            uid: targetUid,
+            newCode: rawNewCode,
+            message: 'Kullanıcı kodu başarıyla güncellendi ve denetim kaydı oluşturuldu.',
+          },
+          200,
+          corsHeaders
+        );
+      } catch (err) {
+        console.error('[Worker /admin/users/:uid/code Error]:', err);
+        if (err.isForbidden) {
+          return jsonResponse({ error: 'FORBIDDEN', message: 'Yetkisiz erişim.' }, 403, corsHeaders);
+        }
+        return jsonResponse({ error: 'INTERNAL_ERROR', message: 'Kullanıcı kodu kaydedilemedi.', detail: err.message }, 500, corsHeaders);
+      }
+    }
+
     // GET /admin/audit-logs (Faz 4 — Değiştirilemez Aktivite Geçmişi Listesi)
     if (request.method === 'GET' && url.pathname === '/admin/audit-logs') {
       try {
