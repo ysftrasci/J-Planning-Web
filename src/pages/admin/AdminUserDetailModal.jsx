@@ -16,9 +16,7 @@ import {
   Lock,
   Unlock,
   Edit3,
-  Check,
-  Save,
-  Clock,
+  Trash2,
   Sparkles,
 } from 'lucide-react';
 import { auth, db } from '../../services/firebase';
@@ -194,6 +192,52 @@ export default function AdminUserDetailModal({ userMeta, onClose, onUserStatusCh
       setStatusMessage({ type: 'error', text: err.message || 'İstek başarısız oldu.' });
     } finally {
       setSaveLoading(false);
+    }
+  };
+
+  // Aşama 28: Görev Silme (DELETE)
+  const handleDeleteTask = async (task) => {
+    if (!task) return;
+    if (task.assignmentDirection === 'RECEIVED') {
+      alert('Bu görev başka bir kullanıcı tarafından atanmıştır, buradan silinemez.');
+      return;
+    }
+
+    const confirmText = `"${task.title}" başlıklı görevi kalıcı olarak silmek istediğinize emin misiniz?\n\nBu işlem geri alınamaz ve denetim günlüğüne (audit log) kaydedilecektir.`;
+    if (!window.confirm(confirmText)) return;
+
+    setActionLoading(true);
+    setStatusMessage(null);
+
+    try {
+      const activeUser = auth.currentUser;
+      const idToken = typeof activeUser?.getIdToken === 'function' ? await activeUser.getIdToken() : null;
+      if (!idToken) throw new Error('Oturum tokenı alınamadı.');
+
+      const res = await fetch(
+        `${workerUrl}/admin/users/${encodeURIComponent(userMeta.uid)}/tasks/${encodeURIComponent(task.id)}`,
+        {
+          method: 'DELETE',
+          headers: {
+            Authorization: `Bearer ${idToken}`,
+          },
+        }
+      );
+
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setStatusMessage({ type: 'success', text: `"${task.title}" görevi başarıyla silindi ve denetim kaydı oluşturuldu.` });
+        if (editingTask?.id === task.id) {
+          setEditingTask(null);
+        }
+        await fetchUserDetail();
+      } else {
+        setStatusMessage({ type: 'error', text: data.message || 'Görev silinemedi.' });
+      }
+    } catch (err) {
+      setStatusMessage({ type: 'error', text: err.message || 'Görev silinirken bir hata oluştu.' });
+    } finally {
+      setActionLoading(false);
     }
   };
 
@@ -635,20 +679,36 @@ export default function AdminUserDetailModal({ userMeta, onClose, onUserStatusCh
                               </td>
                               <td className="date-cell">{formatDate(task.createdAt)}</td>
                               <td>
-                                <button
-                                  type="button"
-                                  className={`admin-edit-row-btn ${task.assignmentDirection === 'RECEIVED' ? 'disabled-assigned' : ''}`}
-                                  onClick={() => setEditingTask(task)}
-                                  disabled={task.assignmentDirection === 'RECEIVED'}
-                                  title={
-                                    task.assignmentDirection === 'RECEIVED'
-                                      ? 'Bu görev başka bir kullanıcı tarafından atanmıştır, buradan düzenlenemez'
-                                      : 'Görevi Düzenle'
-                                  }
-                                >
-                                  <Edit3 size={13} />
-                                  <span>Düzenle</span>
-                                </button>
+                                <div className="admin-row-actions">
+                                  <button
+                                    type="button"
+                                    className={`admin-edit-row-btn ${task.assignmentDirection === 'RECEIVED' ? 'disabled-assigned' : ''}`}
+                                    onClick={() => setEditingTask(task)}
+                                    disabled={task.assignmentDirection === 'RECEIVED'}
+                                    title={
+                                      task.assignmentDirection === 'RECEIVED'
+                                        ? 'Bu görev başka bir kullanıcı tarafından atanmıştır, buradan düzenlenemez'
+                                        : 'Görevi Düzenle'
+                                    }
+                                  >
+                                    <Edit3 size={13} />
+                                    <span>Düzenle</span>
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className={`admin-delete-row-btn ${task.assignmentDirection === 'RECEIVED' ? 'disabled-assigned' : ''}`}
+                                    onClick={() => handleDeleteTask(task)}
+                                    disabled={task.assignmentDirection === 'RECEIVED' || actionLoading}
+                                    title={
+                                      task.assignmentDirection === 'RECEIVED'
+                                        ? 'Bu görev başka bir kullanıcı tarafından atanmıştır, buradan silinemez'
+                                        : 'Görevi Kalıcı Olarak Sil'
+                                    }
+                                  >
+                                    <Trash2 size={13} />
+                                    <span>Sil</span>
+                                  </button>
+                                </div>
                               </td>
                             </tr>
                           ))}

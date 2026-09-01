@@ -409,6 +409,12 @@
   margin-top: 0.15rem;
 }
 
+.admin-row-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
 .admin-edit-row-btn {
   display: inline-flex;
   align-items: center;
@@ -424,10 +430,40 @@
   transition: all 0.2s ease;
 }
 
-.admin-edit-row-btn:hover {
+.admin-edit-row-btn:hover:not(:disabled) {
   background: #6366f1;
   color: white;
   border-color: #6366f1;
+}
+
+.admin-delete-row-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.35rem 0.65rem;
+  border-radius: 6px;
+  border: 1px solid var(--border-color, #374151);
+  background: rgba(239, 68, 68, 0.08);
+  color: #f87171;
+  font-size: 0.75rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.admin-delete-row-btn:hover:not(:disabled) {
+  background: #dc2626;
+  color: white;
+  border-color: #dc2626;
+}
+
+.admin-delete-row-btn:disabled,
+.admin-delete-row-btn.disabled-assigned {
+  opacity: 0.4;
+  cursor: not-allowed;
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--text-muted, #6b7280);
+  border-color: rgba(255, 255, 255, 0.05);
 }
 
 /* Form Styles */

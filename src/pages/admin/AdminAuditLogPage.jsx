@@ -121,6 +121,12 @@ export default function AdminAuditLogPage() {
             <Trash2 size={13} /> Hesap Silme (Kullanıcı)
           </span>
         );
+      case 'DELETE_TASK':
+        return (
+          <span className="audit-action-badge action-self-delete">
+            <Trash2 size={13} /> Görev Silme (Yönetici)
+          </span>
+        );
       default:
         return <span className="audit-action-badge action-default">{action}</span>;
     }
@@ -153,7 +159,24 @@ export default function AdminAuditLogPage() {
       );
     }
 
-    // 2. Standart Nesne Değişiklik Karşılaştırması
+    // 2. Özel Durum: Görev Silme (DELETE_TASK)
+    if (action === 'DELETE_TASK') {
+      const taskTitle = oldObj?.title || 'Bilinmeyen Görev';
+      const priority = oldObj?.priority ? ` • Öncelik: ${oldObj.priority}` : '';
+      const period = oldObj?.period ? ` • Periyot: ${oldObj.period}` : '';
+      return (
+        <div className="diff-container font-mono">
+          <div className="diff-field-row">
+            <span className="diff-old" style={{ display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
+              <Trash2 size={13} />
+              <span>Kalıcı olarak silinen görev: &quot;{taskTitle}&quot;{priority}{period}</span>
+            </span>
+          </div>
+        </div>
+      );
+    }
+
+    // 3. Standart Nesne Değişiklik Karşılaştırması
     if (typeof oldObj === 'object' && typeof newObj === 'object' && oldObj && newObj) {
       const reason = newObj.reason;
       const allKeys = Array.from(new Set([...Object.keys(oldObj), ...Object.keys(newObj)]));
@@ -249,6 +272,7 @@ export default function AdminAuditLogPage() {
               <option value="">Tüm İşlemler</option>
               <option value="UPDATE_WALLET">Cüzdan / JP Düzenlemeleri</option>
               <option value="UPDATE_TASK">Görev Düzenlemeleri</option>
+              <option value="DELETE_TASK">Görev Silme (Yönetici)</option>
               <option value="UPDATE_REWARD">Ödül Düzenlemeleri</option>
               <option value="TOGGLE_STATUS">Hesap Askıya Alma</option>
               <option value="USER_SELF_DELETED">Hesap Silme (Kullanıcı)</option>

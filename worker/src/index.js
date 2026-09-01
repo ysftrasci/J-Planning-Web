@@ -1051,6 +1051,118 @@ export default {
       }
     }
 
+    // DELETE /admin/users/:uid/tasks/:taskId (Aşama 28 — Görev Silme)
+    const taskDeleteMatch = url.pathname.match(/^\/admin\/users\/([^/]+)\/tasks\/([^/]+)$/);
+    if (request.method === 'DELETE' && taskDeleteMatch) {
+      const targetUid = decodeURIComponent(taskDeleteMatch[1]);
+      const taskId = decodeURIComponent(taskDeleteMatch[2]);
+      try {
+        const authHeader = request.headers.get('Authorization');
+        const projectId = env.FIREBASE_PROJECT_ID || 'j-planning';
+
+        const { uid: adminUid, payload } = await verifyAdminClaim(authHeader, projectId);
+
+        // Kullanıcının gerçek db_name bilgisini Control Plane'den bul
+        let targetDbName = getDbNameForUser(targetUid);
+        const controlClient = getControlPlaneClient(env);
+        if (controlClient) {
+          const userMetaRes = await controlClient.execute({
+            sql: 'SELECT db_name FROM admin_users_index WHERE uid = ? LIMIT 1;',
+            args: [targetUid],
+          });
+          if (userMetaRes.rows.length > 0 && userMetaRes.rows[0].db_name) {
+            targetDbName = userMetaRes.rows[0].db_name;
+          }
+        }
+
+        // Kullanıcı DB'sine bağlan
+        const sessionInfo = await ensureUserDatabase(targetDbName, env);
+        const userDbClient = createClient({
+          url: sessionInfo.dbUrl,
+          authToken: sessionInfo.token,
+        });
+
+        // 1. Silinecek görevi oku (Audit log & kısıtlama kontrolü için)
+        const checkRes = await userDbClient.execute({
+          sql: 'SELECT * FROM tasks WHERE id = ? LIMIT 1;',
+          args: [taskId],
+        });
+
+        if (checkRes.rows.length === 0) {
+          return jsonResponse({ error: 'NOT_FOUND', message: 'Silinecek görev bulunamadı.' }, 404, corsHeaders);
+        }
+
+        const oldTask = checkRes.rows[0];
+
+        // 2. Atanan görev kısıtlaması
+        if (oldTask.assignmentDirection === 'RECEIVED') {
+          return jsonResponse(
+            {
+              error: 'CANNOT_DELETE_ASSIGNED_TASK',
+              message: 'Başka bir kullanıcı tarafından atanan görevler yönetici tarafından silinemez.',
+            },
+            400,
+            corsHeaders
+          );
+        }
+
+        // 3. Görevi ve ilişkili periyot kayıtlarını sil
+        await userDbClient.execute({
+          sql: 'DELETE FROM task_records WHERE taskId = ?;',
+          args: [taskId],
+        });
+        await userDbClient.execute({
+          sql: 'DELETE FROM tasks WHERE id = ?;',
+          args: [taskId],
+        });
+
+        // 4. Control Plane task_count sayacını güncelle (AWAIT ile)
+        const countsRes = await userDbClient
+          .execute('SELECT COUNT(*) AS total_tasks FROM tasks WHERE isArchived = 0;')
+          .catch(() => ({ rows: [{ total_tasks: 0 }] }));
+        const realTaskCount = Number(countsRes.rows[0]?.total_tasks || 0);
+
+        if (controlClient) {
+          try {
+            await controlClient.execute({
+              sql: 'UPDATE admin_users_index SET task_count = ?, updated_at = ? WHERE uid = ?;',
+              args: [realTaskCount, Date.now(), targetUid],
+            });
+          } catch (syncErr) {
+            console.warn('[Worker Task Delete Sync Warning]:', syncErr.message);
+          }
+        }
+
+        // 5. Audit Log Kaydı (oldValue tam görev kaydı, newValue: null)
+        await logAdminAudit(env, {
+          adminUid,
+          adminEmail: payload.email,
+          targetUid,
+          action: 'DELETE_TASK',
+          oldValue: oldTask,
+          newValue: null,
+          status: 'SUCCESS',
+        });
+
+        return jsonResponse(
+          {
+            success: true,
+            taskId,
+            remainingTaskCount: realTaskCount,
+            message: 'Görev başarıyla silindi.',
+          },
+          200,
+          corsHeaders
+        );
+      } catch (err) {
+        console.error('[Worker DELETE /admin/users/:uid/tasks/:taskId Error]:', err);
+        if (err.isForbidden) {
+          return jsonResponse({ error: 'FORBIDDEN', message: 'Yetkisiz erişim.' }, 403, corsHeaders);
+        }
+        return jsonResponse({ error: 'INTERNAL_ERROR', message: 'Görev silinemedi.', detail: err.message }, 500, corsHeaders);
+      }
+    }
+
     // PATCH /admin/users/:uid/wallet (Faz 4 — Cüzdan JP Bakiyesi Düzenleme)
     const walletEditMatch = url.pathname.match(/^\/admin\/users\/([^/]+)\/wallet$/);
     if (request.method === 'PATCH' && walletEditMatch) {
