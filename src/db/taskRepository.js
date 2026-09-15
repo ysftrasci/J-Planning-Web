@@ -143,7 +143,7 @@ export async function updateTask(taskId, { title, description, categoryId, prior
   }
 
   const cleanTitle = (title || '').trim();
-  if (!cleanTitle) throw new Error('Lütfen görev adı girin.');
+  if (!cleanTitle) throw new Error('Lütfen bir görev adı gir.');
 
   const descText = typeof description === 'string' && description.trim() ? description.trim() : null;
   const count = Math.max(1, parseInt(subtaskCount, 10) || 1);
@@ -690,3 +690,50 @@ export async function saveTaskStudyLog(taskId, periodKey, studyTimeText) {
 }
 
 export { uuid };
+
+// ONCE görevlerinin task_records kayıtlarını tekil 'ONCE' periodKey'ine dönüştürür (Migrasyon).
+export async function migrateOnceRecords() {
+  const db = getDb();
+  console.log('🚀 ONCE görevleri migrasyonu başlatılıyor...');
+
+  const onceTasks = (await db.getAllAsync(
+    "SELECT id, title FROM tasks WHERE period = 'ONCE'"
+  )) || [];
+  console.log(`📋 Toplam ${onceTasks.length} adet ONCE görev bulundu.`);
+
+  let totalUpdated = 0;
+  let totalDeleted = 0;
+
+  for (const task of onceTasks) {
+    const records = (await db.getAllAsync(
+      'SELECT id, periodKey, status, completedAt FROM task_records WHERE taskId = ? ORDER BY COALESCE(completedAt, 0) DESC, id DESC',
+      [task.id]
+    )) || [];
+
+    if (records.length === 0) continue;
+
+    const keepRecord = records[0];
+    const duplicateRecords = records.slice(1);
+
+    if (duplicateRecords.length > 0) {
+      for (const dup of duplicateRecords) {
+        await db.runAsync('DELETE FROM task_records WHERE id = ?', [dup.id]);
+        totalDeleted++;
+      }
+    }
+
+    if (keepRecord.periodKey !== 'ONCE') {
+      await db.runAsync("UPDATE task_records SET periodKey = 'ONCE' WHERE id = ?", [keepRecord.id]);
+      totalUpdated++;
+    }
+  }
+
+  const msg = `✅ Migrasyon tamamlandı: ${totalUpdated} kayıt 'ONCE' yapıldı, ${totalDeleted} eski/mükerrer kayıt silindi.`;
+  console.log(msg);
+  triggerAutoCloudSyncForCurrentUser();
+  return msg;
+}
+
+if (typeof window !== 'undefined' && import.meta.env?.DEV) {
+  window.migrateOnceRecords = migrateOnceRecords;
+}

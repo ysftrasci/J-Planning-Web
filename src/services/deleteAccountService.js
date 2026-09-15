@@ -112,7 +112,7 @@ const WORKER_URL = (import.meta.env.VITE_WORKER_URL || 'https://jplanning-auth-w
 export async function deleteAccountCompletely({ uid, password }) {
   const user = auth.currentUser;
   if (!user || user.uid !== uid) {
-    throw new Error('Hesap doğrulanamadı, lütfen tekrar giriş yapıp deneyin.');
+    throw new Error('Hesap doğrulanamadı, lütfen tekrar giriş yapıp dene.');
   }
 
   // 0) Idempotency Kontrolü: Profil önceden silinme sürecinde kalmış mı?
@@ -124,7 +124,7 @@ export async function deleteAccountCompletely({ uid, password }) {
     }
   } catch (err) {
     console.warn('Profil durumu okuma uyarısı:', err);
-    throw new Error('Ağ bağlantısı sağlanamadı. Lütfen internet bağlantınızı kontrol edip tekrar deneyin.');
+    throw new Error('Ağ bağlantısı sağlanamadı. Lütfen internet bağlantını kontrol edip tekrar dene.');
   }
 
   // 1) Reauthenticate (Şifre doğrulaması en başta yapılır)
@@ -150,11 +150,11 @@ export async function deleteAccountCompletely({ uid, password }) {
         const errData = await response.json();
         if (errData.message) errMessage = errData.message;
       } catch (_) {}
-      throw new Error(`Hesabınız şu anda silinemedi (${errMessage}). Lütfen tekrar deneyin.`);
+      throw new Error(`Hesabın şu anda silinemedi (${errMessage}). Lütfen tekrar dene.`);
     }
   } catch (workerErr) {
     console.error('[DeleteAccount] Worker veritabanı silme hatası:', workerErr);
-    throw new Error(workerErr.message || 'Hesabınız şu anda silinemedi. Lütfen internet bağlantınızı kontrol edip tekrar deneyin.');
+    throw new Error(workerErr.message || 'Hesabın şu anda silinemedi. Lütfen internet bağlantını kontrol edip tekrar dene.');
   }
 
   if (!isAlreadyDeleting) {
@@ -163,7 +163,7 @@ export async function deleteAccountCompletely({ uid, password }) {
       await markUserProfileAsDeleting(uid);
     } catch (err) {
       console.error('Hesap silinme bayrağı atılamadı:', err);
-      throw new Error('Hesap silme işlemi başlatılamadı (Ağ/Firestore hatası). Lütfen tekrar deneyin.');
+      throw new Error('Hesap silme işlemi başlatılamadı (Ağ/Firestore hatası). Lütfen tekrar dene.');
     }
 
     // 3) Firestore alt verilerini temizle

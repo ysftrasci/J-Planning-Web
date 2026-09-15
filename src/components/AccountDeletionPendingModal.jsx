@@ -13,7 +13,7 @@ export default function AccountDeletionPendingModal({ open, uid, onSuccess, onSi
 
   const handleConfirm = async () => {
     if (!password) {
-      setError('İşlemi tamamlamak için şifrenizi girmeniz gerekiyor.');
+      setError('İşlemi tamamlamak için şifreni girmen gerekiyor.');
       return;
     }
     setLoading(true);
@@ -25,7 +25,7 @@ export default function AccountDeletionPendingModal({ open, uid, onSuccess, onSi
       setFailCount((prev) => prev + 1);
       const code = err?.code || '';
       if (code.includes('wrong-password') || code.includes('invalid-credential')) {
-        setError('Şifre hatalı, lütfen tekrar deneyin.');
+        setError('Şifre hatalı, lütfen tekrar dene.');
       } else {
         setError(err.message || 'Silme işlemi tamamlanırken bir sorun oluştu.');
       }
@@ -36,7 +36,7 @@ export default function AccountDeletionPendingModal({ open, uid, onSuccess, onSi
 
   const handleResetAccount = async () => {
     const confirmed = window.confirm(
-      'Hesabınız sıfırlanacaktır. Bu işlem yarım kalan silme kilidini kaldırır ve sıfırdan yeni bir profille başlamanıza izin verir. Devam edilsin mi?'
+      'Hesabın sıfırlanacaktır. Bu işlem yarım kalan silme kilidini kaldırır ve sıfırdan yeni bir profille başlamana izin verir. Devam edilsin mi?'
     );
     if (!confirmed) return;
 
@@ -47,7 +47,7 @@ export default function AccountDeletionPendingModal({ open, uid, onSuccess, onSi
       if (onSignOut) await onSignOut();
     } catch (err) {
       setError(
-        'Hesap sıfırlama işlemi başarısız oldu (Ağ hatası). Lütfen internet bağlantınızı kontrol edin veya destek@jplanning.com ile iletişime geçin.'
+        'Hesap sıfırlama işlemi başarısız oldu (Ağ hatası). Lütfen internet bağlantını kontrol et veya destek@jplanning.com ile iletişime geç.'
       );
     } finally {
       setResetLoading(false);
@@ -61,15 +61,15 @@ export default function AccountDeletionPendingModal({ open, uid, onSuccess, onSi
           <AlertTriangle size={44} color="var(--color-danger)" />
         </div>
         <p style={{ textAlign: 'center', fontSize: 'var(--font-body-size)', lineHeight: 1.5 }}>
-          Hesabınız daha önce silinme sürecine girmiş ancak işlem tamamlanamamış.
+          Hesabın daha önce silinme sürecine girmiş ancak işlem tamamlanamamış.
           <br />
-          Hesap silme işlemini tamamen bitirmek için şifrenizi girin.
+          Hesap silme işlemini tamamen bitirmek için şifreni gir.
         </p>
 
         <input
           type="password"
           className="profile-page__delete-password-input"
-          placeholder="Şifreniz"
+          placeholder="Şifren"
           value={password}
           onChange={(e) => setPassword(e.target.value)}
           autoComplete="current-password"
@@ -123,7 +123,7 @@ export default function AccountDeletionPendingModal({ open, uid, onSuccess, onSi
             }}
           >
             <p style={{ fontSize: '13px', margin: 0, opacity: 0.9, textAlign: 'center' }}>
-              Silme işlemi tamamlanamıyor mu? Dilerseniz kilitli hesabı sıfırlayıp temiz bir başlangıç yapabilirsiniz.
+              Silme işlemi tamamlanamıyor mu? Dilersen kilitli hesabı sıfırlayıp temiz bir başlangıç yapabilirsin.
             </p>
             <AppButton
               title={resetLoading ? 'Sıfırlanıyor...' : 'Hesabımı Sıfırla ve Devam Et'}

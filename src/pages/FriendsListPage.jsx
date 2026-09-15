@@ -79,7 +79,7 @@ export default function FriendsListPage() {
         <EmptyState
           icon={Users}
           title="Henüz arkadaşın yok"
-          subtitle="Sağ üstteki butonla arkadaşının Kullanıcı ID'sini girerek istek gönder"
+          subtitle="Sağ üstteki butona tıklayıp arkadaşının Kullanıcı Kodunu girerek istek gönder"
         />
       ) : (
         <div className="friends-list-page__list">

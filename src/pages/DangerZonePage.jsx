@@ -2,10 +2,25 @@ import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ChevronLeft, ShieldCheck, AlertTriangle } from 'lucide-react';
 import { getActiveTasks, getTaskRecords } from '../db/taskRepository.js';
+import { calculateCompletionStats } from '../utils/streak.js';
 import EmptyState from '../components/EmptyState.jsx';
 import './DangerZonePage.css';
 
-const DANGER_ZONE_THRESHOLD = 25; // %
+const DANGER_ZONE_SUCCESS_THRESHOLD = 75; // %
+
+function formatDangerZoneStats(item) {
+  const { task, total, successCount, rate } = item;
+  if (task.period === 'DAILY') {
+    return `${total} gün içinde ${successCount} kez tamamlandı (%${rate} başarı)`;
+  }
+  if (task.period === 'WEEKLY') {
+    return `${total} haftada ${successCount} kez tamamlandı (%${rate} başarı)`;
+  }
+  if (task.period === 'MONTHLY') {
+    return `${total} ayda ${successCount} kez tamamlandı (%${rate} başarı)`;
+  }
+  return `${total} periyotta ${successCount} kez tamamlandı (%${rate} başarı)`;
+}
 
 export default function DangerZonePage() {
   const navigate = useNavigate();
@@ -19,15 +34,13 @@ export default function DangerZonePage() {
         const taskDataList = await Promise.all(
           tasks.map(async (task) => {
             const records = (await getTaskRecords(task.id)) || [];
-            const total = records.length;
-            const failed = records.filter((r) => r.status === 'FAILED').length;
-            const rate = total > 0 ? Math.round((failed / total) * 100) : 0;
-            return { task, failed, total, rate };
+            const stats = calculateCompletionStats(records);
+            return { task, ...stats };
           })
         );
         const data = taskDataList
-          .filter((r) => r.rate >= DANGER_ZONE_THRESHOLD)
-          .sort((a, b) => b.rate - a.rate);
+          .filter((r) => r.total > 0 && r.rate < DANGER_ZONE_SUCCESS_THRESHOLD)
+          .sort((a, b) => a.rate - b.rate);
         if (mounted) setRows(data);
       } catch (err) {
         console.error('Tehlikeli alan verisi yüklenirken hata:', err);
@@ -53,7 +66,7 @@ export default function DangerZonePage() {
       <h1>Tehlikeli Alan</h1>
 
       <p className="danger-zone-page__intro">
-        Başarısızlık oranı %{DANGER_ZONE_THRESHOLD} ve üzerinde olan görevler burada listelenir. Görevler ana listeden kaldırılmaz, sadece burada ayrıca vurgulanır.
+        Başarı oranı %{DANGER_ZONE_SUCCESS_THRESHOLD}'in altında olan görevler burada listelenir. Görevler ana listeden kaldırılmaz, sadece burada ayrıca vurgulanır.
       </p>
 
       {rows.length === 0 ? (
@@ -71,7 +84,7 @@ export default function DangerZonePage() {
                 <span className="danger-zone-page__task-title">{item.task.title}</span>
               </div>
               <span className="danger-zone-page__rate">
-                {item.failed}/{item.total} başarısız (%{item.rate})
+                {formatDangerZoneStats(item)}
               </span>
             </div>
           ))}

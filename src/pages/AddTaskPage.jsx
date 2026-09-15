@@ -80,7 +80,7 @@ export default function AddTaskPage() {
     setErrorMessage('');
 
     if (!title.trim()) {
-      setErrorMessage('Lütfen görev adı gir.');
+      setErrorMessage('Lütfen bir görev adı gir.');
       return;
     }
 
@@ -146,7 +146,7 @@ export default function AddTaskPage() {
           id="task-title"
           className="add-task-page__input"
           type="text"
-          placeholder="örn. Su iç, spor yap.."
+          placeholder="örn. Su iç, spor yap..."
           value={title}
           onChange={(e) => setTitle(e.target.value)}
           autoFocus

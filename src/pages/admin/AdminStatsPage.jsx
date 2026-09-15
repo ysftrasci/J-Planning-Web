@@ -34,7 +34,7 @@ export default function AdminStatsPage() {
       const idToken = typeof user?.getIdToken === 'function'
         ? await user.getIdToken()
         : (auth.currentUser ? await auth.currentUser.getIdToken() : null);
-      if (!idToken) throw new Error('Oturum tokenı alınamadı.');
+      if (!idToken) throw new Error("Oturum token'ı alınamadı.");
       const response = await fetch(`${workerUrl}/admin/stats`, {
         method: 'GET',
         headers: {

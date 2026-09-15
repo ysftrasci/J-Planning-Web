@@ -4,6 +4,7 @@
 // gider) ve sağdaki daire buton (tamamla/geri al).
 import { Flame, Check, X, Circle, ArrowDownCircle, ArrowUpCircle } from 'lucide-react';
 import { periodLabel } from '../utils/period';
+import { appendAblativeSuffix, appendDativeSuffix } from '../utils/turkishSuffix';
 import './TaskCard.css';
 
 const PRIORITY_COLOR_VAR = {
@@ -69,13 +70,13 @@ export default function TaskCard({
             {isReceived && (
               <span className="task-card__badge task-card__badge--received">
                 <ArrowDownCircle size={11} />
-                {task.assignedByName}'den
+                {appendAblativeSuffix(task.assignedByName || 'Arkadaşın')}
               </span>
             )}
             {isSent && (
               <span className="task-card__badge task-card__badge--sent">
                 <ArrowUpCircle size={11} />
-                {task.assignedToName}'e attım
+                {appendDativeSuffix(task.assignedToName || 'Arkadaşın')} attım
               </span>
             )}
           </div>

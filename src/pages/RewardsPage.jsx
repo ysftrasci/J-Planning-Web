@@ -221,7 +221,7 @@ export default function RewardsPage() {
         }}
       />
 
-      <AppModal open={!!rewardToRedeem} onClose={() => setRewardToRedeem(null)} title="Ödülü Harcama">
+      <AppModal open={!!rewardToRedeem} onClose={() => setRewardToRedeem(null)} title="Ödülü Harca">
         <p className="caption">
           "{rewardToRedeem?.title}" ödülünü {rewardToRedeem?.cost} JP karşılığında harcamak istiyor musun?
         </p>
@@ -232,7 +232,7 @@ export default function RewardsPage() {
       </AppModal>
 
       <AppModal open={!!rewardToDelete} onClose={() => setRewardToDelete(null)} title="Ödülü Sil">
-        <p className="caption">"{rewardToDelete?.title}" hedefini silmek istiyor musun?</p>
+        <p className="caption">"{rewardToDelete?.title}" hedefini silmek istediğine emin misin?</p>
         <div className="rewards-page__modal-actions">
           <AppButton title="Vazgeç" variant="ghost" onClick={() => setRewardToDelete(null)} />
           <AppButton title="Sil" variant="danger" onClick={confirmDelete} />

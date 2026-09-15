@@ -19,10 +19,12 @@ import {
   onSnapshot,
   serverTimestamp,
 } from 'firebase/firestore';
-import { db } from './firebase';
+import { db, auth } from './firebase';
 import { getUserProfile } from '../db/userProfileRepository';
+import { sendPushNotification } from './pushNotificationClient';
 
 const assignedTasksRef = collection(db, 'assignedTasks');
+const taskDeletionNoticesRef = collection(db, 'taskDeletionNotices');
 
 const VALID_PRIORITIES = ['HIGH', 'MEDIUM', 'LOW', 'ZERO'];
 const VALID_PERIODS = ['DAILY', 'WEEKLY', 'MONTHLY', 'ONCE'];
@@ -50,6 +52,13 @@ export async function assignTaskToFriend({ assignedByUid, assignedByName, assign
     status: 'PENDING',
     createdAt: serverTimestamp(),
   });
+
+  // Anlık Web Push Bildirimi Gönder (Fire-and-forget)
+  sendPushNotification('TASK_ASSIGNED', assignedToUid, {
+    senderName: assignedByName,
+    taskTitle: cleanTitle,
+  }).catch(() => {});
+
   return docRef.id;
 }
 
@@ -165,18 +174,88 @@ export function listenTasksIAssigned(currentUserUid, callback, onError) {
 // zamanlı olarak görebilmesi için Firestore'daki assignedTasks dokümanına
 // güncel durumu yazar. firestoreAssignmentId, kabul sırasında SQLite'a
 // kaydedilen referanstır (bkz. taskRepository.createTaskFromAssignment).
-export async function syncCompletionStatusToFirestore(firestoreAssignmentId, { isCompleted, completedSubtasks, subtaskCount }) {
+export async function syncCompletionStatusToFirestore(firestoreAssignmentId, {
+  isCompleted,
+  completedSubtasks,
+  subtaskCount,
+  periodKey,
+  assignedByUid,
+  taskTitle,
+  completedByName,
+  isNewlyCompleted,
+}) {
   if (!firestoreAssignmentId) return;
   try {
     await updateDoc(doc(db, 'assignedTasks', firestoreAssignmentId), {
-      isCompletedToday: isCompleted,
+      isCompleted: !!isCompleted,
+      completedPeriodKey: periodKey ?? null,
       completedSubtasks: completedSubtasks ?? 0,
       subtaskCount: subtaskCount ?? 1,
       lastUpdatedAt: serverTimestamp(),
     });
+
+    if (isNewlyCompleted && assignedByUid) {
+      sendPushNotification('TASK_COMPLETED', assignedByUid, {
+        senderName: completedByName || auth.currentUser?.displayName || 'Arkadaşın',
+        taskTitle: taskTitle || '',
+      }).catch(() => {});
+    }
   } catch (e) {
     // Firestore'a yazılamazsa (ör. internet yok) sessizce geç — yerel
     // (SQLite) durum zaten doğru, bir sonraki bağlantıda senkronize
     // etmeye çalışmak ileri bir geliştirme olabilir.
   }
 }
+
+// B, kendisine atanan görevi sildiğinde A'ya haber vermek için bildirim oluşturur.
+export async function notifyTaskDeletion(assignedByUid, taskTitle, deletedByName) {
+  const currentUid = auth.currentUser?.uid;
+  if (!assignedByUid || !currentUid) return;
+  try {
+    await addDoc(taskDeletionNoticesRef, {
+      assignedByUid,
+      deletedByUid: currentUid,
+      taskTitle: String(taskTitle || '').slice(0, 300),
+      deletedByName: String(deletedByName || auth.currentUser?.displayName || 'Arkadaşın').slice(0, 100),
+      createdAt: serverTimestamp(),
+    });
+
+    // Anlık Web Push Bildirimi Gönder (Fire-and-forget)
+    sendPushNotification('TASK_DELETED', assignedByUid, {
+      senderName: deletedByName || auth.currentUser?.displayName || 'Arkadaşın',
+      taskTitle: String(taskTitle || ''),
+    }).catch(() => {});
+  } catch (e) {
+    console.warn('[TaskAssignment] notifyTaskDeletion error:', e);
+  }
+}
+
+// Atayan kişi (A): arkadaşının sildiği görevlere ait bildirimleri dinler.
+export function listenTaskDeletionNotices(currentUserUid, callback, onError) {
+  if (!currentUserUid) return () => {};
+  const q = query(
+    taskDeletionNoticesRef,
+    where('assignedByUid', '==', currentUserUid)
+  );
+  return onSnapshot(
+    q,
+    (snap) => {
+      callback(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
+    },
+    (error) => {
+      console.error('[TaskAssignment] listenTaskDeletionNotices error:', error);
+      if (onError) onError(error);
+    }
+  );
+}
+
+// A bildirimi gördükten sonra kalıcı olmaması için Firestore'dan temizler.
+export async function dismissTaskDeletionNotice(noticeId) {
+  if (!noticeId) return;
+  try {
+    await deleteDoc(doc(db, 'taskDeletionNotices', noticeId));
+  } catch (e) {
+    console.warn('[TaskAssignment] dismissTaskDeletionNotice error:', e);
+  }
+}
+

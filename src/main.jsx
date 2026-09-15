@@ -46,11 +46,11 @@ createRoot(document.getElementById('root')).render(
   </StrictMode>,
 )
 
-// PWA Service Worker Kaydı
-if ('serviceWorker' in navigator && import.meta.env.PROD) {
+// Service Worker Kaydı (PWA Çevrimdışı Çalışma & FCM Web Push Desteği)
+if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
     navigator.serviceWorker
-      .register('/sw.js')
+      .register('/sw.js', { scope: '/' })
       .then((reg) => {
         console.log('J-Planning Service Worker yüklendi:', reg.scope);
       })

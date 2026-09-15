@@ -4,7 +4,7 @@ import { ChevronLeft, Hourglass, CheckCircle2, Clock, Pencil, Trash2, FileText }
 import { useAuth } from '../context/AuthContext.jsx';
 import { listenTasksIAssigned, deleteAssignedTask } from '../services/taskAssignmentService';
 import { deleteTask } from '../db/taskRepository';
-import { periodLabel } from '../utils/period';
+import { periodLabel, getPeriodKey } from '../utils/period';
 import EmptyState from '../components/EmptyState.jsx';
 import AppModal from '../components/AppModal.jsx';
 import AppButton from '../components/AppButton.jsx';
@@ -72,7 +72,11 @@ export default function AssignedByMePage() {
         <div className="assigned-by-me-page__list">
           {activeTasks.map((item) => {
             const isPending = item.status === 'PENDING';
-            const isDone = item.isCompletedToday === true;
+            const isOnce = item.period === 'ONCE';
+            const todayKey = getPeriodKey(item.period, new Date());
+            const isDone = isOnce
+              ? item.isCompleted === true
+              : item.isCompleted === true && item.completedPeriodKey === todayKey;
             const StatusIcon = isPending ? Hourglass : isDone ? CheckCircle2 : Clock;
             const statusClass = isPending
               ? 'assigned-by-me-page__status--pending'

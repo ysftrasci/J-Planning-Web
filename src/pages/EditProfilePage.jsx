@@ -43,7 +43,7 @@ export default function EditProfilePage() {
 
   const handleSave = async () => {
     if (!name.trim()) {
-      setErrorMessage('Lütfen bir isim girin.');
+      setErrorMessage('Lütfen bir isim gir.');
       return;
     }
 

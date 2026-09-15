@@ -1,6 +1,6 @@
 // J-Planning — Arkadaş Ekle Sayfası (Web)
-import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useState, useEffect } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { ChevronLeft, Copy, Check } from 'lucide-react';
 import { useAuth } from '../context/AuthContext.jsx';
 import { sendFriendRequest } from '../services/friendService';
@@ -10,13 +10,24 @@ import './AddFriendPage.css';
 export default function AddFriendPage() {
   const { user } = useAuth();
   const navigate = useNavigate();
-  const [code, setCode] = useState('');
+  const [searchParams] = useSearchParams();
+  const codeParam = searchParams.get('code') || '';
+
+  const [code, setCode] = useState(() => (codeParam ? codeParam.trim().toUpperCase() : ''));
   const [loading, setLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
   const [successMessage, setSuccessMessage] = useState('');
   const [copied, setCopied] = useState(false);
 
+  useEffect(() => {
+    const raw = searchParams.get('code');
+    if (raw) {
+      setCode(raw.trim().toUpperCase());
+    }
+  }, [searchParams]);
+
   const myCode = user?.profile?.userCode;
+  const isMyOwnCode = Boolean(myCode && code.trim().toUpperCase() === myCode.toUpperCase());
 
   const handleCopyMyCode = () => {
     if (myCode) {
@@ -29,7 +40,11 @@ export default function AddFriendPage() {
   const handleSend = async (e) => {
     e.preventDefault();
     if (!code.trim()) {
-      setErrorMessage('Lütfen bir Kullanıcı ID gir.');
+      setErrorMessage('Lütfen bir Kullanıcı Kodu gir.');
+      return;
+    }
+    if (isMyOwnCode) {
+      setErrorMessage('Kendine arkadaşlık isteği gönderemezsin.');
       return;
     }
     setLoading(true);
@@ -101,7 +116,7 @@ export default function AddFriendPage() {
       )}
 
       <form className="add-friend-page__form" onSubmit={handleSend}>
-        <label className="add-friend-page__label" htmlFor="friend-code">Arkadaşının Kullanıcı ID'si</label>
+        <label className="add-friend-page__label" htmlFor="friend-code">Arkadaşının Kullanıcı Kodu</label>
         <input
           id="friend-code"
           className="add-friend-page__input"
@@ -115,11 +130,31 @@ export default function AddFriendPage() {
           Arkadaşının sana gönderdiği kodu buraya girerek arkadaşlık isteği gönderebilirsin.
         </p>
 
+        {isMyOwnCode && (
+          <p
+            style={{
+              margin: '8px 0 0 0',
+              padding: '8px 12px',
+              borderRadius: 'var(--radius-md, 8px)',
+              background: 'rgba(201, 138, 44, 0.1)',
+              border: '1px solid rgba(201, 138, 44, 0.3)',
+              color: 'var(--color-primary, #C98A2C)',
+              fontSize: '13px',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+            }}
+          >
+            <span>💡</span>
+            <span>Bu senin kendi kullanıcı kodun, kendine arkadaşlık isteği gönderemezsin.</span>
+          </p>
+        )}
+
         {errorMessage && <p className="add-friend-page__error">{errorMessage}</p>}
         {successMessage && <p className="add-friend-page__success">{successMessage}</p>}
 
         <div className="add-friend-page__footer">
-          <AppButton type="submit" title="İstek Gönder" loading={loading} />
+          <AppButton type="submit" title="İstek Gönder" loading={loading} disabled={isMyOwnCode} />
         </div>
       </form>
     </div>

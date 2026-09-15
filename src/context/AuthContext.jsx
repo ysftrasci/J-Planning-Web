@@ -81,7 +81,7 @@ export function AuthProvider({ children }) {
                 const data = snap.data();
                 if (data?.isDisabled === true || data?.status === 'DISABLED') {
                   console.warn('[AuthContext] Kullanıcı hesabı askıya alındı, oturum kapatılıyor...');
-                  alert('Hesabınız yönetici tarafından askıya alınmıştır. Lütfen destek ekibi ile iletişime geçin.');
+                  alert('Hesabın yönetici tarafından askıya alınmıştır. Lütfen destek ekibi ile iletişime geç.');
                   signOut();
                 }
               },
@@ -116,7 +116,7 @@ export function AuthProvider({ children }) {
         } catch (error) {
           console.error('Giriş sonrası veritabanı hazırlığı başarısız:', error);
           if (error.message?.includes('askıya') || error.message?.includes('ACCOUNT_DISABLED')) {
-            alert('Hesabınız yönetici tarafından askıya alınmıştır. Lütfen destek ekibi ile iletişime geçin.');
+            alert('Hesabın yönetici tarafından askıya alınmıştır. Lütfen destek ekibi ile iletişime geç.');
             signOut();
             return;
           }
@@ -135,7 +135,7 @@ export function AuthProvider({ children }) {
 
     // 4. Force-Logout Olay Dinleyicisi (database.js 403 yakaladığında)
     const handleForceLogout = (e) => {
-      const msg = e.detail?.message || 'Hesabınız yönetici tarafından askıya alınmıştır.';
+      const msg = e.detail?.message || 'Hesabın yönetici tarafından askıya alınmıştır.';
       alert(msg);
       signOut();
     };
@@ -156,7 +156,7 @@ export function AuthProvider({ children }) {
         if (res.status === 403) {
           const errData = await res.json().catch(() => ({}));
           if (errData.error === 'ACCOUNT_DISABLED') {
-            alert('Hesabınız yönetici tarafından askıya alınmıştır. Lütfen destek ekibi ile iletişime geçin.');
+            alert('Hesabın yönetici tarafından askıya alınmıştır. Lütfen destek ekibi ile iletişime geç.');
             signOut();
           }
         }

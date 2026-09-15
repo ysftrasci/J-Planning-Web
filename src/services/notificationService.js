@@ -28,7 +28,10 @@ export async function registerFCMPushToken(userUid) {
   try {
     let serviceWorkerRegistration;
     if ('serviceWorker' in navigator) {
-      serviceWorkerRegistration = await navigator.serviceWorker.ready;
+      serviceWorkerRegistration = await navigator.serviceWorker.register('/sw.js', {
+        scope: '/',
+      });
+      await navigator.serviceWorker.ready;
     }
 
     const vapidKey = import.meta.env.VITE_FIREBASE_VAPID_KEY || undefined;
@@ -62,7 +65,10 @@ export async function unregisterFCMPushToken(userUid) {
     if (messaging && 'Notification' in window && Notification.permission === 'granted') {
       let serviceWorkerRegistration;
       if ('serviceWorker' in navigator) {
-        serviceWorkerRegistration = await navigator.serviceWorker.ready;
+        serviceWorkerRegistration = await navigator.serviceWorker.register('/sw.js', {
+          scope: '/',
+        });
+        await navigator.serviceWorker.ready;
       }
       const vapidKey = import.meta.env.VITE_FIREBASE_VAPID_KEY || undefined;
       token = await getToken(messaging, {

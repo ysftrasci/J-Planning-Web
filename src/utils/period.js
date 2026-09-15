@@ -31,6 +31,9 @@ function getMonday(date) {
 }
 
 export function getPeriodKey(period, date = new Date()) {
+  if (period === 'ONCE') {
+    return 'ONCE';
+  }
   const d = date instanceof Date ? date : parseLocalDate(date);
   if (period === 'WEEKLY') {
     return toDateStr(getMonday(d));

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Send, Plus, CheckCircle2, Search, X, SlidersHorizontal, Filter, BookOpen } from 'lucide-react';
+import { Send, Plus, CheckCircle2, Search, X, SlidersHorizontal, Filter, BookOpen, AlertCircle } from 'lucide-react';
 import {
   getActiveTasks,
   completeSubtask,
@@ -13,7 +13,14 @@ import { getCategories } from '../db/categoryRepository';
 import { calculateCurrentStreak } from '../utils/streak';
 import { getPeriodKey } from '../utils/period';
 import { useAuth } from '../context/AuthContext.jsx';
-import { listenPendingTasksAssignedToMe, acceptAssignedTask, rejectAssignedTask, syncCompletionStatusToFirestore } from '../services/taskAssignmentService';
+import {
+  listenPendingTasksAssignedToMe,
+  acceptAssignedTask,
+  rejectAssignedTask,
+  syncCompletionStatusToFirestore,
+  listenTaskDeletionNotices,
+  dismissTaskDeletionNotice,
+} from '../services/taskAssignmentService';
 import { listenFriends } from '../services/friendService';
 import TaskCard from '../components/TaskCard.jsx';
 import EmptyState from '../components/EmptyState.jsx';
@@ -31,6 +38,7 @@ export default function TasksListPage() {
   const [loading, setLoading] = useState(true);
   const [toast, setToast] = useState('');
   const [pendingAssigned, setPendingAssigned] = useState([]);
+  const [deletionNotices, setDeletionNotices] = useState([]);
   const [modalTask, setModalTask] = useState(null);
   const [friendNameByUid, setFriendNameByUid] = useState({});
 
@@ -132,6 +140,14 @@ export default function TasksListPage() {
     return unsub;
   }, [user]);
 
+  useEffect(() => {
+    if (!user) return;
+    const unsub = listenTaskDeletionNotices(user.uid, (notices) => {
+      setDeletionNotices(notices || []);
+    });
+    return unsub;
+  }, [user]);
+
   const showToast = (msg) => {
     setToast(msg);
     setTimeout(() => setToast(''), 3000);
@@ -164,10 +180,17 @@ export default function TasksListPage() {
     try {
       const result = await completeSubtask(task.id);
       if (result?.firestoreAssignmentId) {
+        const periodKey = getPeriodKey(task.period, new Date());
+        const isNewlyCompleted = result?.fullyCompleted === true && !result?.alreadyComplete;
         await syncCompletionStatusToFirestore(result.firestoreAssignmentId, {
           isCompleted: !!result.fullyCompleted || !!result.alreadyComplete,
           completedSubtasks: result.completedSubtasks,
           subtaskCount: result.subtaskCount,
+          periodKey,
+          assignedByUid: task.assignedByUserId,
+          taskTitle: task.title,
+          completedByName: user?.profile?.displayName || user?.displayName || 'Arkadaşın',
+          isNewlyCompleted,
         });
       }
     } catch (e) {
@@ -200,10 +223,12 @@ export default function TasksListPage() {
     try {
       const result = await uncompleteSubtask(task.id);
       if (result?.firestoreAssignmentId) {
+        const periodKey = getPeriodKey(task.period, new Date());
         await syncCompletionStatusToFirestore(result.firestoreAssignmentId, {
           isCompleted: false,
           completedSubtasks: result.completedSubtasks,
           subtaskCount: result.subtaskCount,
+          periodKey,
         });
       }
     } catch (e) {
@@ -382,16 +407,38 @@ export default function TasksListPage() {
         </div>
       </div>
 
-      {/* Sana Atanan Görevler Banner'ı */}
-      {pendingAssigned.length > 0 && (
-        <button
-          type="button"
-          className="tasks-list-page__pending-banner"
-          onClick={() => setModalTask(pendingAssigned[0])}
-        >
-          <Send size={18} />
-          <span>Sana atanan {pendingAssigned.length} yeni görev var!</span>
-        </button>
+      {/* Bildirim Banner'ları */}
+      {(pendingAssigned.length > 0 || deletionNotices.length > 0) && (
+        <div className="tasks-list-page__banners">
+          {pendingAssigned.length > 0 && (
+            <button
+              type="button"
+              className="tasks-list-page__pending-banner"
+              onClick={() => setModalTask(pendingAssigned[0])}
+            >
+              <Send size={18} />
+              <span>Sana atanan {pendingAssigned.length} yeni görev var!</span>
+            </button>
+          )}
+
+          {deletionNotices.map((notice) => (
+            <div key={notice.id} className="tasks-list-page__deletion-banner">
+              <AlertCircle size={18} className="tasks-list-page__deletion-banner-icon" />
+              <span className="tasks-list-page__deletion-banner-text">
+                {notice.deletedByName || 'Arkadaşın'}, gönderdiğin &apos;{notice.taskTitle}&apos; görevini sildi.
+              </span>
+              <button
+                type="button"
+                className="tasks-list-page__deletion-banner-close"
+                onClick={() => dismissTaskDeletionNotice(notice.id)}
+                title="Bildirimi Kapat"
+                aria-label="Bildirimi Kapat"
+              >
+                <X size={16} />
+              </button>
+            </div>
+          ))}
+        </div>
       )}
 
       {/* Görev Listesi */}

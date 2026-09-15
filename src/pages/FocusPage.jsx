@@ -312,7 +312,7 @@ export default function FocusPage() {
           <AppModal
             open={showSoundPicker}
             onClose={() => setShowSoundPicker(false)}
-            title="Arka Plan Sesi Seçin"
+            title="Arka Plan Sesi Seç"
           >
             <div className="focus-page__sound-list">
               {SOUND_OPTIONS.map((opt) => {
@@ -455,7 +455,7 @@ export default function FocusPage() {
         <AppModal
           open={showSoundPicker}
           onClose={() => setShowSoundPicker(false)}
-          title="Arka Plan Sesi Seçin"
+          title="Arka Plan Sesi Seç"
         >
           <div className="focus-page__sound-list">
             {SOUND_OPTIONS.map((opt) => {

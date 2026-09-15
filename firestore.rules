@@ -19,6 +19,15 @@ service cloud.firestore {
         data.cost is int && data.cost >= 0 && data.cost <= 100000;
     }
 
+    function isValidTaskDeletionNoticeData(data) {
+      return data.taskTitle is string &&
+        data.taskTitle.size() > 0 && data.taskTitle.size() <= 300 &&
+        data.deletedByName is string &&
+        data.deletedByName.size() > 0 && data.deletedByName.size() <= 100 &&
+        data.assignedByUid is string &&
+        data.deletedByUid is string;
+    }
+
     match /users/{userId} {
       allow read: if request.auth != null && (request.auth.uid == userId || request.auth.token.admin == true);
       allow create, delete: if request.auth != null && request.auth.uid == userId;
@@ -85,5 +94,15 @@ service cloud.firestore {
       allow delete: if request.auth != null &&
         (request.auth.uid == resource.data.assignedByUid || request.auth.uid == resource.data.assignedToUid);
     }
+
+    match /taskDeletionNotices/{noticeId} {
+      allow read, delete: if request.auth != null && request.auth.uid == resource.data.assignedByUid;
+      allow create: if request.auth != null &&
+        request.auth.uid == request.resource.data.deletedByUid &&
+        request.resource.data.assignedByUid is string &&
+        request.resource.data.assignedByUid != request.auth.uid &&
+        isValidTaskDeletionNoticeData(request.resource.data);
+    }
   }
 }
+

@@ -73,7 +73,7 @@ export default function NotificationSettingsPage() {
       const granted = await requestNotificationPermission();
       setPermStatus(granted ? 'granted' : 'denied');
       if (!granted) {
-        alert('Bildirim gönderebilmemiz için tarayıcı iznini açmanız gerekmektedir.');
+        alert('Bildirim gönderebilmemiz için tarayıcı bildirim iznini açman gerekiyor.');
         return;
       }
     }
@@ -84,9 +84,9 @@ export default function NotificationSettingsPage() {
     );
 
     if (success) {
-      setToastMessage('Test bildirimi gönderildi! Ekranınızın sağ alt/üst köşesini kontrol edin.');
+      setToastMessage('Test bildirimi gönderildi! Ekranının sağ alt/üst köşesini kontrol et.');
     } else {
-      setToastMessage('Bildirim gönderilemedi. Lütfen tarayıcı ayarlarından bildirimlere izin verildiğinden emin olun.');
+      setToastMessage('Bildirim gönderilemedi. Lütfen tarayıcı ayarlarından bildirimlere izin verildiğinden emin ol.');
     }
     setTimeout(() => setToastMessage(''), 5000);
   };
@@ -123,7 +123,7 @@ export default function NotificationSettingsPage() {
           <AlertTriangle size={20} color="var(--color-accent-dark)" />
           <div className="notification-settings-page__perm-text">
             <strong>Bildirim İzni Gerekli</strong>
-            <p>Hatırlatmaları alabilmeniz için tarayıcı iznine ihtiyaç var.</p>
+            <p>Hatırlatmaları alabilmen için tarayıcı iznine ihtiyaç var.</p>
           </div>
           <button
             type="button"
@@ -228,7 +228,7 @@ export default function NotificationSettingsPage() {
         >
           <div className="notification-settings-page__modal-body">
             <AlertTriangle size={36} color="var(--color-danger)" />
-            <p>Bu bildirim zamanlamasını kaldırmak istiyor musun?</p>
+            <p>Bu bildirim zamanlamasını silmek istediğine emin misin?</p>
             <div className="notification-settings-page__modal-actions">
               <AppButton
                 title="Vazgeç"
@@ -265,7 +265,7 @@ function ScheduleFormModal({ open, editingSchedule, userUid, onClose, onSaved })
 
   const handleSave = async () => {
     if (selectedDays.length === 0) {
-      setErrorMessage('Lütfen en az bir gün seçin.');
+      setErrorMessage('Lütfen en az bir gün seç.');
       return;
     }
 

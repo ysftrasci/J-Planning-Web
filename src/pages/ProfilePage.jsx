@@ -63,16 +63,25 @@ export default function ProfilePage() {
   };
 
   const handleShare = async () => {
-    const text = `J-Planning'de bana arkadaş ekle! Kullanıcı ID'm: ${userCode}`;
+    const baseUrl =
+      import.meta.env.VITE_APP_URL ||
+      (typeof window !== 'undefined' ? window.location.origin : '');
+    const inviteUrl = `${baseUrl}/friends/add?code=${encodeURIComponent(userCode)}`;
+    const shareText = `J-Planning'de arkadaş olalım! Beni eklemek için linke tıkla:\n${inviteUrl}\n(Kullanıcı Kodum: ${userCode})`;
+
     if (navigator.share) {
       try {
-        await navigator.share({ title: 'J-Planning ID', text });
+        await navigator.share({
+          title: 'J-Planning Arkadaşlık Daveti',
+          text: shareText,
+          url: inviteUrl,
+        });
         return;
       } catch (e) {
         // Fallback to clipboard
       }
     }
-    await navigator.clipboard.writeText(text);
+    await navigator.clipboard.writeText(shareText);
     setCopiedSuccess(true);
     setTimeout(() => setCopiedSuccess(false), 3000);
   };
@@ -84,7 +93,7 @@ export default function ProfilePage() {
       await sendResetPasswordEmail(userEmail);
       setAlertMessage({
         title: 'Gönderildi 📧',
-        body: `${userEmail} adresine bir şifre sıfırlama linki gönderdik. Gelen kutunu (ve spam klasörünü) kontrol et.`,
+        body: `${userEmail} adresine bir şifre sıfırlama linki gönderdik. E-posta birkaç dakika içinde gelen kutuna düşmezse, Spam (Gereksiz) veya Tanıtımlar klasörünü kontrol etmeyi unutma.`,
       });
     } catch (e) {
       setAlertMessage({
@@ -190,17 +199,17 @@ export default function ProfilePage() {
         {userEmail && <span className="profile-page__email">{userEmail}</span>}
 
         <div className="profile-page__id-box">
-          <span className="profile-page__id-label">Kullanıcı ID'n</span>
+          <span className="profile-page__id-label">Kullanıcı Kodun</span>
           <button
             type="button"
             className="profile-page__id-value-button"
             onClick={easterEgg.handleTap}
-            title="Sürpriz için tıklayın"
+            title="Sürpriz için dokun"
           >
             {userCode}
           </button>
           <span className="profile-page__id-hint">
-            Arkadaşların seni bu ID ile ekleyebilir
+            Arkadaşların seni bu kod ile ekleyebilir
           </span>
 
           <button
@@ -209,7 +218,7 @@ export default function ProfilePage() {
             onClick={handleShare}
           >
             {copiedSuccess ? <Check size={16} /> : <Share2 size={16} />}
-            <span>{copiedSuccess ? 'Kopyalandı!' : "ID'mi Paylaş"}</span>
+            <span>{copiedSuccess ? 'Kopyalandı!' : 'Kodumu Paylaş'}</span>
           </button>
         </div>
       </div>
@@ -280,9 +289,9 @@ export default function ProfilePage() {
             <Database size={40} color="var(--color-accent)" />
             <p style={{ textAlign: 'left', fontSize: 'var(--font-caption-size)', lineHeight: 1.5 }}>
               <strong>Bu özellik ne işe yarar?</strong><br />
-              Bu buton ile cihazınızda saklanan tüm görevlerinizi, alışkanlık geçmişinizi, kazandığınız puanları, odaklanma istatistiklerinizi ve bildirim ayarlarınızı <strong>.json</strong> formatında tek bir yedek dosyası olarak indirebilirsiniz.<br /><br />
+              Bu buton ile cihazında saklanan tüm görevlerini, alışkanlık geçmişini, kazandığın puanları, odaklanma istatistiklerini ve bildirim ayarlarını <strong>.json</strong> formatında tek bir yedek dosyası olarak indirebilirsin.<br /><br />
               <strong>Alınan veriler nasıl kullanılır?</strong><br />
-              İndirdiğiniz bu dosyayı verilerinizi başka bir cihaza/tarayıcıya aktarmak ya da verilerinizin çevrimdışı yedeğini saklamak için kullanabilirsiniz. Dilediğiniz zaman bu yedek dosyasını uygulamaya yükleyerek verilerinizi geri getirebilirsiniz.
+              İndirdiğin bu dosyayı verilerini başka bir cihaza/tarayıcıya aktarmak ya da verilerinin çevrimdışı yedeğini saklamak için kullanabilirsin. Dilediğin zaman bu yedek dosyasını uygulamaya yükleyerek verilerini geri getirebilirsin.
             </p>
             <div className="profile-page__modal-actions">
               <AppButton
@@ -311,7 +320,7 @@ export default function ProfilePage() {
           title="Yedekleme ve Geri Yükleme"
         >
           <div className="profile-page__modal-body" style={{ gap: 'var(--space-md)' }}>
-            <p className="caption">Lütfen yapmak istediğiniz işlemi seçin:</p>
+            <p className="caption">Lütfen yapmak istediğin işlemi seç:</p>
             
             <AppButton
               title="Yedek İndir (.json)"

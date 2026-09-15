@@ -170,7 +170,7 @@ export default function EditTaskPage() {
         </button>
         <div className="edit-task-page__blocked">
           <h2>Görev Bulunamadı</h2>
-          <p className="caption">Düzenlemek istediğiniz görev mevcut değil veya silinmiş.</p>
+          <p className="caption">Düzenlemek istediğin görev mevcut değil veya silinmiş.</p>
         </div>
       </div>
     );
@@ -217,7 +217,7 @@ export default function EditTaskPage() {
     setErrorMessage('');
 
     if (!title.trim()) {
-      setErrorMessage('Lütfen görev adı gir.');
+      setErrorMessage('Lütfen bir görev adı gir.');
       return;
     }
 

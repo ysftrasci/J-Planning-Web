@@ -144,14 +144,14 @@ export default function DailyNotesPage() {
           <BookOpen size={20} className="daily-notes-page__book-icon" />
           <div>
             <h3 className="daily-notes-page__card-title">Bugünün Özeti ({formatDateLabel(todayKey)})</h3>
-            <p className="daily-notes-page__card-subtitle">Gününüzü değerlendirin, çalışma sürenizi ve notlarınızı yazın</p>
+            <p className="daily-notes-page__card-subtitle">Gününü değerlendir, çalışma süreni ve notlarını yaz</p>
           </div>
         </div>
 
         <div className="daily-notes-page__field">
           <label className="daily-notes-page__field-label">
             <Clock size={16} />
-            <span>Bugün Kaç Saat Çalıştınız? (opsiyonel)</span>
+            <span>Bugün Kaç Saat Çalıştın? (opsiyonel)</span>
           </label>
           <input
             type="text"
@@ -253,7 +253,7 @@ export default function DailyNotesPage() {
         >
           <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', padding: '8px 0' }}>
             <p style={{ margin: 0, fontSize: '14px', lineHeight: 1.5 }}>
-              {dateKeyToDelete ? formatDateLabel(dateKeyToDelete) : ''} tarihli notu silmek istiyor musunuz?
+              {dateKeyToDelete ? formatDateLabel(dateKeyToDelete) : ''} tarihli notu silmek istediğine emin misin?
             </p>
             <div style={{ display: 'flex', gap: '12px' }}>
               <AppButton title="Vazgeç" variant="secondary" onClick={() => setDateKeyToDelete(null)} />

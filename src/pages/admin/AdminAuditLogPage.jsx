@@ -37,7 +37,7 @@ export default function AdminAuditLogPage() {
     try {
       const activeUser = auth.currentUser;
       const idToken = typeof activeUser?.getIdToken === 'function' ? await activeUser.getIdToken() : null;
-      if (!idToken) throw new Error('Oturum tokenı alınamadı.');
+      if (!idToken) throw new Error("Oturum token'ı alınamadı.");
 
       const params = new URLSearchParams({
         page: pagination.page.toString(),

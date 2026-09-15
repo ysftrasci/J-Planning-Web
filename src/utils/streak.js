@@ -91,12 +91,11 @@ export function calculateRecentSummary(task, records) {
 
   for (let i = 0; i < windowSize; i++) {
     const rec = recordsMap.get(checkKey);
-    // Bugünün/bu haftanın periyodu henüz bitmediyse (kayıt yoksa ya da PENDING_PARTIAL
-    // ise) sayıma dahil etme — sadece kesinleşmiş periyotları say.
+    // Henüz kesinleşmemiş periyotlar da (kayıt yok veya PENDING_PARTIAL) pencereye dahil edilir.
     if (rec && (rec.status === 'SUCCESSFUL' || rec.status === 'FAILED')) {
       if (rec.status === 'SUCCESSFUL') successCount += 1;
       countedPeriods += 1;
-    } else if (checkKey !== todayKey) {
+    } else {
       countedPeriods += 1;
     }
     checkKey = getPreviousPeriodKey(task.period, checkKey);

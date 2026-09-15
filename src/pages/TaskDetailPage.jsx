@@ -39,6 +39,9 @@ import {
 import AppButton from '../components/AppButton.jsx';
 import AppModal from '../components/AppModal.jsx';
 import EmptyState from '../components/EmptyState.jsx';
+import { useAuth } from '../context/AuthContext.jsx';
+import { notifyTaskDeletion } from '../services/taskAssignmentService';
+import { appendDativeSuffix } from '../utils/turkishSuffix';
 import './TaskDetailPage.css';
 
 const PRIORITY_LABEL = { HIGH: 'Yüksek', MEDIUM: 'Orta', LOW: 'Düşük', EASY: 'Kolay', HARD: 'Zor' };
@@ -60,6 +63,7 @@ function formatDate(dateInput) {
 export default function TaskDetailPage() {
   const { taskId } = useParams();
   const navigate = useNavigate();
+  const { user } = useAuth();
 
   const [task, setTask] = useState(null);
   const [records, setRecords] = useState([]);
@@ -190,6 +194,13 @@ export default function TaskDetailPage() {
 
   const confirmDelete = async () => {
     try {
+      if (isFriendAssigned && task?.assignedByUserId) {
+        await notifyTaskDeletion(
+          task.assignedByUserId,
+          task.title,
+          user?.displayName || 'Arkadaşın'
+        );
+      }
       await deleteTask(task.id);
       setShowDeleteModal(false);
       navigate('/');
@@ -258,7 +269,7 @@ export default function TaskDetailPage() {
         <div className="task-detail-page__assigned-note">
           <Info size={16} />
           <span>
-            Bu görevi {task.assignedToName}'e attın. Tamamlama işlemi ona ait, sen sadece takip edersin.
+            Bu görevi {appendDativeSuffix(task.assignedToName || 'arkadaşına')} attın. Tamamlama işlemi ona ait, sen sadece takip edersin.
           </span>
         </div>
       )}
@@ -309,13 +320,13 @@ export default function TaskDetailPage() {
           <FileText size={18} className="task-detail-page__card-icon" />
           <div>
             <h3 className="task-detail-page__card-title">Görev Notları & Düşünceler</h3>
-            <span className="caption">Aklınızdan geçenleri veya göreve özel notları buraya yazabilirsiniz.</span>
+            <span className="caption">Aklından geçenleri veya göreve özel notları buraya yazabilirsin.</span>
           </div>
         </div>
         <form onSubmit={handleSaveNotes} className="task-detail-page__card-form">
           <textarea
             className="task-detail-page__textarea"
-            placeholder="Görevle ilgili not veya düşünce yazın..."
+            placeholder="Görevle ilgili not veya düşüncelerini yaz..."
             rows={3}
             value={taskNotes}
             onChange={(e) => setTaskNotes(e.target.value)}
@@ -358,12 +369,12 @@ export default function TaskDetailPage() {
         </div>
       )}
 
-      {!isFriendAssigned && (
-        <div className="task-detail-page__footer" style={{ display: 'flex', gap: 'var(--space-md)' }}>
+      <div className="task-detail-page__footer" style={{ display: 'flex', gap: 'var(--space-md)' }}>
+        {!isFriendAssigned && (
           <AppButton title="Görevi Düzenle" variant="secondary" onClick={() => navigate(`/task/${taskId}/edit`)} />
-          <AppButton title="Görevi Sil" variant="danger" onClick={() => setShowDeleteModal(false || true)} />
-        </div>
-      )}
+        )}
+        <AppButton title="Görevi Sil" variant="danger" onClick={() => setShowDeleteModal(true)} />
+      </div>
 
       <AppModal open={!!recordToLateMark} onClose={() => setRecordToLateMark(null)} title="Geçmiş Görev Düzenle">
         <p className="caption">
@@ -382,7 +393,11 @@ export default function TaskDetailPage() {
       </AppModal>
 
       <AppModal open={showDeleteModal} onClose={() => setShowDeleteModal(false)} title="Görevi Sil">
-        <p className="caption">Bu görevi silmek istediğine emin misin?</p>
+        <p className="caption">
+          {isFriendAssigned
+            ? `Bu görevi silmek istediğine emin misin? Görevi atayan arkadaşına (${task.assignedByName || 'arkadaşına'}) bildirilecek ve görev her iki taraftan da kaldırılacaktır.`
+            : 'Bu görevi silmek istediğine emin misin?'}
+        </p>
         <div className="task-detail-page__modal-actions">
           <AppButton title="Vazgeç" variant="ghost" onClick={() => setShowDeleteModal(false)} />
           <AppButton title="Sil" variant="danger" onClick={confirmDelete} />

@@ -37,7 +37,9 @@ export default function LoginPage() {
     setErrorMessage('');
     try {
       await sendResetPasswordEmail(email);
-      window.alert('Gönderildi: E-postana bir şifre sıfırlama linki gönderdik. Gelen kutunu (ve spam klasörünü) kontrol et.');
+      window.alert(
+        'Şifre sıfırlama linki gönderildi! 📧\n\nE-posta birkaç dakika içinde gelen kutuna düşmezse, Spam (Gereksiz) veya Tanıtımlar klasörünü kontrol etmeyi unutma.'
+      );
     } catch (e) {
       setErrorMessage(e.message);
     } finally {
@@ -160,7 +162,7 @@ export default function LoginPage() {
           onSuccess={() => {
             setShowPendingModal(false);
             setPendingUid(null);
-            window.alert('Hesabınız kalıcı olarak silindi.');
+            window.alert('Hesabın kalıcı olarak silindi.');
           }}
           onSignOut={async () => {
             await signOut();

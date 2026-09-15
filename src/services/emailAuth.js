@@ -23,9 +23,9 @@ function friendlyErrorMessage(error) {
   if (code.includes('wrong-password')) return 'E-posta veya şifre hatalı.';
   if (code.includes('network-request-failed')) return 'İnternet bağlantını kontrol et.';
   if (code.includes('too-many-requests') || message.includes('TOO_MANY_ATTEMPTS_TRY_LATER')) {
-    return 'Çok sık e-posta gönderildi. Güvenlik nedeniyle lütfen 1 dakika bekleyip tekrar deneyin.';
+    return 'Çok sık e-posta gönderildi. Güvenlik nedeniyle lütfen 1 dakika bekleyip tekrar dene.';
   }
-  return 'Bir sorun oluştu, lütfen tekrar deneyin.';
+  return 'Bir sorun oluştu, lütfen tekrar dene.';
 }
 
 export async function registerWithEmail(name, email, password) {

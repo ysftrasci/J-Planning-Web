@@ -93,7 +93,7 @@ export default function CategoriesPage() {
         title="Kategoriyi Sil"
       >
         <p className="caption">
-          "{categoryToDelete?.name}" kategorisini silmek istiyor musun? Bu kategorideki görevler
+          "{categoryToDelete?.name}" kategorisini silmek istediğine emin misin? Bu kategorideki görevler
           "Kategorisiz" olarak kalacak.
         </p>
         <div className="categories-page__modal-actions">

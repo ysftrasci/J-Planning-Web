@@ -1,4 +1,4 @@
-import { Routes, Route, Navigate } from 'react-router-dom';
+import { Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import AppLayout from './AppLayout.jsx';
 import PlaceholderPage from '../pages/PlaceholderPage.jsx';
 import LoginPage from '../pages/LoginPage.jsx';
@@ -53,15 +53,28 @@ function LoadingScreen() {
         }}
       />
       <h2 style={{ margin: 0, fontSize: '22px', fontWeight: '700' }}>J-Planning</h2>
-      <p style={{ margin: 0, opacity: 0.7, fontSize: '14px' }}>Yükleniyor, lütfen bekleyin...</p>
+      <p style={{ margin: 0, opacity: 0.7, fontSize: '14px' }}>Yükleniyor, lütfen bekle...</p>
     </div>
   );
 }
 
 function RequireAuth({ children }) {
   const { user, initializing, signOut } = useAuth();
+  const location = useLocation();
+
   if (initializing) return <LoadingScreen />;
-  if (!user) return <Navigate to="/login" replace />;
+  if (!user) {
+    const fullPath = location.pathname + (location.search || '');
+    if (
+      typeof window !== 'undefined' &&
+      window.sessionStorage &&
+      !fullPath.startsWith('/login') &&
+      !fullPath.startsWith('/verify-email')
+    ) {
+      window.sessionStorage.setItem('jp_auth_redirect', fullPath);
+    }
+    return <Navigate to="/login" state={{ from: location }} replace />;
+  }
   if (!user.emailVerified) return <Navigate to="/verify-email" replace />;
 
   if (user?.profile?.isDeleting === true) {
@@ -82,8 +95,21 @@ function RequireAuth({ children }) {
 
 function RequireAdmin({ children }) {
   const { user, isAdmin, initializing, signOut } = useAuth();
+  const location = useLocation();
+
   if (initializing) return <LoadingScreen />;
-  if (!user) return <Navigate to="/login" replace />;
+  if (!user) {
+    const fullPath = location.pathname + (location.search || '');
+    if (
+      typeof window !== 'undefined' &&
+      window.sessionStorage &&
+      !fullPath.startsWith('/login') &&
+      !fullPath.startsWith('/verify-email')
+    ) {
+      window.sessionStorage.setItem('jp_auth_redirect', fullPath);
+    }
+    return <Navigate to="/login" state={{ from: location }} replace />;
+  }
   if (!user.emailVerified) return <Navigate to="/verify-email" replace />;
 
   if (user?.profile?.isDeleting === true) {
@@ -111,15 +137,41 @@ function RequireUnverified({ children }) {
   const { user, initializing } = useAuth();
   if (initializing) return <LoadingScreen />;
   if (!user) return <Navigate to="/login" replace />;
-  if (user.emailVerified) return <Navigate to="/" replace />;
+  if (user.emailVerified) {
+    let target = '/';
+    if (typeof window !== 'undefined' && window.sessionStorage) {
+      const saved = window.sessionStorage.getItem('jp_auth_redirect');
+      if (saved) {
+        target = saved;
+        window.sessionStorage.removeItem('jp_auth_redirect');
+      }
+    }
+    return <Navigate to={target} replace />;
+  }
   return children;
 }
 
 function RedirectIfAuthed({ children }) {
   const { user, initializing } = useAuth();
+  const location = useLocation();
+
   if (initializing) return <LoadingScreen />;
   if (user && !user.emailVerified) return <Navigate to="/verify-email" replace />;
-  if (user) return <Navigate to="/" replace />;
+  if (user) {
+    let target = '/';
+    if (location.state?.from?.pathname) {
+      target = `${location.state.from.pathname}${location.state.from.search || ''}`;
+    } else if (typeof window !== 'undefined' && window.sessionStorage) {
+      const saved = window.sessionStorage.getItem('jp_auth_redirect');
+      if (saved) {
+        target = saved;
+      }
+    }
+    if (typeof window !== 'undefined' && window.sessionStorage) {
+      window.sessionStorage.removeItem('jp_auth_redirect');
+    }
+    return <Navigate to={target} replace />;
+  }
   return children;
 }
 

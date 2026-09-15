@@ -44,6 +44,18 @@ export default function VerifyEmailPage() {
     return () => clearInterval(timer);
   }, [storageKey]);
 
+  const getSuccessRedirect = () => {
+    let target = '/';
+    if (typeof window !== 'undefined' && window.sessionStorage) {
+      const saved = window.sessionStorage.getItem('jp_auth_redirect');
+      if (saved) {
+        target = saved;
+        window.sessionStorage.removeItem('jp_auth_redirect');
+      }
+    }
+    return target;
+  };
+
   // Kullanıcı mail kutusundan linke tıklayıp bu sekmeye geri döndüğünde otomatik algıla
   useEffect(() => {
     const handleFocus = async () => {
@@ -52,7 +64,7 @@ export default function VerifyEmailPage() {
         if (typeof refreshAuthUser === 'function') {
           const verified = await refreshAuthUser();
           if (verified) {
-            navigate('/', { replace: true });
+            navigate(getSuccessRedirect(), { replace: true });
           }
         }
       } catch (_) {}
@@ -69,7 +81,7 @@ export default function VerifyEmailPage() {
     try {
       await resendVerificationEmail();
       setCooldown(COOLDOWN_SECONDS);
-      setMessage('Doğrulama e-postası tekrar gönderildi. Gelen kutunu (ve spam klasörünü) kontrol et.');
+      setMessage('Doğrulama e-postası tekrar gönderildi. Gelen kutunu, Spam (Gereksiz) veya Tanıtımlar klasörünü kontrol et.');
     } catch (e) {
       setMessage(e.message);
     } finally {
@@ -83,7 +95,7 @@ export default function VerifyEmailPage() {
     try {
       const verified = await refreshAuthUser();
       if (verified) {
-        navigate('/', { replace: true });
+        navigate(getSuccessRedirect(), { replace: true });
       } else {
         setMessage('Henüz doğrulanmamış görünüyor. E-postandaki linke tıkladıktan sonra tekrar dene.');
       }
@@ -104,6 +116,28 @@ export default function VerifyEmailPage() {
           Hesabını kullanabilmek için önce e-postandaki linke tıklaman gerekiyor.
         </p>
 
+        <div
+          style={{
+            background: 'rgba(255, 255, 255, 0.05)',
+            border: '1px solid var(--color-border)',
+            borderRadius: 'var(--radius-md)',
+            padding: '12px 14px',
+            fontSize: '13px',
+            lineHeight: 1.5,
+            color: 'var(--color-text-secondary)',
+            textAlign: 'left',
+            display: 'flex',
+            alignItems: 'flex-start',
+            gap: '8px',
+            margin: '4px 0 12px 0',
+          }}
+        >
+          <span style={{ fontSize: '15px', lineHeight: 1 }}>💡</span>
+          <span>
+            E-posta birkaç dakika içinde gelen kutuna düşmezse, <strong>Spam (Gereksiz)</strong> veya <strong>Tanıtımlar</strong> klasörünü kontrol etmeyi unutma.
+          </span>
+        </div>
+
         {message && <p className="login-error" style={{ color: 'var(--color-text-secondary)' }}>{message}</p>}
 
         <div className="login-form">
@@ -121,7 +155,7 @@ export default function VerifyEmailPage() {
             {resending
               ? 'Gönderiliyor...'
               : cooldown > 0
-              ? `Tekrar göndermek için lütfen bekleyin (${cooldown} sn)`
+              ? `Tekrar göndermek için lütfen bekle (${cooldown} sn)`
               : 'Doğrulama e-postasını tekrar gönder'}
           </button>
           <button type="button" className="login-link" onClick={signOut}>

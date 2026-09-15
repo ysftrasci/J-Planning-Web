@@ -53,7 +53,7 @@ export default function AdminUsersPage() {
       const idToken = typeof user?.getIdToken === 'function'
         ? await user.getIdToken()
         : (auth.currentUser ? await auth.currentUser.getIdToken() : null);
-      if (!idToken) throw new Error('Oturum tokenı alınamadı.');
+      if (!idToken) throw new Error("Oturum token'ı alınamadı.");
       const params = new URLSearchParams({
         page: pagination.page.toString(),
         limit: pagination.limit.toString(),

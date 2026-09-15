@@ -13,6 +13,7 @@ import {
   addDoc,
   updateDoc,
   deleteDoc,
+  getDocs,
   query,
   where,
   onSnapshot,
@@ -20,6 +21,7 @@ import {
 } from 'firebase/firestore';
 import { db } from './firebase';
 import { findUserByCode, getUserProfile } from '../db/userProfileRepository';
+import { sendPushNotification } from './pushNotificationClient';
 
 const friendshipsRef = collection(db, 'friendships');
 
@@ -57,7 +59,7 @@ function checkRateLimit(uid) {
     const blockedUntil = Number(localStorage.getItem(blockKey)) || 0;
     if (now < blockedUntil) {
       const remainingSec = Math.ceil((blockedUntil - now) / 1000);
-      throw new Error(`Çok fazla arama yaptınız. Lütfen ${remainingSec} saniye sonra tekrar deneyin.`);
+      throw new Error(`Çok fazla arama yaptın. Lütfen ${remainingSec} saniye sonra tekrar dene.`);
     }
   } catch (e) {
     if (e.message.includes('Çok fazla')) throw e;
@@ -81,7 +83,7 @@ function checkRateLimit(uid) {
     try {
       localStorage.setItem(blockKey, String(now + backoffMs));
     } catch (e) {}
-    throw new Error('Çok fazla arama yaptınız. Güvenlik nedeniyle lütfen 1 dakika sonra tekrar deneyin.');
+    throw new Error('Çok fazla arama yaptın. Güvenlik nedeniyle lütfen 1 dakika sonra tekrar dene.');
   }
 
   // Günlük limit kontrolü
@@ -96,7 +98,7 @@ function checkRateLimit(uid) {
     : [];
 
   if (dailyAttempts.length >= MAX_SEARCHES_PER_DAY) {
-    throw new Error('Günlük arama limitine ulaştınız. Güvenlik nedeniyle lütfen yarın tekrar deneyin.');
+    throw new Error('Günlük arama limitine ulaştın. Güvenlik nedeniyle lütfen yarın tekrar dene.');
   }
 
   // Kaydet
@@ -111,16 +113,49 @@ function checkRateLimit(uid) {
 // Kullanıcı kodu ile arkadaş isteği gönderir.
 export async function sendFriendRequest(currentUser, targetCode) {
   const code = targetCode.trim().toUpperCase();
-  if (!code) throw new Error('Lütfen bir Kullanıcı ID gir.');
+  if (!code) throw new Error('Lütfen bir Kullanıcı Kodu gir.');
 
   checkRateLimit(currentUser?.uid);
 
   const targetProfile = await findUserByCode(code);
   if (!targetProfile) {
-    throw new Error('Bu Kullanıcı ID ile bir hesap bulunamadı.');
+    throw new Error('Bu Kullanıcı Kodu ile bir hesap bulunamadı.');
   }
   if (targetProfile.uid === currentUser.uid) {
     throw new Error('Kendine arkadaşlık isteği gönderemezsin.');
+  }
+
+  // Çift yönlü mükerrer kontrolü:
+  // İki kullanıcı arasında zaten bir arkadaşlık (ACCEPTED) veya bekleyen bir istek (PENDING) var mı?
+  const [sentSnap, receivedSnap] = await Promise.all([
+    getDocs(
+      query(
+        friendshipsRef,
+        where('fromUid', '==', currentUser.uid),
+        where('toUid', '==', targetProfile.uid)
+      )
+    ),
+    getDocs(
+      query(
+        friendshipsRef,
+        where('fromUid', '==', targetProfile.uid),
+        where('toUid', '==', currentUser.uid)
+      )
+    ),
+  ]);
+
+  const allRelations = [...sentSnap.docs, ...receivedSnap.docs].map((d) => d.data());
+
+  if (allRelations.some((r) => r.status === 'ACCEPTED')) {
+    throw new Error('Bu kullanıcı zaten arkadaş listenizde.');
+  }
+
+  if (sentSnap.docs.some((d) => d.data().status === 'PENDING')) {
+    throw new Error('Bu kullanıcıya zaten bekleyen bir arkadaşlık isteğin var.');
+  }
+
+  if (receivedSnap.docs.some((d) => d.data().status === 'PENDING')) {
+    throw new Error("Bu kullanıcı sana zaten bir istek göndermiş. 'Bekleyen İstekler' bölümünden kabul edebilirsin.");
   }
 
   await addDoc(friendshipsRef, {
@@ -133,6 +168,10 @@ export async function sendFriendRequest(currentUser, targetCode) {
     status: 'PENDING',
     createdAt: serverTimestamp(),
   });
+
+  // Anlık Web Push Bildirimi Gönder (Fire-and-forget: ana işlemi asla bloklamaz)
+  const senderName = currentUser.profile?.displayName || currentUser.displayName || 'Arkadaşın';
+  sendPushNotification('FRIEND_REQUEST', targetProfile.uid, { senderName }).catch(() => {});
 }
 
 export async function acceptFriendRequest(friendshipId) {
@@ -187,11 +226,31 @@ export function listenFriends(currentUserUid, callback, onError) {
       })),
     ];
 
+    // UI Düzeyinde Tekilleştirme:
+    // Geçmişte mükerrer oluşmuş kayıtlar varsa aynı arkadaş (friendUid) için tek kayıt tutulur,
+    // böylece arayüzde mükerrer satır görünmez ve gereksiz profil sorgusu engellenir.
+    const uniqueMap = new Map();
+    for (const friend of combinedRaw) {
+      if (!friend.friendUid) continue;
+      if (!uniqueMap.has(friend.friendUid)) {
+        uniqueMap.set(friend.friendUid, friend);
+      }
+    }
+    const uniqueRaw = Array.from(uniqueMap.values());
+
     // Her arkadaşın güncel profilini çek, isim/foto varsa üzerine yaz.
+    // NOT: users/{uid} güvenlik kuralları gereği başka kullanıcılar tarafından okunamaz,
+    // ancak userCodes/{code} kamuya açık genel profili (displayName, photoURL) tutar.
     const enriched = await Promise.all(
-      combinedRaw.map(async (friend) => {
+      uniqueRaw.map(async (friend) => {
         try {
-          const liveProfile = await getUserProfile(friend.friendUid);
+          let liveProfile = null;
+          if (friend.friendCode) {
+            liveProfile = await findUserByCode(friend.friendCode);
+          }
+          if (!liveProfile && friend.friendUid) {
+            liveProfile = await getUserProfile(friend.friendUid).catch(() => null);
+          }
           if (liveProfile) {
             return {
               ...friend,

@@ -1,4 +1,4 @@
-import { createRemoteJWKSet, jwtVerify } from 'jose';
+import { createRemoteJWKSet, jwtVerify, SignJWT, importPKCS8 } from 'jose';
 import { createClient } from '@libsql/client/web';
 import canonicalSchema from '../../schema.sql';
 
@@ -370,6 +370,200 @@ async function ensureUserDatabase(dbName, env) {
     token: dbToken,
     expiresAt: Math.floor(Date.now() / 1000) + 3600, // 1 saat sonra
   };
+}
+
+/**
+ * ============================================================================
+ * FCM Web Push Bildirim Motoru & Google OAuth2 Yönetimi
+ * ============================================================================
+ */
+let cachedGoogleAccessToken = null;
+let cachedGoogleTokenExpiresAt = 0;
+
+/**
+ * Service Account kimliğiyle Google OAuth2 erişim token'ı üretir ve ~50 dakika önbelleğe alır.
+ */
+async function getGoogleAccessToken(serviceAccountJson) {
+  const now = Date.now();
+  if (cachedGoogleAccessToken && now < cachedGoogleTokenExpiresAt - 5 * 60 * 1000) {
+    return cachedGoogleAccessToken;
+  }
+
+  let sa;
+  if (typeof serviceAccountJson === 'string') {
+    try {
+      sa = JSON.parse(serviceAccountJson);
+    } catch (e) {
+      throw new Error('FIREBASE_SERVICE_ACCOUNT JSON formatı geçersiz.');
+    }
+  } else {
+    sa = serviceAccountJson;
+  }
+
+  if (!sa || !sa.client_email || !sa.private_key) {
+    throw new Error('FIREBASE_SERVICE_ACCOUNT içinde client_email veya private_key eksik.');
+  }
+
+  const privateKey = await importPKCS8(sa.private_key, 'RS256');
+  const issuedAt = Math.floor(now / 1000);
+  const jwt = await new SignJWT({
+    iss: sa.client_email,
+    sub: sa.client_email,
+    aud: 'https://oauth2.googleapis.com/token',
+    scope: 'https://www.googleapis.com/auth/firebase.messaging https://www.googleapis.com/auth/datastore',
+    iat: issuedAt,
+    exp: issuedAt + 3600,
+  })
+    .setProtectedHeader({ alg: 'RS256', typ: 'JWT' })
+    .sign(privateKey);
+
+  const res = await fetch('https://oauth2.googleapis.com/token', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      grant_type: 'urn:ietf:params:oauth:grant-type:jwt-bearer',
+      assertion: jwt,
+    }),
+  });
+
+  const data = await res.json();
+  if (!res.ok) {
+    throw new Error(`Google OAuth token alınamadı: ${data.error_description || data.error || res.status}`);
+  }
+
+  cachedGoogleAccessToken = data.access_token;
+  cachedGoogleTokenExpiresAt = now + (data.expires_in || 3600) * 1000;
+  return cachedGoogleAccessToken;
+}
+
+/**
+ * Hedef kullanıcının Firestore `users/{uid}` dokümanındaki `fcmTokens` dizisini çeker.
+ */
+async function getTargetUserFcmTokens(projectId, targetUid, accessToken) {
+  const url = `https://firestore.googleapis.com/v1/projects/${projectId}/databases/(default)/documents/users/${encodeURIComponent(targetUid)}`;
+  const res = await fetch(url, {
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+    },
+  });
+
+  if (!res.ok) {
+    if (res.status === 404) return [];
+    const text = await res.text();
+    console.warn(`[Push FCM] Firestore kullanıcı okuma hatası (${res.status}):`, text);
+    return [];
+  }
+
+  const docData = await res.json();
+  const rawValues = docData.fields?.fcmTokens?.arrayValue?.values || [];
+  return rawValues.map((v) => v.stringValue).filter(Boolean);
+}
+
+/**
+ * FCM HTTP v1 REST API üzerinden tek bir cihaza bildirim gönderir.
+ */
+async function sendFcmMessage(projectId, token, payload, accessToken) {
+  const url = `https://fcm.googleapis.com/v1/projects/${projectId}/messages:send`;
+  const messageBody = {
+    message: {
+      token,
+      notification: {
+        title: payload.title,
+        body: payload.body,
+      },
+      data: payload.data || {},
+      webpush: {
+        headers: {
+          Urgency: 'high',
+        },
+        notification: {
+          title: payload.title,
+          body: payload.body,
+          icon: '/favicon.svg',
+          badge: '/favicon.svg',
+          tag: payload.tag || 'j-planning-notification',
+        },
+      },
+    },
+  };
+
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(messageBody),
+  });
+
+  if (!res.ok) {
+    const errText = await res.text();
+    console.warn(`[Push FCM] Mesaj gönderme uyarısı (${res.status}):`, errText);
+    return { success: false, status: res.status, error: errText };
+  }
+
+  return { success: true };
+}
+
+/**
+ * Katı sunucu tarafı bildirim şablonları (İstemci serbest metin manipülasyonu yapamaz)
+ */
+const NOTIFICATION_TEMPLATES = {
+  FRIEND_REQUEST: (senderName) => ({
+    title: 'J-Planning 🔔',
+    body: `${senderName || 'Bir kullanıcı'} sana arkadaşlık isteği gönderdi.`,
+    tag: 'friend-request',
+  }),
+  TASK_ASSIGNED: (senderName, taskTitle) => ({
+    title: 'J-Planning 🔔',
+    body: `${senderName || 'Arkadaşın'} sana yeni bir görev atadı: "${taskTitle || 'Yeni Görev'}"`,
+    tag: 'task-assigned',
+  }),
+  TASK_COMPLETED: (senderName, taskTitle) => ({
+    title: 'J-Planning 🔔',
+    body: `${senderName || 'Arkadaşın'}, attığın "${taskTitle || 'görev'}" görevini tamamladı! 🎉`,
+    tag: 'task-completed',
+  }),
+  TASK_DELETED: (senderName, taskTitle) => ({
+    title: 'J-Planning 🔔',
+    body: `${senderName || 'Arkadaşın'}, attığın "${taskTitle || 'görev'}" görevini sildi.`,
+    tag: 'task-deleted',
+  }),
+};
+
+// Bellek içi yedek rate limiter
+const pushMemoryRateLimits = new Map();
+
+/**
+ * Kullanıcı başına dakikada en fazla maxPerMinute kadar bildirim izni verir.
+ */
+async function checkPushRateLimit(env, senderUid, maxPerMinute = 15) {
+  const currentMinute = Math.floor(Date.now() / 60000);
+  const key = `ratelimit:push:${senderUid}:${currentMinute}`;
+
+  if (env.RATE_LIMIT_KV) {
+    try {
+      const current = await env.RATE_LIMIT_KV.get(key);
+      const count = current ? parseInt(current, 10) : 0;
+      if (count >= maxPerMinute) {
+        return false;
+      }
+      await env.RATE_LIMIT_KV.put(key, String(count + 1), { expirationTtl: 120 });
+      return true;
+    } catch (e) {
+      console.warn('[Push RateLimit KV Warning]:', e.message);
+    }
+  }
+
+  const count = pushMemoryRateLimits.get(key) || 0;
+  if (count >= maxPerMinute) {
+    return false;
+  }
+  pushMemoryRateLimits.set(key, count + 1);
+  if (pushMemoryRateLimits.size > 2000) {
+    pushMemoryRateLimits.clear();
+  }
+  return true;
 }
 
 export default {
@@ -1750,6 +1944,142 @@ export default {
             retryable: true,
           },
           503,
+          corsHeaders
+        );
+      }
+    }
+
+    // POST /push/notify (Anlık Olay Push Bildirimi Gönderme)
+    if (request.method === 'POST' && url.pathname === '/push/notify') {
+      try {
+        const authHeader = request.headers.get('Authorization');
+        const projectId = env.FIREBASE_PROJECT_ID || 'j-planning';
+
+        // 1. Firebase Token Doğrulama (Sender Uid garanti edilir)
+        const { uid: senderUid, payload: jwtPayload } = await verifyFirebaseToken(authHeader, projectId);
+
+        const body = await request.json().catch(() => ({}));
+        const { type, targetUid, params = {} } = body;
+
+        // 2. Doğrulama: Tip ve Hedef Kontrolü
+        if (!type || !NOTIFICATION_TEMPLATES[type]) {
+          return jsonResponse(
+            {
+              error: 'INVALID_TYPE',
+              message: `Geçersiz bildirim tipi. İzin verilenler: ${Object.keys(NOTIFICATION_TEMPLATES).join(', ')}`,
+            },
+            400,
+            corsHeaders
+          );
+        }
+
+        if (!targetUid || typeof targetUid !== 'string') {
+          return jsonResponse(
+            { error: 'INVALID_TARGET', message: 'Geçerli bir targetUid gereklidir.' },
+            400,
+            corsHeaders
+          );
+        }
+
+        // 3. Kendine Bildirim Gönderme Engeli
+        if (senderUid === targetUid) {
+          return jsonResponse(
+            { error: 'SELF_NOTIFICATION', message: 'Kendine bildirim gönderemezsin.' },
+            400,
+            corsHeaders
+          );
+        }
+
+        // 4. Rate Limiting (Dakikada en fazla 15 push)
+        const isAllowed = await checkPushRateLimit(env, senderUid, 15);
+        if (!isAllowed) {
+          return jsonResponse(
+            { error: 'RATE_LIMIT_EXCEEDED', message: 'Çok sık bildirim isteği gönderildi. Lütfen biraz bekle.' },
+            429,
+            corsHeaders
+          );
+        }
+
+        // 5. Firebase Service Account Kontrolü
+        if (!env.FIREBASE_SERVICE_ACCOUNT) {
+          console.error('[Push Notification] FIREBASE_SERVICE_ACCOUNT secret tanımlanmamış');
+          return jsonResponse(
+            {
+              error: 'SERVICE_UNAVAILABLE',
+              message: 'Push bildirim servisi yapılandırılmamış (FIREBASE_SERVICE_ACCOUNT eksik).',
+            },
+            503,
+            corsHeaders
+          );
+        }
+
+        // 6. Google OAuth2 Access Token Al (Önbellekten veya OAuth üzerinden)
+        const googleAccessToken = await getGoogleAccessToken(env.FIREBASE_SERVICE_ACCOUNT);
+
+        // 7. Hedef Kullanıcının FCM Token'larını Firestore'dan Çek
+        const fcmTokens = await getTargetUserFcmTokens(projectId, targetUid, googleAccessToken);
+        if (!fcmTokens || fcmTokens.length === 0) {
+          return jsonResponse(
+            {
+              success: true,
+              sentCount: 0,
+              message: 'Hedef kullanıcının kayıtlı bildirim cihazı bulunamadı.',
+            },
+            200,
+            corsHeaders
+          );
+        }
+
+        // 8. Sabit Şablondan Mesajı Oluştur (Client serbest metin enjekte edemez)
+        const senderName = (params.senderName || jwtPayload.name || 'Arkadaşın').trim().slice(0, 100);
+        const taskTitle = (params.taskTitle || '').trim().slice(0, 200);
+
+        const template = NOTIFICATION_TEMPLATES[type](senderName, taskTitle);
+        const notificationPayload = {
+          title: template.title,
+          body: template.body,
+          tag: template.tag,
+          data: {
+            type,
+            senderUid,
+            targetUid,
+            click_action: '/',
+          },
+        };
+
+        // 9. Tüm Kayıtlı Cihazlara Push Gönder
+        let successCount = 0;
+        await Promise.all(
+          fcmTokens.map(async (token) => {
+            const sendRes = await sendFcmMessage(projectId, token, notificationPayload, googleAccessToken);
+            if (sendRes.success) successCount++;
+          })
+        );
+
+        return jsonResponse(
+          {
+            success: true,
+            sentCount: successCount,
+            totalDevices: fcmTokens.length,
+          },
+          200,
+          corsHeaders
+        );
+      } catch (err) {
+        console.error('[Worker /push/notify Error]:', err);
+        const isAuth =
+          err.name?.startsWith('JWT') ||
+          err.name?.startsWith('JWS') ||
+          err.message?.includes('Authorization') ||
+          err.message?.includes('Token');
+
+        if (isAuth) {
+          return jsonResponse({ error: 'UNAUTHORIZED', message: 'Oturum doğrulanamadı.' }, 401, corsHeaders);
+        }
+
+        return jsonResponse(
+          { error: 'INTERNAL_ERROR', message: 'Bildirim gönderilemedi.', detail: err.message },
+          500,
           corsHeaders
         );
       }

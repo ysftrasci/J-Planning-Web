@@ -52,7 +52,7 @@ export default function AdminUserDetailModal({ userMeta, onClose, onUserStatusCh
     try {
       const activeUser = auth.currentUser;
       const idToken = typeof activeUser?.getIdToken === 'function' ? await activeUser.getIdToken() : null;
-      if (!idToken) throw new Error('Oturum tokenı alınamadı.');
+      if (!idToken) throw new Error("Oturum token'ı alınamadı.");
 
       const [res, userDoc] = await Promise.all([
         fetch(`${workerUrl}/admin/users/${encodeURIComponent(userMeta.uid)}/detail`, {
@@ -109,7 +109,7 @@ export default function AdminUserDetailModal({ userMeta, onClose, onUserStatusCh
     try {
       const activeUser = auth.currentUser;
       const idToken = typeof activeUser?.getIdToken === 'function' ? await activeUser.getIdToken() : null;
-      if (!idToken) throw new Error('Oturum tokenı alınamadı.');
+      if (!idToken) throw new Error("Oturum token'ı alınamadı.");
 
       const res = await fetch(`${workerUrl}/admin/users/${encodeURIComponent(userMeta.uid)}/status`, {
         method: 'PATCH',
@@ -176,7 +176,7 @@ export default function AdminUserDetailModal({ userMeta, onClose, onUserStatusCh
     try {
       const activeUser = auth.currentUser;
       const idToken = typeof activeUser?.getIdToken === 'function' ? await activeUser.getIdToken() : null;
-      if (!idToken) throw new Error('Oturum tokenı alınamadı.');
+      if (!idToken) throw new Error("Oturum token'ı alınamadı.");
 
       const res = await fetch(
         `${workerUrl}/admin/users/${encodeURIComponent(userMeta.uid)}/tasks/${encodeURIComponent(editingTask.id)}`,
@@ -228,7 +228,7 @@ export default function AdminUserDetailModal({ userMeta, onClose, onUserStatusCh
     try {
       const activeUser = auth.currentUser;
       const idToken = typeof activeUser?.getIdToken === 'function' ? await activeUser.getIdToken() : null;
-      if (!idToken) throw new Error('Oturum tokenı alınamadı.');
+      if (!idToken) throw new Error("Oturum token'ı alınamadı.");
 
       const res = await fetch(
         `${workerUrl}/admin/users/${encodeURIComponent(userMeta.uid)}/tasks/${encodeURIComponent(task.id)}`,
@@ -304,7 +304,7 @@ export default function AdminUserDetailModal({ userMeta, onClose, onUserStatusCh
 
       const activeUser = auth.currentUser;
       const idToken = typeof activeUser?.getIdToken === 'function' ? await activeUser.getIdToken() : null;
-      if (!idToken) throw new Error('Oturum tokenı alınamadı.');
+      if (!idToken) throw new Error("Oturum token'ı alınamadı.");
 
       // 2. Worker Audit Log Kaydı
       const res = await fetch(`${workerUrl}/admin/users/${encodeURIComponent(userMeta.uid)}/code`, {
@@ -389,7 +389,7 @@ export default function AdminUserDetailModal({ userMeta, onClose, onUserStatusCh
     try {
       const activeUser = auth.currentUser;
       const idToken = typeof activeUser?.getIdToken === 'function' ? await activeUser.getIdToken() : null;
-      if (!idToken) throw new Error('Oturum tokenı alınamadı.');
+      if (!idToken) throw new Error("Oturum token'ı alınamadı.");
 
       const res = await fetch(`${workerUrl}/admin/users/${encodeURIComponent(userMeta.uid)}/wallet`, {
         method: 'PATCH',
@@ -426,7 +426,7 @@ export default function AdminUserDetailModal({ userMeta, onClose, onUserStatusCh
     try {
       const activeUser = auth.currentUser;
       const idToken = typeof activeUser?.getIdToken === 'function' ? await activeUser.getIdToken() : null;
-      if (!idToken) throw new Error('Oturum tokenı alınamadı.');
+      if (!idToken) throw new Error("Oturum token'ı alınamadı.");
 
       const res = await fetch(
         `${workerUrl}/admin/users/${encodeURIComponent(userMeta.uid)}/rewards/${encodeURIComponent(editingReward.id)}`,

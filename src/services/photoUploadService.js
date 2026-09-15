@@ -17,13 +17,13 @@ export function validatePhotoFile(file) {
     if (file.size > MAX_FILE_SIZE_BYTES) {
       return {
         valid: false,
-        error: 'Fotoğraf boyutu çok büyük (Maksimum 10MB yükleyebilirsiniz).',
+        error: 'Fotoğraf boyutu çok büyük (Maksimum 10MB yükleyebilirsin).',
       };
     }
     if (file.type && !file.type.startsWith('image/')) {
       return {
         valid: false,
-        error: 'Lütfen geçerli bir resim dosyası seçin (JPG, PNG, WebP vb.).',
+        error: 'Lütfen geçerli bir resim dosyası seç (JPG, PNG, WebP vb.).',
       };
     }
   }
