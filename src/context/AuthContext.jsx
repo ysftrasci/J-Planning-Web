@@ -3,7 +3,13 @@ import { onAuthStateChanged, signOut as firebaseSignOut } from 'firebase/auth';
 import { doc, onSnapshot } from 'firebase/firestore';
 import { auth, db } from '../services/firebase';
 import { ensureUserProfile, getUserProfile } from '../db/userProfileRepository';
-import { initDatabase, initGuestDatabase, resetDatabaseSession, isDatabaseReady } from '../db/database';
+import {
+  initDatabase,
+  initGuestDatabase,
+  resetDatabaseSession,
+  isDatabaseReady,
+  requestWorkerSession,
+} from '../db/database';
 import { updateTaskFromAssignment, syncReceivedTasksWithFirestore } from '../db/taskRepository';
 import { listenAcceptedTasksAssignedToMe } from '../services/taskAssignmentService';
 import { unregisterFCMPushToken } from '../services/notificationService';
@@ -261,21 +267,19 @@ export function AuthProvider({ children }) {
       if (!auth.currentUser) return; // Misafir modunda anında döner
       if (!auth.currentUser.emailVerified) return; // E-posta doğrulanmamışsa oturum kontrolü yapma
       try {
-        const idToken = await auth.currentUser.getIdToken(false);
-        const res = await fetch(`${WORKER_URL}/session`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${idToken}`,
-          },
-        });
-        if (res.status === 403) {
-          const errData = await res.json().catch(() => ({}));
-          if (errData.error === 'ACCOUNT_DISABLED') {
-            alert('Hesabınız yönetici tarafından askıya alınmıştır. Lütfen destek ekibi ile iletişime geçin.');
-            signOut();
+        // sessionStorage içinde geçerli (en az 5 dk kalan) bir oturum token'ı varsa Worker'a tekrar gitme
+        const cachedStr = sessionStorage.getItem(`jplanning_session_${auth.currentUser.uid}`);
+        if (cachedStr) {
+          const cached = JSON.parse(cachedStr);
+          const nowSec = Math.floor(Date.now() / 1000);
+          if (cached.token && cached.expiresAt && cached.expiresAt > nowSec + 300) {
+            return;
           }
         }
+
+        // Token süresi dolmak üzereyse veya önbellekte yoksa oturumu güvenli şekilde doğrula
+        // (database.js içindeki inFlightSessionPromise deduplication sayesinde paralel çağrılar tek istekte birleşir)
+        await requestWorkerSession();
       } catch (_) { }
     };
     window.addEventListener('focus', handleWindowFocus);

@@ -12,6 +12,7 @@ import {
 import { getCategories } from '../db/categoryRepository';
 import { calculateCurrentStreak } from '../utils/streak';
 import { getPeriodKey } from '../utils/period';
+import { isDatabaseReady, waitForDatabaseReady } from '../db/database';
 import { useAuth } from '../context/AuthContext.jsx';
 import {
   listenPendingTasksAssignedToMe,
@@ -64,7 +65,21 @@ export default function TasksListPage() {
   }, [user, isGuest]);
 
   const load = useCallback(async () => {
+    // Veritabanı henüz başlatılma aşamasındaysa kullanıcıya hata fırlatmak yerine hazır olmasını bekle
+    if (!isDatabaseReady()) {
+      setLoading(true);
+      try {
+        await waitForDatabaseReady(8000);
+      } catch (_) {
+        if (!isDatabaseReady()) {
+          setLoading(false);
+          return;
+        }
+      }
+    }
+
     try {
+      setLoading(true);
       await processExpiredPeriods();
 
       const [tasks, categories, allRecords] = await Promise.all([
@@ -116,6 +131,10 @@ export default function TasksListPage() {
 
       setSections(Array.from(grouped.entries()).map(([title, data]) => ({ title, data })));
     } catch (err) {
+      if (err.message?.includes('Veritabanı henüz başlatılmadı')) {
+        setLoading(true);
+        return;
+      }
       console.error('Görev listesi yüklenirken hata:', err);
     } finally {
       setLoading(false);
@@ -124,6 +143,16 @@ export default function TasksListPage() {
 
   useEffect(() => {
     load();
+  }, [load]);
+
+  useEffect(() => {
+    const handleDbReady = () => {
+      load();
+    };
+    window.addEventListener('jplanning:database-ready', handleDbReady);
+    return () => {
+      window.removeEventListener('jplanning:database-ready', handleDbReady);
+    };
   }, [load]);
 
   useEffect(() => {
