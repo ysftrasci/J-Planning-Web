@@ -10,7 +10,7 @@ export default function AdminPlaceholderPage() {
   const [pingStatus, setPingStatus] = useState({ loading: false, data: null, error: null });
   const [isRefreshing, setIsRefreshing] = useState(false);
 
-  const workerUrl = import.meta.env.VITE_WORKER_URL || 'https://jplanning-auth-worker.ysftrasci.workers.dev';
+  const workerUrl = (import.meta.env.VITE_WORKER_URL || '/api/worker').replace(/\/+$/, '');
 
   const testAdminPing = async () => {
     if (!user) return;

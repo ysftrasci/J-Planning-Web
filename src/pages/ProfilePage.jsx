@@ -32,11 +32,11 @@ import './ProfilePage.css';
 
 export default function ProfilePage() {
   const navigate = useNavigate();
-  const { user, signOut } = useAuth();
-  const userCode = user?.profile?.userCode || '—';
-  const displayName = user?.profile?.displayName || user?.displayName || 'Kullanıcı';
-  const photoURL = user?.profile?.photoURL || user?.photoURL;
-  const userEmail = user?.email;
+  const { user, signOut, isGuest, exitGuestSession } = useAuth();
+  const userCode = isGuest ? null : (user?.profile?.userCode || '—');
+  const displayName = isGuest ? 'Misafir Kullanıcı' : (user?.profile?.displayName || user?.displayName || 'Kullanıcı');
+  const photoURL = isGuest ? null : (user?.profile?.photoURL || user?.photoURL);
+  const userEmail = isGuest ? null : user?.email;
 
   const [theme, setTheme] = useState(getStoredTheme());
   const easterEgg = useEasterEggTrigger();
@@ -180,8 +180,9 @@ export default function ProfilePage() {
         <button
           type="button"
           className="profile-page__avatar-wrap"
-          onClick={() => navigate('/profile/edit')}
-          title="Profili Düzenle"
+          onClick={() => !isGuest && navigate('/profile/edit')}
+          title={isGuest ? 'Misafir Kullanıcı' : 'Profili Düzenle'}
+          style={isGuest ? { cursor: 'default' } : undefined}
         >
           {photoURL ? (
             <img src={photoURL} alt={displayName} className="profile-page__avatar-img" />
@@ -190,37 +191,56 @@ export default function ProfilePage() {
               <User size={36} color="var(--color-accent-dark)" />
             </div>
           )}
-          <div className="profile-page__edit-badge">
-            <Pencil size={12} color="#FFF" />
-          </div>
+          {!isGuest && (
+            <div className="profile-page__edit-badge">
+              <Pencil size={12} color="#FFF" />
+            </div>
+          )}
         </button>
 
         <h2 className="profile-page__name">{displayName}</h2>
         {userEmail && <span className="profile-page__email">{userEmail}</span>}
 
-        <div className="profile-page__id-box">
-          <span className="profile-page__id-label">Kullanıcı Kodun</span>
-          <button
-            type="button"
-            className="profile-page__id-value-button"
-            onClick={easterEgg.handleTap}
-            title="Sürpriz için dokun"
-          >
-            {userCode}
-          </button>
-          <span className="profile-page__id-hint">
-            Arkadaşların seni bu kod ile ekleyebilir
-          </span>
+        {isGuest ? (
+          <div className="profile-page__guest-box" style={{ marginTop: 'var(--space-md)', padding: 'var(--space-md)', background: 'var(--color-surface-variant, rgba(99, 102, 241, 0.08))', borderRadius: 'var(--radius-md)', border: '1px solid var(--color-border)', textAlign: 'center', width: '100%' }}>
+            <span style={{ display: 'block', fontSize: 'var(--font-caption-size)', color: 'var(--color-text-secondary)', marginBottom: 'var(--space-xs)' }}>
+              Misafir Oturumu 👤
+            </span>
+            <p style={{ margin: '0 0 var(--space-md) 0', fontSize: '0.85rem', color: 'var(--color-text-primary)' }}>
+              Verilerin sadece bu tarayıcıda saklanıyor. Tüm özelliklerin kilidini açmak ve verilerini buluta yedeklemek için hesap oluşturabilirsin.
+            </p>
+            <AppButton
+              title="Hesap Oluştur ve Verilerini Koru"
+              variant="primary"
+              onClick={() => navigate('/login?mode=register')}
+              style={{ width: '100%' }}
+            />
+          </div>
+        ) : (
+          <div className="profile-page__id-box">
+            <span className="profile-page__id-label">Kullanıcı Kodun</span>
+            <button
+              type="button"
+              className="profile-page__id-value-button"
+              onClick={easterEgg.handleTap}
+              title="Sürpriz için dokun"
+            >
+              {userCode}
+            </button>
+            <span className="profile-page__id-hint">
+              Arkadaşların seni bu kod ile ekleyebilir
+            </span>
 
-          <button
-            type="button"
-            className="profile-page__share-button"
-            onClick={handleShare}
-          >
-            {copiedSuccess ? <Check size={16} /> : <Share2 size={16} />}
-            <span>{copiedSuccess ? 'Kopyalandı!' : 'Kodumu Paylaş'}</span>
-          </button>
-        </div>
+            <button
+              type="button"
+              className="profile-page__share-button"
+              onClick={handleShare}
+            >
+              {copiedSuccess ? <Check size={16} /> : <Share2 size={16} />}
+              <span>{copiedSuccess ? 'Kopyalandı!' : 'Kodumu Paylaş'}</span>
+            </button>
+          </div>
+        )}
       </div>
 
       <div className="profile-page__menu card">
@@ -229,42 +249,50 @@ export default function ProfilePage() {
           label="Kategorileri Yönet"
           onClick={() => navigate('/categories')}
         />
-        <MenuRow
-          Icon={Bell}
-          label="Bildirim Ayarları"
-          onClick={() => navigate('/profile/notifications')}
-        />
-        <MenuRow
-          Icon={UserCheck}
-          label="Profili Düzenle"
-          onClick={() => navigate('/profile/edit')}
-        />
+        {!isGuest && (
+          <MenuRow
+            Icon={Bell}
+            label="Bildirim Ayarları"
+            onClick={() => navigate('/profile/notifications')}
+          />
+        )}
+        {!isGuest && (
+          <MenuRow
+            Icon={UserCheck}
+            label="Profili Düzenle"
+            onClick={() => navigate('/profile/edit')}
+          />
+        )}
         <MenuRow
           Icon={Database}
           label="Veri Yedekleme ve Transfer"
           onClick={() => setShowBackupInfoModal(true)}
         />
-        <MenuRow
-          Icon={Lock}
-          label="Şifre Değiştir"
-          onClick={() => setShowResetPasswordConfirm(true)}
-        />
+        {!isGuest && (
+          <MenuRow
+            Icon={Lock}
+            label="Şifre Değiştir"
+            onClick={() => setShowResetPasswordConfirm(true)}
+          />
+        )}
         <MenuRow
           Icon={theme === 'dark' ? Sun : Moon}
           label={theme === 'dark' ? 'Açık Temaya Geç ☀️' : 'Koyu Temaya Geç 🌙'}
           onClick={toggleTheme}
         />
-        <MenuRow
-          Icon={Trash2}
-          label="Hesabımı Sil"
-          onClick={() => setShowDeleteWarningModal(true)}
-          danger
-        />
+        {!isGuest && (
+          <MenuRow
+            Icon={Trash2}
+            label="Hesabımı Sil"
+            onClick={() => setShowDeleteWarningModal(true)}
+            danger
+          />
+        )}
       </div>
 
       <div className="profile-page__signout-wrap">
         <AppButton
-          title="Çıkış Yap"
+          title={isGuest ? "Misafir Oturumunu Kapat" : "Çıkış Yap"}
           variant="danger"
           onClick={() => setShowSignOutConfirm(true)}
           style={{ width: '100%' }}
@@ -383,11 +411,15 @@ export default function ProfilePage() {
         <AppModal
           open={showSignOutConfirm}
           onClose={() => setShowSignOutConfirm(false)}
-          title="Çıkış Yap"
+          title={isGuest ? "Misafir Oturumunu Kapat" : "Çıkış Yap"}
         >
           <div className="profile-page__modal-body">
             <LogOut size={36} color="var(--color-danger)" />
-            <p>Hesabından çıkış yapmak istediğine emin misin?</p>
+            <p>
+              {isGuest
+                ? "Misafir oturumunu kapatmak istediğine emin misin? Bir hesap oluşturmazsan yerel verilerine daha sonra erişemeyebilirsin."
+                : "Hesabından çıkış yapmak istediğine emin misin?"}
+            </p>
             <div className="profile-page__modal-actions">
               <AppButton
                 title="Vazgeç"
@@ -395,9 +427,17 @@ export default function ProfilePage() {
                 onClick={() => setShowSignOutConfirm(false)}
               />
               <AppButton
-                title="Çıkış Yap"
+                title={isGuest ? "Oturumu Kapat" : "Çıkış Yap"}
                 variant="danger"
-                onClick={signOut}
+                onClick={() => {
+                  setShowSignOutConfirm(false);
+                  if (isGuest) {
+                    exitGuestSession();
+                    navigate('/login');
+                  } else {
+                    signOut();
+                  }
+                }}
               />
             </div>
           </div>

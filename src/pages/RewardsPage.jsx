@@ -12,17 +12,19 @@ import { PRIORITY_JP, STREAK_BONUS_JP, STREAK_BONUS_INTERVAL } from '../utils/re
 import AppButton from '../components/AppButton.jsx';
 import AppModal from '../components/AppModal.jsx';
 import EmptyState from '../components/EmptyState.jsx';
+import GuestLimitModal from '../components/GuestLimitModal.jsx';
 import { triggerConfetti } from '../utils/confetti';
 import './RewardsPage.css';
 
 export default function RewardsPage() {
-  const { user } = useAuth();
+  const { user, isGuest } = useAuth();
   const navigate = useNavigate();
   const [balance, setBalance] = useState(0);
   const [freezeCount, setFreezeCount] = useState(0);
   const [rewards, setRewards] = useState([]);
   const [pendingRewards, setPendingRewards] = useState([]);
   const [showAddModal, setShowAddModal] = useState(false);
+  const [showLimitModal, setShowLimitModal] = useState(false);
   const [showHowToModal, setShowHowToModal] = useState(false);
   const [pendingToDecide, setPendingToDecide] = useState(null);
   const [rewardToRedeem, setRewardToRedeem] = useState(null);
@@ -49,10 +51,10 @@ export default function RewardsPage() {
   }, [load]);
 
   useEffect(() => {
-    if (!user) return;
+    if (!user || isGuest) return;
     const unsub = listenPendingRewardsAssignedToMe(user.uid, setPendingRewards);
     return unsub;
-  }, [user]);
+  }, [user, isGuest]);
 
   const handleBuyFreeze = async () => {
     try {
@@ -177,7 +179,13 @@ export default function RewardsPage() {
         <button
           type="button"
           className="rewards-page__add-button"
-          onClick={() => setShowAddModal(true)}
+          onClick={() => {
+            if (isGuest && rewards.length >= 3) {
+              setShowLimitModal(true);
+              return;
+            }
+            setShowAddModal(true);
+          }}
           aria-label="Yeni ödül hedefi ekle"
         >
           <Plus size={24} />
@@ -214,11 +222,18 @@ export default function RewardsPage() {
 
       <AddRewardModal
         open={showAddModal}
+        isGuest={isGuest}
         onClose={() => setShowAddModal(false)}
         onSaved={async () => {
           setShowAddModal(false);
           await load();
         }}
+      />
+
+      <GuestLimitModal
+        open={showLimitModal}
+        onClose={() => setShowLimitModal(false)}
+        type="reward"
       />
 
       <AppModal open={!!rewardToRedeem} onClose={() => setRewardToRedeem(null)} title="Ödülü Harca">
@@ -254,7 +269,7 @@ export default function RewardsPage() {
   );
 }
 
-function AddRewardModal({ open, onClose, onSaved }) {
+function AddRewardModal({ open, onClose, onSaved, isGuest }) {
   const { user } = useAuth();
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
@@ -265,10 +280,10 @@ function AddRewardModal({ open, onClose, onSaved }) {
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
-    if (!open || !user) return;
+    if (!open || !user || isGuest || !user.emailVerified) return;
     const unsub = listenFriends(user.uid, setFriends);
     return unsub;
-  }, [open, user]);
+  }, [open, user, isGuest]);
 
   const resetAndClose = () => {
     setTitle('');
@@ -287,7 +302,7 @@ function AddRewardModal({ open, onClose, onSaved }) {
       return;
     }
 
-    if (assignTo === 'me') {
+    if (assignTo === 'me' || isGuest) {
       try {
         setSaving(true);
         await createReward({ title: title.trim(), description: description.trim(), cost: costNum });
@@ -352,13 +367,17 @@ function AddRewardModal({ open, onClose, onSaved }) {
           disabled={saving}
         />
 
-        <span className="rewards-page__label">Kime atanacak?</span>
-        <div className="rewards-page__chip-row">
-          <Chip label="Kendime" selected={assignTo === 'me'} onClick={() => setAssignTo('me')} />
-          {friends.map((f) => (
-            <Chip key={f.friendUid} label={f.friendName} selected={assignTo === f.friendUid} onClick={() => setAssignTo(f.friendUid)} />
-          ))}
-        </div>
+        {!isGuest && (
+          <>
+            <span className="rewards-page__label">Kime atanacak?</span>
+            <div className="rewards-page__chip-row">
+              <Chip label="Kendime" selected={assignTo === 'me'} onClick={() => setAssignTo('me')} />
+              {friends.map((f) => (
+                <Chip key={f.friendUid} label={f.friendName} selected={assignTo === f.friendUid} onClick={() => setAssignTo(f.friendUid)} />
+              ))}
+            </div>
+          </>
+        )}
 
         {errorMessage && <p className="rewards-page__form-error">{errorMessage}</p>}
 

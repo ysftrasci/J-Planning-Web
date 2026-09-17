@@ -1,6 +1,7 @@
 import { NavLink, Outlet } from 'react-router-dom';
 import { CheckSquare, Gift, Users, Timer, User } from 'lucide-react';
 import PWAInstallPrompt from '../components/PWAInstallPrompt.jsx';
+import GuestBanner from '../components/GuestBanner.jsx';
 import './AppLayout.css';
 
 // J-Planning — Temel Sayfa Yönlendirme İskeleti (Web)
@@ -16,6 +17,7 @@ const TABS = [
 export default function AppLayout() {
   return (
     <div className="app-layout">
+      <GuestBanner />
       <main className="app-layout__main">
         <Outlet />
       </main>

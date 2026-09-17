@@ -9,6 +9,7 @@ import sqlWasmUrl from 'sql.js/dist/sql-wasm.wasm?url';
 import { openDB } from 'idb';
 import { doc, getDoc } from 'firebase/firestore';
 import { db as firestoreDb } from '../services/firebase';
+import { finalizeGuestMigration, rollbackGuestMigration } from './localSqliteEngine';
 
 const IDB_NAME = 'jplanning-sqlite-store';
 const IDB_VERSION = 1;
@@ -535,6 +536,7 @@ export async function migrateLegacyDataIfNeeded(uid, tursoDb) {
 
   if (!allMatched) {
     console.error('[Migration] HATA: Bazı satırlar Turso veritabanında doğrulanamadı! Migrasyon bayrağı KONULMADI.');
+    await rollbackGuestMigration().catch(() => {});
     window.dispatchEvent(
       new CustomEvent('jplanning:migration-error', {
         detail: { message: 'Verilerinizin bir kısmı aktarılırken uyuşmazlık tespit edildi.' },
@@ -548,6 +550,9 @@ export async function migrateLegacyDataIfNeeded(uid, tursoDb) {
     "INSERT INTO app_meta (key, value) VALUES ('legacy_data_migrated_v1', 'true') ON CONFLICT(key) DO UPDATE SET value = 'true'"
   );
   localStorage.setItem(localKey, 'true');
+
+  // Misafir aktarımı başarılı olduysa geçici depoyu ve yedeği temizle
+  await finalizeGuestMigration().catch(() => {});
 
   console.log('[Migration] ✅ 10/10 tablodaki TÜM satırların ID varlığı %100 doğrulandı ve migrasyon tamamlandı.');
 }

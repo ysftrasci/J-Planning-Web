@@ -7,5 +7,12 @@ export default defineConfig({
   server: {
     host: true, // Yerel ağdaki tüm cihazların (telefon, tablet vb.) erişimine izin verir
     port: 5173,
+    proxy: {
+      '/api/worker': {
+        target: 'https://jplanning-auth-worker.ysftrasci.workers.dev',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/api\/worker/, ''),
+      },
+    },
   },
 })

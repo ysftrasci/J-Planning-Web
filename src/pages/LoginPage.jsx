@@ -1,23 +1,38 @@
 // J-Planning — Giriş / Kayıt Sayfası (Web)
-// Mobildeki src/screens/LoginScreen.js dosyasının web karşılığı.
-// View/TextInput/Alert/Pressable yerine div/input/window.alert/button
-// kullanılıyor; giriş-kayıt mantığı (mode toggle, şifre sıfırlama) aynen
-// korunuyor. Başarılı girişte AuthContext otomatik yakalayıp yönlendirecek.
-import { useState } from 'react';
+// Misafir Modu desteği: "Misafir olarak devam et" butonu ve onay adımı içerir.
+// Misafirken kayıt olma durumunda yerel IndexedDB verisini yeni hesaba köprüler.
+
+import { useState, useEffect } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import AppButton from '../components/AppButton.jsx';
 import { registerWithEmail, loginWithEmail, sendResetPasswordEmail } from '../services/emailAuth';
 import { getUserProfile } from '../db/userProfileRepository';
 import AccountDeletionPendingModal from '../components/AccountDeletionPendingModal';
+import GuestConfirmationModal from '../components/GuestConfirmationModal.jsx';
+import { bridgeGuestDataToNewUser } from '../db/localSqliteEngine';
 import { useAuth } from '../context/AuthContext.jsx';
 import './LoginPage.css';
 
 export default function LoginPage() {
-  const { signOut } = useAuth();
-  const [mode, setMode] = useState('login'); // 'login' | 'register'
+  const { signOut, startGuestSession, isGuest } = useAuth();
+  const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+
+  const initialMode = searchParams.get('mode') === 'register' ? 'register' : 'login';
+  const [mode, setMode] = useState(initialMode); // 'login' | 'register'
+
+  useEffect(() => {
+    const qMode = searchParams.get('mode');
+    if (qMode === 'register' || qMode === 'login') {
+      setMode(qMode);
+    }
+  }, [searchParams]);
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
+  const [guestLoading, setGuestLoading] = useState(false);
+  const [showGuestConfirmModal, setShowGuestConfirmModal] = useState(false);
   const [resetLoading, setResetLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
   const [pendingUid, setPendingUid] = useState(null);
@@ -37,9 +52,7 @@ export default function LoginPage() {
     setErrorMessage('');
     try {
       await sendResetPasswordEmail(email);
-      window.alert(
-        'Şifre sıfırlama linki gönderildi! 📧\n\nE-posta birkaç dakika içinde gelen kutuna düşmezse, Spam (Gereksiz) veya Tanıtımlar klasörünü kontrol etmeyi unutma.'
-      );
+      window.alert('Gönderildi: E-postana bir şifre sıfırlama linki gönderdik. Gelen kutunu (ve spam klasörünü) kontrol et.');
     } catch (e) {
       setErrorMessage(e.message);
     } finally {
@@ -63,13 +76,21 @@ export default function LoginPage() {
     setLoading(true);
     try {
       if (mode === 'register') {
-        await registerWithEmail(name, email, password);
+        const userObj = await registerWithEmail(name, email, password);
+        const newUid = userObj?.uid || userObj?.user?.uid;
+        // Misafirken kayıt oluyorsa yerel IndexedDB verisini yeni hesaba köprüle
+        if (newUid) {
+          await bridgeGuestDataToNewUser(newUid).catch((bridgeErr) => {
+            console.warn('[Migration Bridge] Misafir verisi köprüleme uyarısı:', bridgeErr);
+          });
+        }
       } else {
-        const cred = await loginWithEmail(email, password);
-        if (cred?.user) {
-          const profile = await getUserProfile(cred.user.uid);
+        const userObj = await loginWithEmail(email, password);
+        const uid = userObj?.uid || userObj?.user?.uid;
+        if (uid) {
+          const profile = await getUserProfile(uid);
           if (profile?.isDeleting === true) {
-            setPendingUid(cred.user.uid);
+            setPendingUid(uid);
             setShowPendingModal(true);
             setLoading(false);
             return;
@@ -81,6 +102,20 @@ export default function LoginPage() {
       setErrorMessage(e.message);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleGuestConfirm = async () => {
+    setGuestLoading(true);
+    setErrorMessage('');
+    try {
+      await startGuestSession();
+      setShowGuestConfirmModal(false);
+      navigate('/');
+    } catch (err) {
+      setErrorMessage(err.message || 'Misafir oturumu başlatılamadı.');
+    } finally {
+      setGuestLoading(false);
     }
   };
 
@@ -129,14 +164,31 @@ export default function LoginPage() {
             type="submit"
             title={mode === 'register' ? 'Kayıt Ol' : 'Giriş Yap'}
             loading={loading}
+            disabled={guestLoading}
           />
+
+          {mode === 'login' && !isGuest && (
+            <>
+              <div className="login-divider">
+                <span>veya</span>
+              </div>
+              <button
+                type="button"
+                className="login-guest-btn"
+                onClick={() => setShowGuestConfirmModal(true)}
+                disabled={loading || guestLoading}
+              >
+                {guestLoading ? 'Başlatılıyor...' : '👤 Misafir Olarak Devam Et'}
+              </button>
+            </>
+          )}
 
           {mode === 'login' && (
             <button
               type="button"
               className="login-link"
               onClick={handleForgotPassword}
-              disabled={resetLoading}
+              disabled={resetLoading || guestLoading}
             >
               Şifremi Unuttum
             </button>
@@ -149,11 +201,32 @@ export default function LoginPage() {
               setErrorMessage('');
               setMode(mode === 'register' ? 'login' : 'register');
             }}
+            disabled={guestLoading}
           >
             {mode === 'register' ? 'Zaten hesabın var mı? Giriş yap' : 'Hesabın yok mu? Kayıt ol'}
           </button>
+
+          {isGuest && (
+            <button
+              type="button"
+              className="login-link"
+              style={{ marginTop: '8px', opacity: 0.8 }}
+              onClick={() => navigate('/')}
+            >
+              ← Misafir moduna geri dön
+            </button>
+          )}
         </div>
       </form>
+
+      {showGuestConfirmModal && (
+        <GuestConfirmationModal
+          open={showGuestConfirmModal}
+          onClose={() => setShowGuestConfirmModal(false)}
+          onConfirm={handleGuestConfirm}
+          loading={guestLoading}
+        />
+      )}
 
       {showPendingModal && (
         <AccountDeletionPendingModal
@@ -162,7 +235,7 @@ export default function LoginPage() {
           onSuccess={() => {
             setShowPendingModal(false);
             setPendingUid(null);
-            window.alert('Hesabın kalıcı olarak silindi.');
+            window.alert('Hesabınız kalıcı olarak silindi.');
           }}
           onSignOut={async () => {
             await signOut();

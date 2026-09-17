@@ -27,11 +27,13 @@ import EmptyState from '../components/EmptyState.jsx';
 import AssignedTaskModal from '../components/AssignedTaskModal.jsx';
 import AppModal from '../components/AppModal.jsx';
 import AppButton from '../components/AppButton.jsx';
+import GuestRestrictedModal from '../components/GuestRestrictedModal.jsx';
+import GuestLimitModal from '../components/GuestLimitModal.jsx';
 import { triggerConfetti } from '../utils/confetti';
 import './TasksListPage.css';
 
 export default function TasksListPage() {
-  const { user } = useAuth();
+  const { user, isGuest } = useAuth();
   const navigate = useNavigate();
 
   const [sections, setSections] = useState([]);
@@ -41,6 +43,8 @@ export default function TasksListPage() {
   const [deletionNotices, setDeletionNotices] = useState([]);
   const [modalTask, setModalTask] = useState(null);
   const [friendNameByUid, setFriendNameByUid] = useState({});
+  const [showRestrictedModal, setShowRestrictedModal] = useState(false);
+  const [showLimitModal, setShowLimitModal] = useState(false);
 
   // Arama ve Filtreleme State'leri
   const [searchQuery, setSearchQuery] = useState('');
@@ -50,14 +54,14 @@ export default function TasksListPage() {
   const [sourceFilter, setSourceFilter] = useState('ALL');
 
   useEffect(() => {
-    if (!user) return;
+    if (!user || isGuest || !user.emailVerified) return;
     const unsub = listenFriends(user.uid, (friends) => {
       const map = {};
       friends.forEach((f) => { map[f.friendUid] = f.friendName; });
       setFriendNameByUid(map);
     });
     return unsub;
-  }, [user]);
+  }, [user, isGuest]);
 
   const load = useCallback(async () => {
     try {
@@ -133,20 +137,20 @@ export default function TasksListPage() {
   }, [load]);
 
   useEffect(() => {
-    if (!user) return;
+    if (!user || isGuest || !user.emailVerified) return;
     const unsub = listenPendingTasksAssignedToMe(user.uid, (tasks) => {
       setPendingAssigned(tasks || []);
     });
     return unsub;
-  }, [user]);
+  }, [user, isGuest]);
 
   useEffect(() => {
-    if (!user) return;
+    if (!user || isGuest || !user.emailVerified) return;
     const unsub = listenTaskDeletionNotices(user.uid, (notices) => {
       setDeletionNotices(notices || []);
     });
     return unsub;
-  }, [user]);
+  }, [user, isGuest]);
 
   const showToast = (msg) => {
     setToast(msg);
@@ -323,7 +327,13 @@ export default function TasksListPage() {
           <button
             type="button"
             className="tasks-list-page__icon-button"
-            onClick={() => navigate('/assigned-by-me')}
+            onClick={() => {
+              if (isGuest) {
+                setShowRestrictedModal(true);
+              } else {
+                navigate('/assigned-by-me');
+              }
+            }}
             title="Atadığım Görevler"
           >
             <Send size={18} />
@@ -331,7 +341,14 @@ export default function TasksListPage() {
           <button
             type="button"
             className="tasks-list-page__add-button"
-            onClick={() => navigate('/tasks/new')}
+            onClick={() => {
+              const totalCount = sections.reduce((acc, s) => acc + s.data.length, 0);
+              if (isGuest && totalCount >= 10) {
+                setShowLimitModal(true);
+              } else {
+                navigate('/tasks/new');
+              }
+            }}
             title="Yeni Görev Ekle"
           >
             <Plus size={22} />
@@ -589,6 +606,19 @@ export default function TasksListPage() {
           </div>
         </AppModal>
       )}
+
+      <GuestRestrictedModal
+        open={showRestrictedModal}
+        onClose={() => setShowRestrictedModal(false)}
+        title="Atadığım Görevler Kayıtlı Kullanıcılara Özeldir"
+        description="Arkadaşlarına görev atamak ve onların ilerlemesini takip etmek için ücretsiz bir hesap oluşturabilirsin."
+      />
+
+      <GuestLimitModal
+        open={showLimitModal}
+        onClose={() => setShowLimitModal(false)}
+        type="task"
+      />
     </div>
   );
 }

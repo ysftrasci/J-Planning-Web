@@ -3,21 +3,87 @@ import { onAuthStateChanged, signOut as firebaseSignOut } from 'firebase/auth';
 import { doc, onSnapshot } from 'firebase/firestore';
 import { auth, db } from '../services/firebase';
 import { ensureUserProfile, getUserProfile } from '../db/userProfileRepository';
-import { initDatabase, resetDatabaseSession } from '../db/database';
+import { initDatabase, initGuestDatabase, resetDatabaseSession, isDatabaseReady } from '../db/database';
 import { updateTaskFromAssignment, syncReceivedTasksWithFirestore } from '../db/taskRepository';
 import { listenAcceptedTasksAssignedToMe } from '../services/taskAssignmentService';
 import { unregisterFCMPushToken } from '../services/notificationService';
+import { bridgeGuestDataToNewUser } from '../db/localSqliteEngine';
 
 const AuthContext = createContext(null);
-const WORKER_URL = (import.meta.env.VITE_WORKER_URL || 'https://jplanning-auth-worker.ysftrasci.workers.dev').replace(/\/+$/, '');
+const WORKER_URL = (import.meta.env.VITE_WORKER_URL || '/api/worker').replace(/\/+$/, '');
+
+function createGuestUserObject() {
+  return {
+    uid: 'guest',
+    displayName: 'Misafir Kullanıcı',
+    isGuest: true,
+    email: null,
+    emailVerified: true,
+    profile: {
+      displayName: 'Misafir Kullanıcı',
+      userCode: 'GUEST',
+      photoURL: null,
+      isGuest: true,
+    },
+  };
+}
 
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
   const [isAdmin, setIsAdmin] = useState(false);
+  const [isGuest, setIsGuest] = useState(() => {
+    if (typeof localStorage === 'undefined') return false;
+    return localStorage.getItem('jplanning_guest_mode') === 'true';
+  });
   const [initializing, setInitializing] = useState(true);
   const [dbError, setDbError] = useState(null);
 
+  /**
+   * Misafir oturumunu başlatır (Yerel sql.js motoru, 0 ağ isteği).
+   */
+  const startGuestSession = useCallback(async () => {
+    try {
+      if (typeof localStorage !== 'undefined') {
+        localStorage.setItem('jplanning_guest_mode', 'true');
+      }
+      setIsGuest(true);
+      setIsAdmin(false);
+      setDbError(null);
+
+      await initGuestDatabase();
+      const guestUser = createGuestUserObject();
+      setUser(guestUser);
+      return guestUser;
+    } catch (err) {
+      console.error('[AuthContext] Misafir oturumu başlatılamadı:', err);
+      setDbError('Misafir modu başlatılamadı.');
+      throw err;
+    }
+  }, []);
+
+  /**
+   * Misafir oturumunu kapatır ve yerel oturumu temizler.
+   */
+  const exitGuestSession = useCallback(() => {
+    if (typeof localStorage !== 'undefined') {
+      localStorage.removeItem('jplanning_guest_mode');
+    }
+    setIsGuest(false);
+    resetDatabaseSession();
+    setUser(null);
+    setIsAdmin(false);
+    setDbError(null);
+  }, []);
+
+  /**
+   * Kayıtlı Firebase kullanıcısı için normal çıkış akışı.
+   */
   const signOut = useCallback(async () => {
+    if (isGuest) {
+      exitGuestSession();
+      return;
+    }
+
     const currentUid = auth.currentUser?.uid;
     if (currentUid) {
       try {
@@ -31,13 +97,14 @@ export function AuthProvider({ children }) {
     setUser(null);
     setDbError(null);
     await firebaseSignOut(auth);
-  }, []);
+  }, [isGuest, exitGuestSession]);
 
   useEffect(() => {
     let assignedTasksUnsub = null;
     let userStatusUnsub = null;
 
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
+      // Her Auth durum değişiminde (misafir -> gerçek veya gerçek -> misafir) eski dinleyicileri iptal et
       if (assignedTasksUnsub) {
         assignedTasksUnsub();
         assignedTasksUnsub = null;
@@ -48,6 +115,28 @@ export function AuthProvider({ children }) {
       }
 
       if (firebaseUser) {
+        // ----------------------------------------------------
+        // DURUM A: Gerçek Kayıtlı Firebase Kullanıcısı
+        // ----------------------------------------------------
+        const wasGuest = typeof localStorage !== 'undefined' && localStorage.getItem('jplanning_guest_mode') === 'true';
+        if (wasGuest) {
+          await bridgeGuestDataToNewUser(firebaseUser.uid).catch((err) => {
+            console.warn('[AuthContext] Misafir verisi köprüleme uyarısı:', err);
+          });
+        }
+        if (typeof localStorage !== 'undefined') {
+          localStorage.removeItem('jplanning_guest_mode');
+        }
+        setIsGuest(false);
+        setUser(firebaseUser); // Stale guestUser nesnesinin 1 saniye bile kalmasını engelle
+
+        // E-posta henüz doğrulanmamışsa Turso veritabanı oturumu istenmez,
+        // kullanıcı doğrudan /verify-email ekranına kilitlenir.
+        if (!firebaseUser.emailVerified) {
+          setIsAdmin(false);
+          return;
+        }
+
         try {
           setDbError(null);
 
@@ -65,7 +154,7 @@ export function AuthProvider({ children }) {
 
           // Token'da henüz isim yoksa ama profil veya auth nesnesinde isim varsa, taze token al
           if (!tokenResult?.claims?.name && (firebaseUser.displayName || profile?.displayName)) {
-            await firebaseUser.getIdToken(true).catch(() => {});
+            await firebaseUser.getIdToken(true).catch(() => { });
           }
 
           // 2. Turso veritabanını başlat
@@ -73,7 +162,7 @@ export function AuthProvider({ children }) {
 
           setIsAdmin(Boolean(tokenResult?.claims?.admin));
 
-          // 2. GERÇEK ZAMANLI ASKIYA ALMA DİNLEYİCİSİ (Firestore users/{uid})
+          // 3. GERÇEK ZAMANLI ASKIYA ALMA DİNLEYİCİSİ (Firestore users/{uid})
           try {
             userStatusUnsub = onSnapshot(
               doc(db, 'users', firebaseUser.uid),
@@ -81,7 +170,7 @@ export function AuthProvider({ children }) {
                 const data = snap.data();
                 if (data?.isDisabled === true || data?.status === 'DISABLED') {
                   console.warn('[AuthContext] Kullanıcı hesabı askıya alındı, oturum kapatılıyor...');
-                  alert('Hesabın yönetici tarafından askıya alınmıştır. Lütfen destek ekibi ile iletişime geç.');
+                  alert('Hesabınız yönetici tarafından askıya alınmıştır. Lütfen destek ekibi ile iletişime geçin.');
                   signOut();
                 }
               },
@@ -93,30 +182,32 @@ export function AuthProvider({ children }) {
             console.warn('Kullanıcı durum dinleyicisi başlatılamadı:', statusListenErr);
           }
 
-          // 3. SOSYAL ÖZELLİK: Arkadaş Görev Atama Dinleyicisi
-          try {
-            assignedTasksUnsub = listenAcceptedTasksAssignedToMe(firebaseUser.uid, async (tasks) => {
-              if (Array.isArray(tasks)) {
-                await syncReceivedTasksWithFirestore(tasks);
-                for (const t of tasks) {
-                  await updateTaskFromAssignment(t);
+          // 4. SOSYAL ÖZELLİK: Arkadaş Görev Atama Dinleyicisi (Sadece e-posta doğrulanmışsa başlatılır)
+          if (firebaseUser.emailVerified) {
+            try {
+              assignedTasksUnsub = listenAcceptedTasksAssignedToMe(firebaseUser.uid, async (tasks) => {
+                if (Array.isArray(tasks)) {
+                  await syncReceivedTasksWithFirestore(tasks);
+                  for (const t of tasks) {
+                    await updateTaskFromAssignment(t);
+                  }
+                  window.dispatchEvent(new Event('jplanning:cloud-sync-update'));
                 }
-                window.dispatchEvent(new Event('jplanning:cloud-sync-update'));
-              }
-            });
-          } catch (assignedErr) {
-            console.warn('Atanan görevler dinleyicisi başlatılamadı:', assignedErr);
+              });
+            } catch (assignedErr) {
+              console.warn('Atanan görevler dinleyicisi başlatılamadı:', assignedErr);
+            }
           }
 
           // Prototype zincirini koruyarak profile alanını bağla
           try {
             firebaseUser.profile = profile;
-          } catch (_) {}
+          } catch (_) { }
           setUser(firebaseUser);
         } catch (error) {
           console.error('Giriş sonrası veritabanı hazırlığı başarısız:', error);
           if (error.message?.includes('askıya') || error.message?.includes('ACCOUNT_DISABLED')) {
-            alert('Hesabın yönetici tarafından askıya alınmıştır. Lütfen destek ekibi ile iletişime geç.');
+            alert('Hesabınız yönetici tarafından askıya alınmıştır. Lütfen destek ekibi ile iletişime geçin.');
             signOut();
             return;
           }
@@ -125,25 +216,50 @@ export function AuthProvider({ children }) {
           setIsAdmin(false);
         }
       } else {
-        resetDatabaseSession();
-        setUser(null);
-        setIsAdmin(false);
-        setDbError(null);
+        // ----------------------------------------------------
+        // DURUM B veya C: firebaseUser yok
+        // ----------------------------------------------------
+        const isGuestSaved = typeof localStorage !== 'undefined' && localStorage.getItem('jplanning_guest_mode') === 'true';
+
+        if (isGuestSaved) {
+          // DURUM B: Misafir Oturumu Aktif
+          try {
+            setIsGuest(true);
+            setIsAdmin(false);
+            setDbError(null);
+
+            await initGuestDatabase();
+            const guestUser = createGuestUserObject();
+            setUser(guestUser);
+          } catch (guestInitErr) {
+            console.error('[AuthContext] Misafir veritabanı açılış hatası:', guestInitErr);
+            setDbError('Misafir veritabanı açılamadı.');
+            setUser(null);
+          }
+        } else {
+          // DURUM C: Oturum Yok (Giriş Yapılmamış)
+          setIsGuest(false);
+          resetDatabaseSession();
+          setUser(null);
+          setIsAdmin(false);
+          setDbError(null);
+        }
       }
       setInitializing(false);
     });
 
-    // 4. Force-Logout Olay Dinleyicisi (database.js 403 yakaladığında)
+    // Force-Logout Olay Dinleyicisi (database.js 403 yakaladığında)
     const handleForceLogout = (e) => {
-      const msg = e.detail?.message || 'Hesabın yönetici tarafından askıya alınmıştır.';
+      const msg = e.detail?.message || 'Hesabınız yönetici tarafından askıya alınmıştır.';
       alert(msg);
       signOut();
     };
     window.addEventListener('jplanning:force-logout', handleForceLogout);
 
-    // 5. Pencere Odağı (Window Focus) Denetimi
+    // Pencere Odağı (Window Focus) Denetimi — Misafirde auth.currentUser null olduğu için çalışmaz!
     const handleWindowFocus = async () => {
-      if (!auth.currentUser) return;
+      if (!auth.currentUser) return; // Misafir modunda anında döner
+      if (!auth.currentUser.emailVerified) return; // E-posta doğrulanmamışsa oturum kontrolü yapma
       try {
         const idToken = await auth.currentUser.getIdToken(false);
         const res = await fetch(`${WORKER_URL}/session`, {
@@ -156,11 +272,11 @@ export function AuthProvider({ children }) {
         if (res.status === 403) {
           const errData = await res.json().catch(() => ({}));
           if (errData.error === 'ACCOUNT_DISABLED') {
-            alert('Hesabın yönetici tarafından askıya alınmıştır. Lütfen destek ekibi ile iletişime geç.');
+            alert('Hesabınız yönetici tarafından askıya alınmıştır. Lütfen destek ekibi ile iletişime geçin.');
             signOut();
           }
         }
-      } catch (_) {}
+      } catch (_) { }
     };
     window.addEventListener('focus', handleWindowFocus);
 
@@ -174,45 +290,59 @@ export function AuthProvider({ children }) {
   }, [signOut]);
 
   const refreshProfile = async () => {
-    if (!auth.currentUser) return;
-    try {
-      const profile = await getUserProfile(auth.currentUser.uid);
+    if (isGuest) return;
+    if (auth.currentUser) {
       try {
-        auth.currentUser.profile = profile;
-      } catch (_) {}
-      setUser(auth.currentUser);
-    } catch (e) {
-      console.warn('Profil yenilenemedi:', e);
+        const profile = await getUserProfile(auth.currentUser.uid);
+        try {
+          auth.currentUser.profile = profile;
+        } catch (_) { }
+        setUser(auth.currentUser);
+      } catch (err) {
+        console.warn('Profil yenilenemedi:', err);
+      }
     }
   };
 
   const refreshAuthUser = useCallback(async () => {
+    if (isGuest) return true;
     if (!auth.currentUser) return false;
     try {
       await auth.currentUser.reload();
-      const updatedUser = auth.currentUser;
-      const profile = await getUserProfile(updatedUser.uid).catch(() => null);
+      const updated = auth.currentUser;
+      const profile = await getUserProfile(updated.uid).catch(() => null);
       try {
-        updatedUser.profile = profile || user?.profile || null;
-      } catch (_) {}
-      setUser(updatedUser);
-      return Boolean(updatedUser.emailVerified);
-    } catch (err) {
-      console.warn('Kullanıcı durumu yenilenemedi:', err);
+        updated.profile = profile || user?.profile || null;
+      } catch (_) { }
+      setUser(updated);
+
+      if (updated.emailVerified && !isDatabaseReady()) {
+        await initDatabase(updated.uid).catch((err) => {
+          console.warn('[AuthContext] Doğrulama sonrası veritabanı başlatma hatası:', err);
+        });
+      }
+
+      return Boolean(updated.emailVerified);
+    } catch (e) {
+      console.warn('Kullanıcı durumu yenilenemedi:', e);
       return false;
     }
-  }, [user?.profile]);
+  }, [isGuest, user?.profile]);
 
   const refreshAdminStatus = async () => {
+    if (isGuest) {
+      setIsAdmin(false);
+      return false;
+    }
     if (!auth.currentUser) {
       setIsAdmin(false);
       return false;
     }
     try {
-      const tokenResult = await auth.currentUser.getIdTokenResult(true); // force refresh
-      const adminClaim = Boolean(tokenResult?.claims?.admin);
-      setIsAdmin(adminClaim);
-      return adminClaim;
+      const tokenResult = await auth.currentUser.getIdTokenResult(true);
+      const isAdm = Boolean(tokenResult?.claims?.admin);
+      setIsAdmin(isAdm);
+      return isAdm;
     } catch (err) {
       console.warn('Admin yetkisi yenilenemedi:', err);
       return false;
@@ -220,17 +350,23 @@ export function AuthProvider({ children }) {
   };
 
   const retryDatabaseConnection = async () => {
-    if (!auth.currentUser) return;
-    try {
+    if (isGuest) {
       setDbError(null);
-      await initDatabase(auth.currentUser.uid);
-      const profile = await getUserProfile(auth.currentUser.uid);
+      await initGuestDatabase();
+      return;
+    }
+    if (auth.currentUser) {
       try {
-        auth.currentUser.profile = profile;
-      } catch (_) {}
-      setUser(auth.currentUser);
-    } catch (err) {
-      setDbError(err.message || 'Yeniden bağlanma başarısız');
+        setDbError(null);
+        await initDatabase(auth.currentUser.uid);
+        const profile = await getUserProfile(auth.currentUser.uid);
+        try {
+          auth.currentUser.profile = profile;
+        } catch (_) { }
+        setUser(auth.currentUser);
+      } catch (err) {
+        setDbError(err.message || 'Yeniden bağlanma başarısız');
+      }
     }
   };
 
@@ -239,8 +375,11 @@ export function AuthProvider({ children }) {
       value={{
         user,
         isAdmin,
+        isGuest,
         initializing,
         dbError,
+        startGuestSession,
+        exitGuestSession,
         refreshProfile,
         refreshAuthUser,
         refreshAdminStatus,
@@ -255,8 +394,6 @@ export function AuthProvider({ children }) {
 
 export function useAuth() {
   const ctx = useContext(AuthContext);
-  if (!ctx) {
-    throw new Error('useAuth bir AuthProvider içinde kullanılmalıdır');
-  }
+  if (!ctx) throw new Error('useAuth bir AuthProvider içinde kullanılmalıdır');
   return ctx;
 }

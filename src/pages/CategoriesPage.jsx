@@ -6,14 +6,18 @@ import { getCategories, createCategory, deleteCategory } from '../db/categoryRep
 import AppButton from '../components/AppButton.jsx';
 import AppModal from '../components/AppModal.jsx';
 import EmptyState from '../components/EmptyState.jsx';
+import GuestLimitModal from '../components/GuestLimitModal.jsx';
+import { useAuth } from '../context/AuthContext.jsx';
 import './CategoriesPage.css';
 
 const COLOR_OPTIONS = ['#C98A2C', '#5B8A6B', '#C4512E', '#5B7A9C', '#8A6BA8', '#9C6B1E'];
 
 export default function CategoriesPage() {
+  const { isGuest } = useAuth();
   const [categories, setCategories] = useState([]);
   const [showAddModal, setShowAddModal] = useState(false);
   const [categoryToDelete, setCategoryToDelete] = useState(null);
+  const [showLimitModal, setShowLimitModal] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -46,7 +50,13 @@ export default function CategoriesPage() {
         <button
           type="button"
           className="categories-page__add-button"
-          onClick={() => setShowAddModal(true)}
+          onClick={() => {
+            if (isGuest && categories.length >= 3) {
+              setShowLimitModal(true);
+              return;
+            }
+            setShowAddModal(true);
+          }}
           aria-label="Yeni kategori ekle"
         >
           <Plus size={24} />
@@ -101,6 +111,12 @@ export default function CategoriesPage() {
           <AppButton title="Sil" variant="danger" onClick={confirmDelete} />
         </div>
       </AppModal>
+
+      <GuestLimitModal
+        open={showLimitModal}
+        onClose={() => setShowLimitModal(false)}
+        type="category"
+      />
     </div>
   );
 }

@@ -1,10 +1,13 @@
-// J-Planning — SQLite / Turso Veritabanı Katmanı (Web)
+// J-Planning — SQLite / Turso & Yerel Misafir Veritabanı Katmanı (Web)
 //
-// Cloudflare Worker üzerinden sağlanan scoped token ile kullanıcının
-// Turso veritabanına bağlanır. Şema kurulumu ilk açılışta Worker tarafından
-// yapıldığı için istemci sadece bağlantıyı kurar ve varsayılan kayıtları garanti eder.
+// 1. Kayıtlı Kullanıcı Modu: Cloudflare Worker üzerinden sağlanan scoped token ile
+//    kullanıcının Turso bulut veritabanına bağlanır (TursoConnection).
+// 2. Misafir (Guest) Modu: Tamamen yerel WebAssembly SQLite (sql.js) + IndexedDB
+//    üzerinde çalışır (LocalSqliteConnection). Worker ve Turso'ya hiçbir istek gitmez.
+// 3. Repository Katmanı: getDb() üzerinden aynı asenkron arayüzle konuşur; alt motoru bilmez.
 
 import { openTursoConnection } from './sqliteEngine';
+import { openGuestLocalDatabase } from './localSqliteEngine';
 import { ensureDefaultCategories } from './categoryRepository';
 import { migrateLegacyDataIfNeeded } from './migrationService';
 import { auth } from '../services/firebase';
@@ -13,10 +16,25 @@ let dbInstance = null;
 let currentUid = null;
 let currentSession = null; // { dbUrl, token, expiresAt, uid }
 
-const WORKER_URL = (import.meta.env.VITE_WORKER_URL || 'https://jplanning-auth-worker.ysftrasci.workers.dev').replace(/\/+$/, '');
+const WORKER_URL = (import.meta.env.VITE_WORKER_URL || '/api/worker').replace(/\/+$/, '');
 
+/**
+ * Misafir oturumunun aktif olup olmadığını kontrol eder.
+ */
+export function isGuestSessionActive() {
+  if (typeof localStorage === 'undefined') return false;
+  return localStorage.getItem('jplanning_guest_mode') === 'true';
+}
+
+/**
+ * Tüm repository'lerin ortak giriş noktası.
+ * Misafir modunda LocalSqliteConnection, normal modda TursoConnection döndürür.
+ */
 export function getDb() {
   if (!dbInstance) {
+    if (isGuestSessionActive()) {
+      throw new Error('Misafir veritabanı henüz başlatılmadı. Önce initGuestDatabase() çağrılmalı.');
+    }
     throw new Error('Veritabanı henüz başlatılmadı. Önce initDatabase(uid) çağrılmalı.');
   }
   return dbInstance;
@@ -24,8 +42,13 @@ export function getDb() {
 
 /**
  * Worker'dan kullanıcı için DB URL ve scoped token alır (sessionStorage ile önbelleklenir).
+ * Misafir modunda KESİNLİKLE çağrılamaz (korumalıdır).
  */
 async function requestWorkerSession(forceFreshIdToken = false) {
+  if (isGuestSessionActive()) {
+    throw new Error('[Database] Misafir modunda Worker oturumu açılamaz.');
+  }
+
   const currentUser = auth.currentUser;
   if (!currentUser) {
     throw new Error('Oturum açmış bir Firebase kullanıcısı bulunamadı.');
@@ -55,6 +78,12 @@ async function requestWorkerSession(forceFreshIdToken = false) {
   });
 
   if (!response.ok) {
+    if (response.status === 401 && !forceFreshIdToken) {
+      // Profil güncellemesi veya ilk kayıt anındaki geçici token yarışında 400ms bekleyip taze token ile 1 kez yeniden dene
+      await new Promise((resolve) => setTimeout(resolve, 400));
+      return requestWorkerSession(true);
+    }
+
     let errMessage = `Worker oturum hatası (${response.status})`;
     let errCode = null;
     try {
@@ -94,7 +123,7 @@ async function requestWorkerSession(forceFreshIdToken = false) {
 }
 
 /**
- * Token Yöneticisi: Proaktif ve reaktif token tazeleme
+ * Token Yöneticisi: Proaktif ve reaktif token tazeleme (Sadece Turso için)
  */
 const tokenManager = {
   getToken: () => currentSession?.token || null,
@@ -109,8 +138,13 @@ const tokenManager = {
 
 /**
  * Belirtilen UID için Turso bağlantısını açar veya mevcut olanı döndürür.
+ * Misafir modunda KESİNLİKLE çağrılamaz.
  */
 export async function switchToUserDatabase(uid) {
+  if (isGuestSessionActive()) {
+    throw new Error('[Database] Misafir modunda Turso veritabanına geçilemez.');
+  }
+
   if (dbInstance && currentUid === uid) {
     const token = await tokenManager.getToken();
     if (token) return dbInstance;
@@ -131,9 +165,48 @@ export async function switchToUserDatabase(uid) {
 }
 
 /**
- * Veritabanını başlatır, gerekirse eski verileri taşır ve varsayılan kayıtları kontrol eder.
+ * Yerel misafir veritabanını başlatır.
+ * Worker'a veya Turso'ya hiçbir istek gitmez.
+ */
+export async function initGuestDatabase() {
+  if (dbInstance && currentUid === 'guest') {
+    return dbInstance;
+  }
+
+  if (dbInstance) {
+    try {
+      dbInstance.close();
+    } catch (_) {}
+  }
+
+  const localDb = await openGuestLocalDatabase();
+  dbInstance = localDb;
+  currentUid = 'guest';
+  currentSession = null;
+
+  // Varsayılan kategorileri ve 0 bakiyeli cüzdanı yerel motorda hazırla
+  await Promise.all([
+    ensureDefaultCategories().catch((e) => console.warn('[GuestDB] Varsayılan kategoriler uyarısı:', e)),
+    dbInstance.getFirstAsync('SELECT userId FROM wallet WHERE userId = ?', ['me'])
+      .then((existing) => {
+        if (!existing) {
+          return dbInstance.runAsync('INSERT INTO wallet (userId, balance) VALUES (?, 0)', ['me']);
+        }
+      })
+      .catch((e) => console.warn('[GuestDB] Cüzdan kontrolü uyarısı:', e)),
+  ]);
+
+  return dbInstance;
+}
+
+/**
+ * Kayıtlı kullanıcı için Turso veritabanını başlatır, gerekirse eski verileri taşır.
  */
 export async function initDatabase(uid) {
+  if (isGuestSessionActive()) {
+    return initGuestDatabase();
+  }
+
   const db = await switchToUserDatabase(uid);
 
   // 1. Önce eski verileri (IndexedDB veya Firestore'dan) Turso'ya taşı
@@ -195,4 +268,11 @@ export function resetDatabaseSession(targetUid = null) {
  */
 export async function deleteUserDatabase(uid) {
   resetDatabaseSession(uid);
+}
+
+/**
+ * Veritabanı motorunun başlatılıp kullanıma hazır olup olmadığını bildirir.
+ */
+export function isDatabaseReady() {
+  return Boolean(dbInstance);
 }

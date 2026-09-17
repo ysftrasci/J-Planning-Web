@@ -37,6 +37,10 @@
   ],
   "rewrites": [
     {
+      "source": "/api/worker/:path*",
+      "destination": "https://jplanning-auth-worker.ysftrasci.workers.dev/:path*"
+    },
+    {
       "source": "/(.*)",
       "destination": "/index.html"
     }

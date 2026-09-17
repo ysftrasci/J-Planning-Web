@@ -107,7 +107,7 @@ export async function reauthenticate(password) {
   await reauthenticateWithCredential(user, credential);
 }
 
-const WORKER_URL = (import.meta.env.VITE_WORKER_URL || 'https://jplanning-auth-worker.ysftrasci.workers.dev').replace(/\/+$/, '');
+const WORKER_URL = (import.meta.env.VITE_WORKER_URL || '/api/worker').replace(/\/+$/, '');
 
 export async function deleteAccountCompletely({ uid, password }) {
   const user = auth.currentUser;

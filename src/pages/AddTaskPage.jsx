@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react';
 import { X, Plus } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
-import { createTask } from '../db/taskRepository';
+import { createTask, getActiveTasks } from '../db/taskRepository';
 import { getCategories } from '../db/categoryRepository';
 import { useAuth } from '../context/AuthContext.jsx';
 import { listenFriends } from '../services/friendService';
 import { assignTaskToFriend } from '../services/taskAssignmentService';
+import GuestLimitModal from '../components/GuestLimitModal.jsx';
 import './AddTaskPage.css';
 
 const PRIORITIES = [
@@ -30,7 +31,7 @@ const PERIODS = [
 ];
 
 export default function AddTaskPage() {
-  const { user } = useAuth();
+  const { user, isGuest } = useAuth();
   const navigate = useNavigate();
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
@@ -43,6 +44,7 @@ export default function AddTaskPage() {
   const [subtaskLabels, setSubtaskLabels] = useState(['']);
   const [errorMessage, setErrorMessage] = useState('');
   const [saving, setSaving] = useState(false);
+  const [showLimitModal, setShowLimitModal] = useState(false);
 
   useEffect(() => {
     let mounted = true;
@@ -57,10 +59,10 @@ export default function AddTaskPage() {
   }, []);
 
   useEffect(() => {
-    if (!user) return;
+    if (!user || isGuest || !user.emailVerified) return;
     const unsub = listenFriends(user.uid, setFriends);
     return unsub;
-  }, [user]);
+  }, [user, isGuest]);
 
   const isOnce = period === 'ONCE';
 
@@ -82,6 +84,16 @@ export default function AddTaskPage() {
     if (!title.trim()) {
       setErrorMessage('Lütfen bir görev adı gir.');
       return;
+    }
+
+    if (isGuest) {
+      try {
+        const currentTasks = await getActiveTasks();
+        if (currentTasks && currentTasks.length >= 10) {
+          setShowLimitModal(true);
+          return;
+        }
+      } catch (_) {}
     }
 
     const subtaskCount = isOnce ? 1 : subtaskLabels.length;
@@ -163,27 +175,31 @@ export default function AddTaskPage() {
           onChange={(e) => setDescription(e.target.value)}
         />
 
-        {/* Kime atanacak? */}
-        <label className="add-task-page__label">Kime atanacak?</label>
-        <div className="add-task-page__chip-row">
-          <button
-            type="button"
-            className={`add-task-page__chip ${assignTo === 'me' ? 'add-task-page__chip--selected' : ''}`}
-            onClick={() => setAssignTo('me')}
-          >
-            Kendime
-          </button>
-          {friends.map((f) => (
-            <button
-              key={f.friendUid}
-              type="button"
-              className={`add-task-page__chip ${assignTo === f.friendUid ? 'add-task-page__chip--selected' : ''}`}
-              onClick={() => setAssignTo(f.friendUid)}
-            >
-              {f.friendName}
-            </button>
-          ))}
-        </div>
+        {/* Kime atanacak? (Misafirde gizlenir) */}
+        {!isGuest && (
+          <>
+            <label className="add-task-page__label">Kime atanacak?</label>
+            <div className="add-task-page__chip-row">
+              <button
+                type="button"
+                className={`add-task-page__chip ${assignTo === 'me' ? 'add-task-page__chip--selected' : ''}`}
+                onClick={() => setAssignTo('me')}
+              >
+                Kendime
+              </button>
+              {friends.map((f) => (
+                <button
+                  key={f.friendUid}
+                  type="button"
+                  className={`add-task-page__chip ${assignTo === f.friendUid ? 'add-task-page__chip--selected' : ''}`}
+                  onClick={() => setAssignTo(f.friendUid)}
+                >
+                  {f.friendName}
+                </button>
+              ))}
+            </div>
+          </>
+        )}
 
         {/* Periyot */}
         <label className="add-task-page__label">Periyot</label>
@@ -287,6 +303,12 @@ export default function AddTaskPage() {
           </button>
         </div>
       </form>
+
+      <GuestLimitModal
+        open={showLimitModal}
+        onClose={() => setShowLimitModal(false)}
+        type="task"
+      />
     </div>
   );
 }

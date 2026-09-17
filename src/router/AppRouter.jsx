@@ -1,4 +1,4 @@
-import { Routes, Route, Navigate, useLocation } from 'react-router-dom';
+import { Routes, Route, Navigate } from 'react-router-dom';
 import AppLayout from './AppLayout.jsx';
 import PlaceholderPage from '../pages/PlaceholderPage.jsx';
 import LoginPage from '../pages/LoginPage.jsx';
@@ -22,6 +22,7 @@ import DangerZonePage from '../pages/DangerZonePage.jsx';
 import VerifyEmailPage from '../pages/VerifyEmailPage.jsx';
 import DailyNotesPage from '../pages/DailyNotesPage.jsx';
 import AccountDeletionPendingModal from '../components/AccountDeletionPendingModal.jsx';
+import GuestRestrictedView from '../components/GuestRestrictedView.jsx';
 import AdminPlaceholderPage from '../pages/admin/AdminPlaceholderPage.jsx';
 import AdminLayout from '../pages/admin/AdminLayout.jsx';
 import AdminUsersPage from '../pages/admin/AdminUsersPage.jsx';
@@ -59,22 +60,14 @@ function LoadingScreen() {
 }
 
 function RequireAuth({ children }) {
-  const { user, initializing, signOut } = useAuth();
-  const location = useLocation();
+  const { user, isGuest, initializing, signOut } = useAuth();
 
   if (initializing) return <LoadingScreen />;
-  if (!user) {
-    const fullPath = location.pathname + (location.search || '');
-    if (
-      typeof window !== 'undefined' &&
-      window.sessionStorage &&
-      !fullPath.startsWith('/login') &&
-      !fullPath.startsWith('/verify-email')
-    ) {
-      window.sessionStorage.setItem('jp_auth_redirect', fullPath);
-    }
-    return <Navigate to="/login" state={{ from: location }} replace />;
-  }
+  if (!user) return <Navigate to="/login" replace />;
+
+  // Misafir kullanıcı e-posta doğrulama veya hesap silme engeline takılmaz
+  if (isGuest) return children;
+
   if (!user.emailVerified) return <Navigate to="/verify-email" replace />;
 
   if (user?.profile?.isDeleting === true) {
@@ -93,23 +86,23 @@ function RequireAuth({ children }) {
   return children;
 }
 
+function RequireRegisteredUser({ children, title, description }) {
+  const { isGuest } = useAuth();
+  if (isGuest) {
+    return <GuestRestrictedView title={title} description={description} />;
+  }
+  return children;
+}
+
 function RequireAdmin({ children }) {
-  const { user, isAdmin, initializing, signOut } = useAuth();
-  const location = useLocation();
+  const { user, isGuest, isAdmin, initializing, signOut } = useAuth();
 
   if (initializing) return <LoadingScreen />;
-  if (!user) {
-    const fullPath = location.pathname + (location.search || '');
-    if (
-      typeof window !== 'undefined' &&
-      window.sessionStorage &&
-      !fullPath.startsWith('/login') &&
-      !fullPath.startsWith('/verify-email')
-    ) {
-      window.sessionStorage.setItem('jp_auth_redirect', fullPath);
-    }
-    return <Navigate to="/login" state={{ from: location }} replace />;
-  }
+  if (!user) return <Navigate to="/login" replace />;
+
+  // Misafir kullanıcı kesinlikle yönetici olamaz
+  if (isGuest) return <Navigate to="/" replace />;
+
   if (!user.emailVerified) return <Navigate to="/verify-email" replace />;
 
   if (user?.profile?.isDeleting === true) {
@@ -134,44 +127,21 @@ function RequireAdmin({ children }) {
 }
 
 function RequireUnverified({ children }) {
-  const { user, initializing } = useAuth();
+  const { user, isGuest, initializing } = useAuth();
   if (initializing) return <LoadingScreen />;
+  if (isGuest) return <Navigate to="/" replace />;
   if (!user) return <Navigate to="/login" replace />;
-  if (user.emailVerified) {
-    let target = '/';
-    if (typeof window !== 'undefined' && window.sessionStorage) {
-      const saved = window.sessionStorage.getItem('jp_auth_redirect');
-      if (saved) {
-        target = saved;
-        window.sessionStorage.removeItem('jp_auth_redirect');
-      }
-    }
-    return <Navigate to={target} replace />;
-  }
+  if (user.emailVerified) return <Navigate to="/" replace />;
   return children;
 }
 
 function RedirectIfAuthed({ children }) {
-  const { user, initializing } = useAuth();
-  const location = useLocation();
-
+  const { user, isGuest, initializing } = useAuth();
   if (initializing) return <LoadingScreen />;
+  // Misafir kullanıcı hesap oluşturmak veya giriş yapmak için login/register sayfasına erişebilmelidir
+  if (isGuest) return children;
   if (user && !user.emailVerified) return <Navigate to="/verify-email" replace />;
-  if (user) {
-    let target = '/';
-    if (location.state?.from?.pathname) {
-      target = `${location.state.from.pathname}${location.state.from.search || ''}`;
-    } else if (typeof window !== 'undefined' && window.sessionStorage) {
-      const saved = window.sessionStorage.getItem('jp_auth_redirect');
-      if (saved) {
-        target = saved;
-      }
-    }
-    if (typeof window !== 'undefined' && window.sessionStorage) {
-      window.sessionStorage.removeItem('jp_auth_redirect');
-    }
-    return <Navigate to={target} replace />;
-  }
+  if (user) return <Navigate to="/" replace />;
   return children;
 }
 
@@ -194,7 +164,7 @@ export default function AppRouter() {
           </RequireUnverified>
         }
       />
-      {/* Yönetici Paneli Rotaları (RequireAdmin ile tam korumalı) */}
+      {/* Yönetici Paneli Rotaları (RequireAdmin ile tam korumalı, misafire kapalı) */}
       <Route
         path="admin"
         element={
@@ -216,6 +186,7 @@ export default function AppRouter() {
           </RequireAuth>
         }
       >
+        {/* AÇIK: Kişisel Planlama & Üretkenlik Özellikleri */}
         <Route index element={<TasksListPage />} />
         <Route path="tasks" element={<TasksListPage />} />
         <Route path="tasks/new" element={<AddTaskPage />} />
@@ -229,16 +200,85 @@ export default function AppRouter() {
         <Route path="categories" element={<CategoriesPage />} />
         <Route path="rewards" element={<RewardsPage />} />
         <Route path="rewards/history" element={<RewardHistoryPage />} />
-        <Route path="friends" element={<FriendsListPage />} />
-        <Route path="friends/add" element={<AddFriendPage />} />
-        <Route path="friends/:friendshipId" element={<FriendDetailPage />} />
-        <Route path="assigned-by-me" element={<AssignedByMePage />} />
         <Route path="focus" element={<FocusPage />} />
         <Route path="focus/history" element={<FocusHistoryPage />} />
         <Route path="profile" element={<ProfilePage />} />
-        <Route path="profile/edit" element={<EditProfilePage />} />
-        <Route path="profile/notifications" element={<NotificationSettingsPage />} />
-        <Route path="profile/danger-zone" element={<DangerZonePage />} />
+
+        {/* KAPALI: Misafire Kısıtlı Rotalar (RequireRegisteredUser ile korumalı) */}
+        <Route
+          path="friends"
+          element={
+            <RequireRegisteredUser
+              title="Arkadaşlık Sistemi Kayıtlı Kullanıcılara Özeldir"
+              description="Arkadaşlarınla görev paylaşmak, birbirini motive etmek ve birlikte büyümek için ücretsiz bir hesap oluşturabilirsin."
+            >
+              <FriendsListPage />
+            </RequireRegisteredUser>
+          }
+        />
+        <Route
+          path="friends/add"
+          element={
+            <RequireRegisteredUser
+              title="Arkadaş Ekleme Kayıtlı Kullanıcılara Özeldir"
+              description="Arkadaşlarını eklemek için ücretsiz bir hesap oluşturabilirsin."
+            >
+              <AddFriendPage />
+            </RequireRegisteredUser>
+          }
+        />
+        <Route
+          path="friends/:friendshipId"
+          element={
+            <RequireRegisteredUser title="Arkadaş Detayı Kayıtlı Kullanıcılara Özeldir">
+              <FriendDetailPage />
+            </RequireRegisteredUser>
+          }
+        />
+        <Route
+          path="assigned-by-me"
+          element={
+            <RequireRegisteredUser
+              title="Atanan Görevler Kayıtlı Kullanıcılara Özeldir"
+              description="Arkadaşlarına görev atamak ve onların ilerlemesini takip etmek için ücretsiz kayıt ol."
+            >
+              <AssignedByMePage />
+            </RequireRegisteredUser>
+          }
+        />
+        <Route
+          path="profile/edit"
+          element={
+            <RequireRegisteredUser
+              title="Profil Düzenleme Kayıtlı Kullanıcılara Özeldir"
+              description="Profil fotoğrafı ve adını kalıcı hale getirmek için ücretsiz hesap oluştur."
+            >
+              <EditProfilePage />
+            </RequireRegisteredUser>
+          }
+        />
+        <Route
+          path="profile/notifications"
+          element={
+            <RequireRegisteredUser
+              title="Bildirim Ayarları Kayıtlı Kullanıcılara Özeldir"
+              description="Anlık hatırlatıcılar ve web push bildirimleri almak için lütfen ücretsiz hesap oluştur."
+            >
+              <NotificationSettingsPage />
+            </RequireRegisteredUser>
+          }
+        />
+        <Route
+          path="profile/danger-zone"
+          element={
+            <RequireRegisteredUser
+              title="Hesap Silme"
+              description="Misafir oturumunda silinecek bir bulut hesabı bulunmamaktadır. Profil sayfasından Misafir Oturumunu kapatabilirsin."
+            >
+              <DangerZonePage />
+            </RequireRegisteredUser>
+          }
+        />
         <Route
           path="*"
           element={<PlaceholderPage title="Sayfa bulunamadı" stageLabel="404" />}

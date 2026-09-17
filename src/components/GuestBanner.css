@@ -1,0 +1,65 @@
+.guest-banner {
+  background: linear-gradient(90deg, rgba(201, 138, 44, 0.15), rgba(201, 138, 44, 0.28));
+  border-bottom: 1px solid rgba(201, 138, 44, 0.35);
+  color: var(--color-text-primary);
+  padding: 8px 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  font-size: 13px;
+  z-index: 99;
+  position: sticky;
+  top: 0;
+  backdrop-filter: blur(8px);
+}
+
+.guest-banner__text {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 500;
+}
+
+.guest-banner__badge {
+  background: #C98A2C;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 7px;
+  border-radius: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+
+.guest-banner__button {
+  background: #C98A2C;
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  padding: 4px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  transition: opacity 0.2s, transform 0.1s;
+}
+
+.guest-banner__button:hover {
+  opacity: 0.9;
+  transform: translateY(-1px);
+}
+
+@media (max-width: 600px) {
+  .guest-banner {
+    flex-direction: column;
+    gap: 6px;
+    padding: 6px 12px;
+    text-align: center;
+  }
+  .guest-banner__text {
+    font-size: 12px;
+  }
+}
