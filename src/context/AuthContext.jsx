@@ -262,6 +262,18 @@ export function AuthProvider({ children }) {
     };
     window.addEventListener('jplanning:force-logout', handleForceLogout);
 
+    // Migrasyon Hatası Olay Dinleyicisi (migrationService allMatched false olduğunda)
+    const handleMigrationError = (e) => {
+      const detailMsg = e.detail?.message;
+      alert(
+        '⚠️ Veri Aktarımı Uyarısı:\n\n' +
+        'Misafir oturumundaki verileriniz yeni hesabınıza aktarılırken bir uyuşmazlık oluştu.\n\n' +
+        'Merak etmeyin, verileriniz güvende ve silinmedi. Lütfen sayfayı yenileyerek (F5) aktarımı tekrar deneyin.' +
+        (detailMsg ? `\n\nDetay: ${detailMsg}` : '')
+      );
+    };
+    window.addEventListener('jplanning:migration-error', handleMigrationError);
+
     // Pencere Odağı (Window Focus) Denetimi — Misafirde auth.currentUser null olduğu için çalışmaz!
     const handleWindowFocus = async () => {
       if (!auth.currentUser) return; // Misafir modunda anında döner
@@ -288,6 +300,7 @@ export function AuthProvider({ children }) {
       if (assignedTasksUnsub) assignedTasksUnsub();
       if (userStatusUnsub) userStatusUnsub();
       window.removeEventListener('jplanning:force-logout', handleForceLogout);
+      window.removeEventListener('jplanning:migration-error', handleMigrationError);
       window.removeEventListener('focus', handleWindowFocus);
       unsubscribe();
     };

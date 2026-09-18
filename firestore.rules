@@ -28,6 +28,11 @@ service cloud.firestore {
         data.deletedByUid is string;
     }
 
+    function isNotAnonymous() {
+      return request.auth != null &&
+        request.auth.token.firebase.sign_in_provider != 'anonymous';
+    }
+
     match /users/{userId} {
       allow read: if request.auth != null && (request.auth.uid == userId || request.auth.token.admin == true);
       allow create, delete: if request.auth != null && request.auth.uid == userId;
@@ -44,18 +49,18 @@ service cloud.firestore {
 
     match /userCodes/{code} {
       allow read: if request.auth != null;
-      allow create: if request.auth != null && (request.resource.data.uid == request.auth.uid || request.auth.token.admin == true);
-      allow update: if request.auth != null && (resource.data.uid == request.auth.uid || request.auth.token.admin == true);
+      allow create: if request.auth != null && isNotAnonymous() && (request.resource.data.uid == request.auth.uid || request.auth.token.admin == true);
+      allow update: if request.auth != null && isNotAnonymous() && (resource.data.uid == request.auth.uid || request.auth.token.admin == true);
       allow delete: if request.auth != null && (resource.data.uid == request.auth.uid || request.auth.token.admin == true);
     }
 
     match /friendships/{friendshipId} {
       allow read: if request.auth != null &&
         (request.auth.uid == resource.data.fromUid || request.auth.uid == resource.data.toUid);
-      allow create: if request.auth != null &&
+      allow create: if request.auth != null && isNotAnonymous() &&
         request.auth.uid == request.resource.data.fromUid &&
         request.resource.data.toUid != null;
-      allow update: if request.auth != null &&
+      allow update: if request.auth != null && isNotAnonymous() &&
         (request.auth.uid == resource.data.fromUid || request.auth.uid == resource.data.toUid) &&
         request.resource.data.fromUid == resource.data.fromUid &&
         request.resource.data.toUid == resource.data.toUid;
@@ -66,11 +71,11 @@ service cloud.firestore {
     match /assignedTasks/{taskId} {
       allow read: if request.auth != null &&
         (request.auth.uid == resource.data.assignedByUid || request.auth.uid == resource.data.assignedToUid);
-      allow create: if request.auth != null &&
+      allow create: if request.auth != null && isNotAnonymous() &&
         request.auth.uid == request.resource.data.assignedByUid &&
         request.resource.data.assignedToUid != null &&
         isValidAssignedTaskData(request.resource.data);
-      allow update: if request.auth != null &&
+      allow update: if request.auth != null && isNotAnonymous() &&
         (request.auth.uid == resource.data.assignedByUid || request.auth.uid == resource.data.assignedToUid) &&
         request.resource.data.assignedByUid == resource.data.assignedByUid &&
         request.resource.data.assignedToUid == resource.data.assignedToUid &&
@@ -82,11 +87,11 @@ service cloud.firestore {
     match /assignedRewards/{rewardId} {
       allow read: if request.auth != null &&
         (request.auth.uid == resource.data.assignedByUid || request.auth.uid == resource.data.assignedToUid);
-      allow create: if request.auth != null &&
+      allow create: if request.auth != null && isNotAnonymous() &&
         request.auth.uid == request.resource.data.assignedByUid &&
         request.resource.data.assignedToUid != null &&
         isValidAssignedRewardData(request.resource.data);
-      allow update: if request.auth != null &&
+      allow update: if request.auth != null && isNotAnonymous() &&
         (request.auth.uid == resource.data.assignedByUid || request.auth.uid == resource.data.assignedToUid) &&
         request.resource.data.assignedByUid == resource.data.assignedByUid &&
         request.resource.data.assignedToUid == resource.data.assignedToUid &&
