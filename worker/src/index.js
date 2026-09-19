@@ -106,18 +106,23 @@ async function verifyAdminClaim(authHeader, projectId) {
  * Control Plane veritabanı istemcisini döndürür.
  */
 function getControlPlaneClient(env) {
-  const org = env.TURSO_ORG;
-  const dbUrl = env.TURSO_CONTROL_DB_URL || `libsql://jplanning-control-${org}.turso.io`;
-  const dbToken = env.TURSO_CONTROL_DB_TOKEN || env.TURSO_PLATFORM_TOKEN;
+  const org = env?.TURSO_ORG;
+  const dbUrl = env?.TURSO_CONTROL_DB_URL || (org ? `libsql://jplanning-control-${org}.turso.io` : null);
+  const dbToken = env?.TURSO_CONTROL_DB_TOKEN || env?.TURSO_PLATFORM_TOKEN;
 
-  if (!dbToken) {
+  if (!dbToken || !dbUrl) {
     return null;
   }
 
-  return createClient({
-    url: dbUrl,
-    authToken: dbToken,
-  });
+  try {
+    return createClient({
+      url: dbUrl,
+      authToken: dbToken,
+    });
+  } catch (err) {
+    console.warn('[Worker Control Plane Client Init Warning]:', err.message);
+    return null;
+  }
 }
 
 /**
@@ -179,6 +184,7 @@ async function ensureAuditLogSchema(client) {
         admin_uid TEXT NOT NULL,
         admin_email TEXT,
         target_user_uid TEXT,
+        target_user_email TEXT,
         action TEXT NOT NULL,
         old_value TEXT,
         new_value TEXT,
@@ -188,9 +194,15 @@ async function ensureAuditLogSchema(client) {
         created_at INTEGER NOT NULL
       );
     `);
-    const cols = ['admin_email', 'old_value', 'new_value', 'status', 'error_message', 'detail'];
+
+    // Tablo zaten varsa eksik kolonları ekle (PRAGMA table_info kontrolü ile)
+    const tableInfo = await client.execute('PRAGMA table_info(admin_audit_log);').catch(() => null);
+    const existingCols = new Set(tableInfo?.rows?.map((r) => r.name) || []);
+    const cols = ['admin_email', 'target_user_email', 'old_value', 'new_value', 'status', 'error_message', 'detail'];
     for (const col of cols) {
-      await client.execute(`ALTER TABLE admin_audit_log ADD COLUMN ${col} TEXT;`).catch(() => {});
+      if (!existingCols.has(col)) {
+        await client.execute(`ALTER TABLE admin_audit_log ADD COLUMN ${col} TEXT;`).catch(() => {});
+      }
     }
     auditSchemaInitialized = true;
   } catch (e) {
@@ -202,7 +214,7 @@ async function ensureAuditLogSchema(client) {
  * Admin tarafından yapılan değişiklikleri Control Plane DB'deki admin_audit_log tablosuna kaydeder.
  * Append-only çalışır; kayıtlar asla silinemez veya güncellenemez.
  */
-async function logAdminAudit(env, { adminUid, adminEmail, targetUid, action, oldValue, newValue, status = 'SUCCESS', errorMessage = null }) {
+async function logAdminAudit(env, { adminUid, adminEmail, targetUid, targetEmail = null, action, oldValue, newValue, status = 'SUCCESS', errorMessage = null }) {
   try {
     const client = getControlPlaneClient(env);
     if (!client) {
@@ -216,8 +228,8 @@ async function logAdminAudit(env, { adminUid, adminEmail, targetUid, action, old
 
     const sql = `
       INSERT INTO admin_audit_log (
-        id, admin_uid, admin_email, target_user_uid, action, old_value, new_value, status, error_message, created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+        id, admin_uid, admin_email, target_user_uid, target_user_email, action, old_value, new_value, status, error_message, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
     `;
 
     await client.execute({
@@ -227,6 +239,7 @@ async function logAdminAudit(env, { adminUid, adminEmail, targetUid, action, old
         adminUid,
         adminEmail || null,
         targetUid,
+        targetEmail || null,
         action,
         oldValue ? JSON.stringify(oldValue) : null,
         newValue ? JSON.stringify(newValue) : null,
@@ -241,14 +254,62 @@ async function logAdminAudit(env, { adminUid, adminEmail, targetUid, action, old
 }
 
 /**
+ * Hedef kullanıcının e-postasını Control Plane veya Firestore üzerinden çözer.
+ * Kullanıcı silinmeden önce çağrılarak kalıcı audit log kaydı için e-posta temin edilir.
+ */
+async function resolveTargetUserEmail(env, uid, controlClient = null) {
+  if (!uid) return null;
+  // 1. Önce Control Plane admin_users_index tablosunu kontrol et
+  try {
+    const client = controlClient || getControlPlaneClient(env);
+    if (client) {
+      const res = await client.execute({
+        sql: 'SELECT email FROM admin_users_index WHERE uid = ? LIMIT 1;',
+        args: [uid],
+      });
+      if (res?.rows?.length > 0 && res.rows[0].email) {
+        return String(res.rows[0].email);
+      }
+    }
+  } catch (e) {
+    console.warn('[resolveTargetUserEmail index warning]:', e.message);
+  }
+
+  // 2. Yoksa Firestore users/{uid} dokümanını kontrol et
+  try {
+    if (env?.FIREBASE_SERVICE_ACCOUNT) {
+      const projectId = env.FIREBASE_PROJECT_ID || 'j-planning';
+      const googleToken = await getGoogleAccessToken(env.FIREBASE_SERVICE_ACCOUNT);
+      const fsBase = `https://firestore.googleapis.com/v1/projects/${projectId}/databases/(default)/documents`;
+      const res = await fetch(`${fsBase}/users/${encodeURIComponent(uid)}`, {
+        headers: { Authorization: `Bearer ${googleToken}` },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.fields?.email?.stringValue) {
+          return String(data.fields.email.stringValue);
+        }
+      }
+    }
+  } catch (e) {
+    console.warn('[resolveTargetUserEmail firestore warning]:', e.message);
+  }
+
+  return null;
+}
+
+/**
  * Turso Platform API Çağrısı Yardımcısı
  */
 async function callTursoPlatformApi(endpoint, env, options = {}) {
-  const org = env.TURSO_ORG;
-  const platformToken = env.TURSO_PLATFORM_TOKEN;
+  const org = env?.TURSO_ORG;
+  const platformToken = env?.TURSO_PLATFORM_TOKEN;
 
   if (!org || !platformToken) {
-    throw new Error('Turso organizasyon adı (TURSO_ORG) veya TURSO_PLATFORM_TOKEN tanımlı değil');
+    const missing = [];
+    if (!org) missing.push('TURSO_ORG');
+    if (!platformToken) missing.push('TURSO_PLATFORM_TOKEN');
+    throw new Error(`Turso Platform API yapılandırması eksik (${missing.join(', ')} tanımlı değil). Yerel ortam için worker/.dev.vars dosyasını kontrol edin.`);
   }
 
   const url = `https://api.turso.tech/v1/organizations/${org}${endpoint}`;
@@ -389,15 +450,21 @@ async function getGoogleAccessToken(serviceAccountJson) {
     return cachedGoogleAccessToken;
   }
 
+  if (!serviceAccountJson) {
+    throw new Error('FIREBASE_SERVICE_ACCOUNT ortam değişkeni (secret) tanımlanmamış. Yerel geliştirme için worker/.dev.vars dosyasını kontrol edin.');
+  }
+
   let sa;
   if (typeof serviceAccountJson === 'string') {
     try {
       sa = JSON.parse(serviceAccountJson);
     } catch (e) {
-      throw new Error('FIREBASE_SERVICE_ACCOUNT JSON formatı geçersiz.');
+      throw new Error('FIREBASE_SERVICE_ACCOUNT JSON formatı geçersiz. Geçerli bir Service Account JSON dizesi girilmelidir.');
     }
-  } else {
+  } else if (typeof serviceAccountJson === 'object' && serviceAccountJson !== null) {
     sa = serviceAccountJson;
+  } else {
+    throw new Error('FIREBASE_SERVICE_ACCOUNT geçersiz türde.');
   }
 
   if (!sa || !sa.client_email || !sa.private_key) {
@@ -410,7 +477,7 @@ async function getGoogleAccessToken(serviceAccountJson) {
     iss: sa.client_email,
     sub: sa.client_email,
     aud: 'https://oauth2.googleapis.com/token',
-    scope: 'https://www.googleapis.com/auth/firebase.messaging https://www.googleapis.com/auth/datastore',
+    scope: 'https://www.googleapis.com/auth/firebase.messaging https://www.googleapis.com/auth/datastore https://www.googleapis.com/auth/identitytoolkit',
     iat: issuedAt,
     exp: issuedAt + 3600,
   })
@@ -434,6 +501,30 @@ async function getGoogleAccessToken(serviceAccountJson) {
   cachedGoogleAccessToken = data.access_token;
   cachedGoogleTokenExpiresAt = now + (data.expires_in || 3600) * 1000;
   return cachedGoogleAccessToken;
+}
+
+/**
+ * Google Identity Toolkit Admin REST API çağrısı yapar (accounts:delete, accounts:update vb.)
+ */
+async function callFirebaseAuthAdminApi(env, action, body) {
+  if (!env?.FIREBASE_SERVICE_ACCOUNT) {
+    throw new Error('FIREBASE_SERVICE_ACCOUNT ortam değişkeni (secret) tanımlanmamış. Yerel ortam için worker/.dev.vars dosyasını kontrol edin.');
+  }
+  const projectId = env.FIREBASE_PROJECT_ID || 'j-planning';
+  const accessToken = await getGoogleAccessToken(env.FIREBASE_SERVICE_ACCOUNT);
+  const url = `https://identitytoolkit.googleapis.com/v1/projects/${projectId}/${action}`;
+
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(body),
+  });
+
+  const data = await res.json().catch(() => ({}));
+  return { ok: res.ok, status: res.status, data };
 }
 
 /**
@@ -568,7 +659,16 @@ async function checkPushRateLimit(env, senderUid, maxPerMinute = 15) {
 
 export default {
   async fetch(request, env, ctx) {
-    const corsHeaders = getCorsHeaders(request, env);
+    let corsHeaders;
+    try {
+      corsHeaders = getCorsHeaders(request, env);
+    } catch {
+      corsHeaders = {
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Methods': 'GET, POST, PATCH, DELETE, OPTIONS',
+        'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+      };
+    }
 
     // CORS Preflight (OPTIONS) İsteği
     if (request.method === 'OPTIONS') {
@@ -578,7 +678,8 @@ export default {
       });
     }
 
-    const url = new URL(request.url);
+    try {
+      const url = new URL(request.url);
 
     // Health check endpoint
     if (request.method === 'GET' && (url.pathname === '/' || url.pathname === '/health')) {
@@ -1634,6 +1735,269 @@ export default {
       }
     }
 
+    // DELETE /admin/users/:uid (Yönetici Tarafından Kullanıcı Hesabı ve Verilerini Silme)
+    const userDeleteMatch = url.pathname.match(/^\/admin\/users\/([^/]+)$/);
+    if (request.method === 'DELETE' && userDeleteMatch) {
+      const targetUid = decodeURIComponent(userDeleteMatch[1]);
+      try {
+        const authHeader = request.headers.get('Authorization');
+        const projectId = env.FIREBASE_PROJECT_ID || 'j-planning';
+
+        const { uid: adminUid, payload } = await verifyAdminClaim(authHeader, projectId);
+
+        if (adminUid === targetUid) {
+          return jsonResponse(
+            { error: 'CANNOT_DELETE_SELF', message: 'Yönetici kendi hesabını bu panelden silemez.' },
+            400,
+            corsHeaders
+          );
+        }
+
+        // Hedef kullanıcının e-postasını ve veritabanı adını silme işlemine başlamadan ÖNCE oku (silindikten sonra kaybolmasın)
+        let targetDbName = getDbNameForUser(targetUid);
+        let targetEmail = null;
+        const controlClient = getControlPlaneClient(env);
+        if (controlClient) {
+          try {
+            const userMetaRes = await controlClient.execute({
+              sql: 'SELECT db_name, email FROM admin_users_index WHERE uid = ? LIMIT 1;',
+              args: [targetUid],
+            });
+            if (userMetaRes.rows.length > 0) {
+              if (userMetaRes.rows[0].db_name) targetDbName = String(userMetaRes.rows[0].db_name);
+              if (userMetaRes.rows[0].email) targetEmail = String(userMetaRes.rows[0].email);
+            }
+          } catch (cpErr) {
+            console.warn(`[Worker DELETE /admin/users/:uid] Control Plane sorgulama uyarısı:`, cpErr.message);
+          }
+        }
+
+        if (!targetEmail) {
+          targetEmail = await resolveTargetUserEmail(env, targetUid, controlClient);
+        }
+
+        const steps = {
+          firebaseAuth: { status: 'PENDING' },
+          tursoDb: { status: 'PENDING' },
+          controlPlane: { status: 'PENDING' },
+          firestore: { status: 'PENDING' },
+        };
+
+        // (a) Firebase Auth üzerinden hesabı sil
+        try {
+          const authRes = await callFirebaseAuthAdminApi(env, 'accounts:delete', { localId: targetUid });
+          if (authRes.ok) {
+            steps.firebaseAuth = { status: 'SUCCESS' };
+          } else if (authRes.status === 400 && authRes.data?.error?.message?.includes('USER_NOT_FOUND')) {
+            steps.firebaseAuth = { status: 'ALREADY_DELETED', message: 'Kullanıcı Firebase Auth üzerinde zaten bulunamadı.' };
+          } else {
+            const errMsg = authRes.data?.error?.message || `HTTP_${authRes.status}`;
+            steps.firebaseAuth = { status: 'FAILED', error: errMsg };
+          }
+        } catch (authErr) {
+          steps.firebaseAuth = { status: 'FAILED', error: authErr.message };
+        }
+
+        // (b) Turso DB'sini sil
+        try {
+          const deleteDbRes = await callTursoPlatformApi(`/databases/${targetDbName}`, env, {
+            method: 'DELETE',
+          });
+          if (deleteDbRes.ok) {
+            steps.tursoDb = { status: 'SUCCESS', dbName: targetDbName };
+          } else if (deleteDbRes.status === 404) {
+            steps.tursoDb = { status: 'ALREADY_DELETED', dbName: targetDbName, message: 'Turso veritabanı zaten mevcut değil.' };
+          } else {
+            const errText = await deleteDbRes.text().catch(() => '');
+            steps.tursoDb = { status: 'FAILED', dbName: targetDbName, error: `HTTP ${deleteDbRes.status}: ${errText}` };
+          }
+        } catch (tursoErr) {
+          steps.tursoDb = { status: 'FAILED', dbName: targetDbName, error: tursoErr.message };
+        }
+
+        // (c) Control Plane admin_users_index kaydını sil
+        if (controlClient) {
+          try {
+            const delRes = await controlClient.execute({
+              sql: 'DELETE FROM admin_users_index WHERE uid = ?;',
+              args: [targetUid],
+            });
+            steps.controlPlane = { status: 'SUCCESS', rowsAffected: delRes.rowsAffected ?? 1 };
+          } catch (cpDelErr) {
+            steps.controlPlane = { status: 'FAILED', error: cpDelErr.message };
+          }
+        } else {
+          steps.controlPlane = { status: 'FAILED', error: 'Control Plane DB client mevcut değil.' };
+        }
+
+        // (d) Firestore temizliği: users/{uid} ve userCodes/{userCode}
+        try {
+          const googleToken = await getGoogleAccessToken(env.FIREBASE_SERVICE_ACCOUNT);
+          const fsBase = `https://firestore.googleapis.com/v1/projects/${projectId}/databases/(default)/documents`;
+
+          // 1. users/{uid} dokümanından userCode'u öğren
+          let userCode = null;
+          try {
+            const userDocRes = await fetch(`${fsBase}/users/${encodeURIComponent(targetUid)}`, {
+              headers: { Authorization: `Bearer ${googleToken}` },
+            });
+            if (userDocRes.ok) {
+              const userDocData = await userDocRes.json();
+              userCode = userDocData.fields?.userCode?.stringValue || null;
+            }
+          } catch (e) {
+            console.warn(`[Worker DELETE /admin/users/:uid] userCode sorgu hatası:`, e.message);
+          }
+
+          // 2. users/{uid} sil
+          const delUserRes = await fetch(`${fsBase}/users/${encodeURIComponent(targetUid)}`, {
+            method: 'DELETE',
+            headers: { Authorization: `Bearer ${googleToken}` },
+          });
+
+          // 3. userCodes/{userCode} varsa sil
+          if (userCode) {
+            await fetch(`${fsBase}/userCodes/${encodeURIComponent(userCode)}`, {
+              method: 'DELETE',
+              headers: { Authorization: `Bearer ${googleToken}` },
+            });
+          }
+
+          // 4. users/{uid}/user_backup/latest varsa sil
+          await fetch(`${fsBase}/users/${encodeURIComponent(targetUid)}/user_backup/latest`, {
+            method: 'DELETE',
+            headers: { Authorization: `Bearer ${googleToken}` },
+          }).catch(() => {});
+
+          if (delUserRes.ok || delUserRes.status === 404) {
+            steps.firestore = {
+              status: delUserRes.status === 404 && !userCode ? 'ALREADY_DELETED' : 'SUCCESS',
+              cleanedUserCode: userCode,
+              note: 'Bilinen sınırlama: Arkadaşlık referansları (friendships/assignedTasks) temizlenmemiştir.',
+            };
+          } else {
+            steps.firestore = { status: 'FAILED', error: `HTTP_${delUserRes.status}` };
+          }
+        } catch (fsErr) {
+          steps.firestore = { status: 'FAILED', error: fsErr.message };
+        }
+
+        // Audit Log kaydı
+        const hasFailed = Object.values(steps).some((s) => s.status === 'FAILED');
+        await logAdminAudit(env, {
+          adminUid,
+          adminEmail: payload.email || null,
+          targetUid,
+          targetEmail,
+          action: 'ADMIN_DELETED_USER',
+          oldValue: { dbName: targetDbName, email: targetEmail },
+          newValue: { steps },
+          status: hasFailed ? 'PARTIAL_SUCCESS' : 'SUCCESS',
+          errorMessage: hasFailed ? 'Bazı adımlar başarısız oldu' : null,
+        });
+
+        return jsonResponse(
+          {
+            success: true,
+            message: hasFailed
+              ? 'Kullanıcı silme işlemi kısmi başarıyla tamamlandı (bazı adımlarda hata oluştu).'
+              : 'Kullanıcı hesabı ve tüm ilişkili veriler başarıyla silindi.',
+            steps,
+            limitationNote: 'Bilinen sınırlama: Arkadaşlık referansları temizlenmemiştir.',
+          },
+          200,
+          corsHeaders
+        );
+      } catch (err) {
+        console.error('[Worker DELETE /admin/users/:uid Error]:', err);
+        if (err.isForbidden) {
+          return jsonResponse({ error: 'FORBIDDEN', message: 'Yetkisiz erişim.' }, 403, corsHeaders);
+        }
+        return jsonResponse({ error: 'INTERNAL_ERROR', message: 'Kullanıcı silinemedi.', detail: err.message }, 500, corsHeaders);
+      }
+    }
+
+    // PATCH /admin/users/:uid/reset-password (Yönetici Tarafından Kullanıcı Şifresi Sıfırlama)
+    const resetPwdMatch = url.pathname.match(/^\/admin\/users\/([^/]+)\/reset-password$/);
+    if (request.method === 'PATCH' && resetPwdMatch) {
+      const targetUid = decodeURIComponent(resetPwdMatch[1]);
+      try {
+        const authHeader = request.headers.get('Authorization');
+        const projectId = env.FIREBASE_PROJECT_ID || 'j-planning';
+
+        const { uid: adminUid, payload } = await verifyAdminClaim(authHeader, projectId);
+
+        const body = await request.json().catch(() => ({}));
+        const newPassword = body?.newPassword;
+
+        if (typeof newPassword !== 'string' || newPassword.length < 6) {
+          return jsonResponse(
+            { error: 'INVALID_PASSWORD', message: 'Yeni şifre en az 6 karakter uzunluğunda olmalıdır.' },
+            400,
+            corsHeaders
+          );
+        }
+
+        // Hedef kullanıcının e-postasını işlem öncesinde oku (audit log için)
+        const targetEmail = await resolveTargetUserEmail(env, targetUid);
+
+        const authRes = await callFirebaseAuthAdminApi(env, 'accounts:update', {
+          localId: targetUid,
+          password: newPassword,
+        });
+
+        if (!authRes.ok) {
+          const errMsg = authRes.data?.error?.message || `HTTP_${authRes.status}`;
+          if (authRes.status === 403 && errMsg.includes('Identity Toolkit API')) {
+            return jsonResponse(
+              {
+                error: 'API_DISABLED',
+                message: 'Google Cloud projenizde Identity Toolkit API etkinleştirilmemiş. Lütfen GCP Konsolu üzerinden Identity Toolkit API’yi etkinleştirin.',
+                detail: errMsg,
+              },
+              403,
+              corsHeaders
+            );
+          }
+          return jsonResponse(
+            {
+              error: 'AUTH_API_ERROR',
+              message: `Firebase Auth şifre güncelleme hatası: ${errMsg}`,
+            },
+            authRes.status >= 400 && authRes.status < 500 ? authRes.status : 500,
+            corsHeaders
+          );
+        }
+
+        // Audit Log kaydı — Şifre ASLA loglanmaz veya saklanmaz!
+        await logAdminAudit(env, {
+          adminUid,
+          adminEmail: payload.email || null,
+          targetUid,
+          targetEmail,
+          action: 'ADMIN_RESET_PASSWORD',
+          oldValue: null,
+          newValue: { note: 'Kullanıcı şifresi yönetici tarafından doğrudan sıfırlandı' },
+          status: 'SUCCESS',
+        });
+
+        return jsonResponse(
+          {
+            success: true,
+            message: 'Kullanıcının şifresi başarıyla güncellendi.',
+          },
+          200,
+          corsHeaders
+        );
+      } catch (err) {
+        console.error('[Worker PATCH /admin/users/:uid/reset-password Error]:', err.message);
+        if (err.isForbidden) {
+          return jsonResponse({ error: 'FORBIDDEN', message: 'Yetkisiz erişim.' }, 403, corsHeaders);
+        }
+        return jsonResponse({ error: 'INTERNAL_ERROR', message: 'Şifre sıfırlanamadı.', detail: err.message }, 500, corsHeaders);
+      }
+    }
+
     // GET /admin/audit-logs (Faz 4 — Değiştirilemez Aktivite Geçmişi Listesi)
     if (request.method === 'GET' && url.pathname === '/admin/audit-logs') {
       try {
@@ -1671,13 +2035,13 @@ export default {
             l.admin_uid, 
             l.admin_email, 
             l.target_user_uid, 
+            COALESCE(l.target_user_email, u.email) AS target_user_email,
             l.action, 
             l.old_value, 
             l.new_value, 
             l.status, 
             l.error_message, 
             l.created_at,
-            u.email AS target_user_email,
             u.display_name AS target_user_name
           FROM admin_audit_log l
           LEFT JOIN admin_users_index u ON l.target_user_uid = u.uid
@@ -1783,6 +2147,7 @@ export default {
           adminUid: uid,
           adminEmail: payload.email || null,
           targetUid: uid,
+          targetEmail: payload.email || null,
           action: 'USER_SELF_DELETED',
           oldValue: { dbName, email: payload.email },
           newValue: null,
@@ -2086,5 +2451,30 @@ export default {
     }
 
     return jsonResponse({ error: 'NOT_FOUND', message: 'Endpoint bulunamadı' }, 404, corsHeaders);
+    } catch (fatalError) {
+      // Teknik detaylar (stack trace, dosya yolları vb.) sadece Worker konsoluna yazılır
+      console.error('[Worker Fatal Error]:', fatalError);
+
+      // Yanıtta stack trace veya gizli bilgi sızdırmadan temiz, genel ve güvenli hata dönülür
+      let safeMessage = 'Sunucu içi beklenmeyen bir hata oluştu.';
+      if (fatalError.message?.includes('FIREBASE_SERVICE_ACCOUNT')) {
+        safeMessage = 'FIREBASE_SERVICE_ACCOUNT yapılandırması eksik veya geçersiz. Lütfen worker/.dev.vars dosyasını kontrol edin.';
+      } else if (fatalError.message?.includes('TURSO_PLATFORM_TOKEN') || fatalError.message?.includes('TURSO_ORG')) {
+        safeMessage = 'Turso Platform API veya organizasyon yapılandırması eksik. Lütfen worker/.dev.vars dosyasını kontrol edin.';
+      } else if (fatalError.message?.includes('TURSO_CONTROL_DB_TOKEN')) {
+        safeMessage = 'Turso Control Plane yapılandırması eksik. Lütfen worker/.dev.vars dosyasını kontrol edin.';
+      } else if (fatalError.name === 'TypeError' || fatalError.name === 'ReferenceError') {
+        safeMessage = 'Sunucu tarafında dahili bir çalışma zamanı hatası oluştu.';
+      }
+
+      return jsonResponse(
+        {
+          error: 'WORKER_INTERNAL_ERROR',
+          message: safeMessage,
+        },
+        500,
+        corsHeaders
+      );
+    }
   },
 };

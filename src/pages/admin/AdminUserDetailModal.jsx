@@ -22,6 +22,7 @@ import {
 } from 'lucide-react';
 import { auth, db } from '../../services/firebase';
 import { doc, setDoc, getDoc, writeBatch } from 'firebase/firestore';
+import AppModal from '../../components/AppModal';
 import './AdminUserDetailModal.css';
 
 export default function AdminUserDetailModal({ userMeta, onClose, onUserStatusChanged }) {
@@ -41,6 +42,18 @@ export default function AdminUserDetailModal({ userMeta, onClose, onUserStatusCh
   const [editingCode, setEditingCode] = useState(false); // Kullanıcı kodu düzenleme açık mı
   const [codeForm, setCodeForm] = useState({ newCode: '', reason: '' });
   const [saveLoading, setSaveLoading] = useState(false);
+
+  // Şifre Sıfırlama ve Hesap Silme Durumları
+  const [showResetModal, setShowResetModal] = useState(false);
+  const [resetPasswordForm, setResetPasswordForm] = useState({ newPassword: '' });
+  const [resetPasswordLoading, setResetPasswordLoading] = useState(false);
+  const [resetPasswordError, setResetPasswordError] = useState(null);
+
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [deleteConfirmEmail, setDeleteConfirmEmail] = useState('');
+  const [deleteLoading, setDeleteLoading] = useState(false);
+  const [deleteError, setDeleteError] = useState(null);
+  const [deleteSteps, setDeleteSteps] = useState(null);
 
   const workerUrl = (import.meta.env.VITE_WORKER_URL || '/api/worker').replace(/\/+$/, '');
 
@@ -162,6 +175,106 @@ export default function AdminUserDetailModal({ userMeta, onClose, onUserStatusCh
       setStatusMessage({ type: 'error', text: err.message || 'İşlem başarısız oldu.' });
     } finally {
       setActionLoading(false);
+    }
+  };
+
+  // Şifre Sıfırlama (PATCH /admin/users/:uid/reset-password)
+  const handleResetPassword = async (e) => {
+    e.preventDefault();
+    const pwd = (resetPasswordForm.newPassword || '').trim();
+    if (pwd.length < 6) {
+      setResetPasswordError('Yeni şifre en az 6 karakter uzunluğunda olmalıdır.');
+      return;
+    }
+
+    setResetPasswordLoading(true);
+    setResetPasswordError(null);
+
+    try {
+      const activeUser = auth.currentUser;
+      const idToken = typeof activeUser?.getIdToken === 'function' ? await activeUser.getIdToken() : null;
+      if (!idToken) throw new Error("Oturum token'ı alınamadı.");
+
+      const res = await fetch(`${workerUrl}/admin/users/${encodeURIComponent(userMeta.uid)}/reset-password`, {
+        method: 'PATCH',
+        headers: {
+          Authorization: `Bearer ${idToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ newPassword: pwd }),
+      });
+
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data.success) {
+        setShowResetModal(false);
+        setResetPasswordForm({ newPassword: '' });
+        setStatusMessage({
+          type: 'success',
+          text: data.message || 'Kullanıcı şifresi başarıyla güncellendi.',
+        });
+      } else {
+        setResetPasswordError(data.message || 'Şifre güncellenemedi.');
+      }
+    } catch (err) {
+      setResetPasswordError(err.message || 'Worker bağlantı hatası.');
+    } finally {
+      setResetPasswordLoading(false);
+    }
+  };
+
+  // Hesabı Kalıcı Olarak Sil (DELETE /admin/users/:uid)
+  const handleDeleteUser = async (e) => {
+    e.preventDefault();
+    const rawTargetEmail = currentUserState?.email || userMeta?.email || '';
+    const targetEmail = rawTargetEmail.trim().toLowerCase();
+    const inputEmail = deleteConfirmEmail.trim().toLowerCase();
+
+    if (targetEmail && inputEmail !== targetEmail) {
+      setDeleteError('Girdiğiniz e-posta adresi kullanıcı e-postası ile eşleşmiyor.');
+      return;
+    }
+    if (!targetEmail && inputEmail !== 'sil') {
+      setDeleteError('Onaylamak için "SİL" yazmanız gerekmektedir.');
+      return;
+    }
+
+    setDeleteLoading(true);
+    setDeleteError(null);
+
+    try {
+      const activeUser = auth.currentUser;
+      const idToken = typeof activeUser?.getIdToken === 'function' ? await activeUser.getIdToken() : null;
+      if (!idToken) throw new Error("Oturum token'ı alınamadı.");
+
+      const res = await fetch(`${workerUrl}/admin/users/${encodeURIComponent(userMeta.uid)}`, {
+        method: 'DELETE',
+        headers: {
+          Authorization: `Bearer ${idToken}`,
+          'Content-Type': 'application/json',
+        },
+      });
+
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data.success) {
+        setDeleteSteps(data.steps);
+        setStatusMessage({
+          type: 'success',
+          text: data.message || 'Kullanıcı hesabı ve tüm verileri silindi.',
+        });
+        setTimeout(() => {
+          setShowDeleteModal(false);
+          if (onClose) onClose();
+        }, 1500);
+      } else {
+        setDeleteError(data.message || 'Kullanıcı silinirken hata oluştu.');
+        if (data.steps) {
+          setDeleteSteps(data.steps);
+        }
+      }
+    } catch (err) {
+      setDeleteError(err.message || 'Worker bağlantı hatası.');
+    } finally {
+      setDeleteLoading(false);
     }
   };
 
@@ -531,9 +644,40 @@ export default function AdminUserDetailModal({ userMeta, onClose, onUserStatusCh
           <div className="admin-modal-header-actions">
             <button
               type="button"
+              className="admin-header-btn btn-reset-password"
+              onClick={() => {
+                setResetPasswordForm({ newPassword: '' });
+                setResetPasswordError(null);
+                setShowResetModal(true);
+              }}
+              disabled={actionLoading || deleteLoading}
+              title="Kullanıcının Şifresini Sıfırla"
+            >
+              <Key size={14} />
+              <span>Şifreyi Sıfırla</span>
+            </button>
+
+            <button
+              type="button"
+              className="admin-header-btn btn-delete-account"
+              onClick={() => {
+                setDeleteConfirmEmail('');
+                setDeleteError(null);
+                setDeleteSteps(null);
+                setShowDeleteModal(true);
+              }}
+              disabled={actionLoading || deleteLoading}
+              title="Kullanıcı Hesabını ve Tüm Verilerini Kalıcı Olarak Sil"
+            >
+              <Trash2 size={14} />
+              <span>Hesabı Sil</span>
+            </button>
+
+            <button
+              type="button"
               className={`admin-status-toggle-btn ${isDisabled ? 'btn-activate' : 'btn-suspend'}`}
               onClick={handleToggleStatus}
-              disabled={actionLoading}
+              disabled={actionLoading || deleteLoading}
               title={isDisabled ? 'Hesabı Tekrar Aktif Et' : 'Hesabı Geçici Olarak Askıya Al'}
             >
               {isDisabled ? <Unlock size={15} /> : <Lock size={15} />}
@@ -1040,6 +1184,153 @@ export default function AdminUserDetailModal({ userMeta, onClose, onUserStatusCh
           </button>
         </div>
       </div>
+
+      {/* Şifreyi Sıfırla Modalı */}
+      <AppModal
+        open={showResetModal}
+        onClose={() => {
+          if (!resetPasswordLoading) setShowResetModal(false);
+        }}
+        title="Kullanıcı Şifresini Sıfırla"
+      >
+        <form className="admin-action-dialog-form" onSubmit={handleResetPassword}>
+          <div className="admin-dialog-info-banner">
+            <Key size={18} className="dialog-info-icon" />
+            <div>
+              <p className="dialog-info-user">
+                <strong>{currentUserState?.display_name || userMeta?.display_name || 'Kullanıcı'}</strong> ({currentUserState?.email || userMeta?.email || 'E-posta Yok'})
+              </p>
+              <p className="dialog-info-desc">
+                Bu işlem Firebase Auth üzerinden kullanıcının şifresini doğrudan günceller. Kullanıcı mevcut oturumu kapandığında yeni şifreyle giriş yapacaktır.
+              </p>
+            </div>
+          </div>
+
+          {resetPasswordError && (
+            <div className="admin-dialog-error-box">
+              <AlertTriangle size={16} />
+              <span>{resetPasswordError}</span>
+            </div>
+          )}
+
+          <div className="form-group">
+            <label htmlFor="admin-new-password">Yeni Şifre (En az 6 karakter):</label>
+            <input
+              id="admin-new-password"
+              type="text"
+              value={resetPasswordForm.newPassword}
+              onChange={(e) => setResetPasswordForm({ newPassword: e.target.value })}
+              placeholder="Yeni şifreyi girin (min 6 karakter)"
+              required
+              minLength={6}
+              autoComplete="off"
+              disabled={resetPasswordLoading}
+            />
+          </div>
+
+          <div className="admin-dialog-actions">
+            <button
+              type="button"
+              className="btn-cancel"
+              onClick={() => setShowResetModal(false)}
+              disabled={resetPasswordLoading}
+            >
+              Vazgeç
+            </button>
+            <button
+              type="submit"
+              className="btn-primary-action btn-confirm-reset"
+              disabled={resetPasswordLoading || (resetPasswordForm.newPassword || '').trim().length < 6}
+            >
+              {resetPasswordLoading ? 'Güncelleniyor...' : 'Şifreyi Güncelle'}
+            </button>
+          </div>
+        </form>
+      </AppModal>
+
+      {/* Hesabı Sil Modalı */}
+      <AppModal
+        open={showDeleteModal}
+        onClose={() => {
+          if (!deleteLoading) setShowDeleteModal(false);
+        }}
+        title="Hesabı Kalıcı Olarak Sil"
+      >
+        <form className="admin-action-dialog-form" onSubmit={handleDeleteUser}>
+          <div className="admin-dialog-danger-banner">
+            <AlertTriangle size={22} className="dialog-danger-icon" />
+            <div>
+              <strong className="dialog-danger-title">DİKKAT: Bu işlem geri alınamaz!</strong>
+              <p className="dialog-danger-desc">
+                Bu işlem kullanıcının <strong>Firebase Auth</strong> hesabını, <strong>Turso veritabanını</strong>, Firestore profilini ve kontrol paneli kaydını kalıcı olarak silecektir.
+              </p>
+            </div>
+          </div>
+
+          {deleteError && (
+            <div className="admin-dialog-error-box">
+              <AlertTriangle size={16} />
+              <span>{deleteError}</span>
+            </div>
+          )}
+
+          {deleteSteps && (
+            <div className="admin-delete-steps-summary">
+              <h4>İşlem Adımları Raporu:</h4>
+              <ul>
+                <li>Firebase Auth: <strong className={`step-${deleteSteps.firebaseAuth?.status?.toLowerCase()}`}>{deleteSteps.firebaseAuth?.status || 'Bilinmiyor'}</strong></li>
+                <li>Turso DB: <strong className={`step-${deleteSteps.tursoDb?.status?.toLowerCase()}`}>{deleteSteps.tursoDb?.status || 'Bilinmiyor'}</strong></li>
+                <li>Control Plane: <strong className={`step-${deleteSteps.controlPlane?.status?.toLowerCase()}`}>{deleteSteps.controlPlane?.status || 'Bilinmiyor'}</strong></li>
+                <li>Firestore: <strong className={`step-${deleteSteps.firestore?.status?.toLowerCase()}`}>{deleteSteps.firestore?.status || 'Bilinmiyor'}</strong></li>
+              </ul>
+            </div>
+          )}
+
+          <div className="form-group">
+            <label htmlFor="admin-confirm-email">
+              Onaylamak için lütfen kullanıcının e-posta adresini{' '}
+              <strong className="admin-danger-target-email">
+                {currentUserState?.email || userMeta?.email || 'SİL'}
+              </strong>{' '}
+              yazın:
+            </label>
+            <input
+              id="admin-confirm-email"
+              type="text"
+              value={deleteConfirmEmail}
+              onChange={(e) => setDeleteConfirmEmail(e.target.value)}
+              placeholder={currentUserState?.email || userMeta?.email || 'SİL'}
+              required
+              autoComplete="off"
+              disabled={deleteLoading}
+            />
+          </div>
+
+          <div className="admin-dialog-actions">
+            <button
+              type="button"
+              className="btn-cancel"
+              onClick={() => setShowDeleteModal(false)}
+              disabled={deleteLoading}
+            >
+              Vazgeç
+            </button>
+            <button
+              type="submit"
+              className="btn-danger-action btn-confirm-delete"
+              disabled={
+                deleteLoading ||
+                (currentUserState?.email || userMeta?.email
+                  ? deleteConfirmEmail.trim().toLowerCase() !== (currentUserState?.email || userMeta?.email).trim().toLowerCase()
+                  : deleteConfirmEmail.trim().toUpperCase() !== 'SİL')
+              }
+            >
+              <Trash2 size={15} />
+              {deleteLoading ? 'Siliniyor...' : 'Hesabı Kalıcı Olarak Sil'}
+            </button>
+          </div>
+        </form>
+      </AppModal>
     </div>
   );
 }

@@ -198,6 +198,48 @@
   color: white;
 }
 
+/* Header Aksiyon Butonları (Şifre Sıfırla & Hesabı Sil) */
+.admin-header-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.8rem;
+  font-weight: 600;
+  padding: 0.45rem 0.85rem;
+  border-radius: 0.5rem;
+  border: none;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.admin-header-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.admin-header-btn.btn-reset-password {
+  background: rgba(245, 158, 11, 0.15);
+  color: #f59e0b;
+  border: 1px solid rgba(245, 158, 11, 0.35);
+}
+
+.admin-header-btn.btn-reset-password:hover:not(:disabled) {
+  background: #f59e0b;
+  color: #111827;
+}
+
+.admin-header-btn.btn-delete-account {
+  background: rgba(239, 68, 68, 0.15);
+  color: #ef4444;
+  border: 1px solid rgba(239, 68, 68, 0.35);
+}
+
+.admin-header-btn.btn-delete-account:hover:not(:disabled) {
+  background: #ef4444;
+  color: #ffffff;
+  box-shadow: 0 0 12px rgba(239, 68, 68, 0.4);
+}
+
 .admin-modal-close-btn {
   background: transparent;
   border: 1px solid var(--border-color, #374151);
@@ -806,6 +848,191 @@
   }
   .admin-modal-header-actions {
     width: 100%;
-    justify-content: space-between;
+    flex-wrap: wrap;
+    justify-content: flex-start;
   }
+}
+
+/* Şifre Sıfırlama & Hesap Silme Dialog Stilleri */
+.admin-action-dialog-form {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+.admin-dialog-info-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  background: rgba(56, 189, 248, 0.08);
+  border: 1px solid rgba(56, 189, 248, 0.25);
+  padding: 0.85rem 1rem;
+  border-radius: 0.75rem;
+}
+
+.dialog-info-icon {
+  color: #38bdf8;
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.dialog-info-user {
+  font-size: 0.9rem;
+  color: #f3f4f6;
+  margin: 0 0 0.25rem 0;
+}
+
+.dialog-info-desc {
+  font-size: 0.8rem;
+  color: #9ca3af;
+  margin: 0;
+  line-height: 1.4;
+}
+
+.admin-dialog-danger-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  background: rgba(239, 68, 68, 0.1);
+  border: 1px solid rgba(239, 68, 68, 0.35);
+  padding: 0.85rem 1rem;
+  border-radius: 0.75rem;
+}
+
+.dialog-danger-icon {
+  color: #ef4444;
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.dialog-danger-title {
+  color: #ef4444;
+  font-size: 0.92rem;
+  display: block;
+  margin-bottom: 0.25rem;
+}
+
+.dialog-danger-desc {
+  font-size: 0.8rem;
+  color: #d1d5db;
+  margin: 0;
+  line-height: 1.4;
+}
+
+.admin-danger-target-email {
+  color: #f87171;
+  background: rgba(239, 68, 68, 0.15);
+  padding: 2px 6px;
+  border-radius: 4px;
+  user-select: all;
+  word-break: break-all;
+}
+
+.admin-dialog-error-box {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  background: rgba(239, 68, 68, 0.15);
+  border: 1px solid rgba(239, 68, 68, 0.35);
+  color: #fca5a5;
+  padding: 0.75rem 1rem;
+  border-radius: 0.5rem;
+  font-size: 0.82rem;
+}
+
+.admin-delete-steps-summary {
+  background: rgba(0, 0, 0, 0.25);
+  border: 1px solid var(--border-color, #374151);
+  border-radius: 0.5rem;
+  padding: 0.75rem 1rem;
+}
+
+.admin-delete-steps-summary h4 {
+  font-size: 0.82rem;
+  margin: 0 0 0.5rem 0;
+  color: #9ca3af;
+}
+
+.admin-delete-steps-summary ul {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  font-size: 0.8rem;
+}
+
+.admin-delete-steps-summary li {
+  display: flex;
+  justify-content: space-between;
+  color: #d1d5db;
+}
+
+.step-success {
+  color: #34d399;
+}
+
+.step-already_deleted {
+  color: #38bdf8;
+}
+
+.step-failed {
+  color: #f87171;
+}
+
+.admin-dialog-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.75rem;
+  margin-top: 0.5rem;
+}
+
+.btn-primary-action {
+  padding: 0.55rem 1.2rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+  border-radius: 0.5rem;
+  border: none;
+  cursor: pointer;
+  background: #3b82f6;
+  color: #ffffff;
+  transition: all 0.2s ease;
+}
+
+.btn-primary-action:hover:not(:disabled) {
+  background: #2563eb;
+}
+
+.btn-primary-action:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.btn-danger-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.55rem 1.2rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+  border-radius: 0.5rem;
+  border: none;
+  cursor: pointer;
+  background: #ef4444;
+  color: #ffffff;
+  transition: all 0.2s ease;
+}
+
+.btn-danger-action:hover:not(:disabled) {
+  background: #dc2626;
+  box-shadow: 0 0 12px rgba(239, 68, 68, 0.4);
+}
+
+.btn-danger-action:disabled {
+  background: #4b5563;
+  color: #9ca3af;
+  cursor: not-allowed;
+  opacity: 0.6;
 }

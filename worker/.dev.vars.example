@@ -1,0 +1,21 @@
+# J-Planning Cloudflare Worker — Yerel Geliştirme Değişkenleri Şablonu
+#
+# KULLANIM:
+# Bu dosyayı "worker/.dev.vars" olarak kopyalayın ve gerçek değerlerinizi girin.
+# DİKKAT: "worker/.dev.vars" dosyası gizli anahtarlar içerir, .gitignore'a eklenmiştir ve ASLA git'e commit edilmemelidir.
+
+# 1. Firebase Service Account (Tek satırlık JSON string olarak girilmelidir)
+# Firebase Console > Project Settings > Service Accounts > Generate new private key adımıyla indirilen JSON içeriği
+FIREBASE_SERVICE_ACCOUNT={"type":"service_account","project_id":"j-planning","private_key_id":"your-private-key-id","private_key":"-----BEGIN PRIVATE KEY-----\nMIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQD...\n-----END PRIVATE KEY-----\n","client_email":"firebase-adminsdk-xxxxx@j-planning.iam.gserviceaccount.com","client_id":"000000000000000000000","auth_uri":"https://accounts.google.com/o/oauth2/auth","token_uri":"https://oauth2.googleapis.com/token","auth_provider_x509_cert_url":"https://www.googleapis.com/oauth2/v1/certs","client_x509_cert_url":"https://www.googleapis.com/robot/v1/metadata/x509/firebase-adminsdk-xxxxx%40j-planning.iam.gserviceaccount.com"}
+
+# 2. Turso Control Plane Veritabanı Erişim Token'ı
+# Control Plane veritabanına (jplanning-control-org) okuma/yazma izni veren token
+TURSO_CONTROL_DB_TOKEN=your-turso-control-db-token-here
+
+# 3. Turso Platform API Token'ı
+# Kullanıcılar için dinamik Turso DB oluşturma, silme ve token üretme yetkisine sahip Turso Platform API token'ı
+TURSO_PLATFORM_TOKEN=your-turso-platform-api-token-here
+
+# 4. (Opsiyonel) Turso Control Plane DB URL'i
+# Varsayılan: libsql://jplanning-control-ysftrasci.turso.io
+# TURSO_CONTROL_DB_URL=libsql://your-control-db-url.turso.io

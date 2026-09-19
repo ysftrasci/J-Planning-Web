@@ -134,6 +134,18 @@ export default function AdminAuditLogPage() {
             <Key size={13} /> Kod Değişikliği (Yönetici)
           </span>
         );
+      case 'ADMIN_DELETED_USER':
+        return (
+          <span className="audit-action-badge action-self-delete">
+            <Trash2 size={13} /> Hesap Silme (Yönetici)
+          </span>
+        );
+      case 'ADMIN_RESET_PASSWORD':
+        return (
+          <span className="audit-action-badge action-task">
+            <Key size={13} /> Şifre Sıfırlama (Yönetici)
+          </span>
+        );
       default:
         return <span className="audit-action-badge action-default">{action}</span>;
     }
@@ -166,7 +178,59 @@ export default function AdminAuditLogPage() {
       );
     }
 
-    // 2. Özel Durum: Görev Silme (DELETE_TASK)
+    // 2. Özel Durum: Yöneticinin kullanıcı hesabını silmesi (ADMIN_DELETED_USER)
+    if (action === 'ADMIN_DELETED_USER') {
+      const steps = newObj?.steps || {};
+      const stepLabels = {
+        firebaseAuth: 'Firebase Auth',
+        tursoDb: 'Turso DB',
+        controlPlane: 'Control Plane',
+        firestore: 'Firestore',
+      };
+
+      const failedSteps = Object.entries(steps)
+        .filter(([_, v]) => v?.status === 'FAILED')
+        .map(([k]) => stepLabels[k] || k);
+
+      const hasFailed = failedSteps.length > 0;
+
+      const summaryText = hasFailed
+        ? `Hesap silindi (${failedSteps.join(', ')} adımı başarısız oldu, detay için loglara bakın)`
+        : 'Hesap kalıcı olarak silindi (Firebase Auth, Turso DB, Control Plane, Firestore)';
+
+      return (
+        <div className="diff-container font-mono">
+          <div className="diff-field-row">
+            <span
+              className={hasFailed ? 'diff-old' : 'diff-new'}
+              style={{ display: 'inline-flex', alignItems: 'center', gap: '5px' }}
+            >
+              <Trash2 size={13} />
+              <span>{summaryText}</span>
+            </span>
+          </div>
+        </div>
+      );
+    }
+
+    // 3. Özel Durum: Yöneticinin kullanıcı şifresini sıfırlaması (ADMIN_RESET_PASSWORD)
+    if (action === 'ADMIN_RESET_PASSWORD') {
+      const note =
+        (typeof newObj === 'object' && newObj?.note) ||
+        'Kullanıcı şifresi yönetici tarafından doğrudan sıfırlandı';
+      return (
+        <div className="diff-container font-mono">
+          <div className="diff-field-row">
+            <span className="diff-new" style={{ display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
+              <Key size={13} />
+              <span>{note}</span>
+            </span>
+          </div>
+        </div>
+      );
+    }
+
+    // 4. Özel Durum: Görev Silme (DELETE_TASK)
     if (action === 'DELETE_TASK') {
       const taskTitle = oldObj?.title || 'Bilinmeyen Görev';
       const priority = oldObj?.priority ? ` • Öncelik: ${oldObj.priority}` : '';
@@ -183,7 +247,7 @@ export default function AdminAuditLogPage() {
       );
     }
 
-    // 3. Özel Durum: Kullanıcı Kodu Değişikliği (UPDATE_USER_CODE)
+    // 5. Özel Durum: Kullanıcı Kodu Değişikliği (UPDATE_USER_CODE)
     if (action === 'UPDATE_USER_CODE') {
       const oldCode = oldObj?.userCode || 'Yok';
       const newCode = newObj?.userCode || 'Yok';
@@ -307,6 +371,8 @@ export default function AdminAuditLogPage() {
               <option value="UPDATE_REWARD">Ödül Düzenlemeleri</option>
               <option value="TOGGLE_STATUS">Hesap Askıya Alma</option>
               <option value="USER_SELF_DELETED">Hesap Silme (Kullanıcı)</option>
+              <option value="ADMIN_DELETED_USER">Hesap Silme (Yönetici)</option>
+              <option value="ADMIN_RESET_PASSWORD">Şifre Sıfırlama (Yönetici)</option>
             </select>
           </div>
 
@@ -381,12 +447,17 @@ export default function AdminAuditLogPage() {
                       const targetEmail =
                         log.target_user_email ||
                         (oldObj && typeof oldObj === 'object' ? oldObj.email : null);
+                      if (!targetEmail && !log.target_user_uid) {
+                        return <span className="audit-empty-dash">—</span>;
+                      }
                       return (
                         <div className="target-user-cell font-mono">
                           {targetEmail ? (
                             <>
                               <span className="target-email-text">{targetEmail}</span>
-                              <span className="target-uid-sub">{log.target_user_uid}</span>
+                              {log.target_user_uid && (
+                                <span className="target-uid-sub">{log.target_user_uid}</span>
+                              )}
                             </>
                           ) : (
                             <span className="target-uid-tag">{log.target_user_uid}</span>

@@ -26,11 +26,26 @@ cp .env.example .env
 npm run dev
 ```
 
+#### Yerel Worker ile Birlikte Çalışma (Opsiyonel)
+
+Frontend varsayılan olarak canlı Cloudflare Worker'a bağlanır. Eğer geliştirmeyi yerel worker (`wrangler dev` — `http://127.0.0.1:8787`) ile birlikte test etmek isterseniz:
+
+```bash
+# .env.local dosyanıza yerel worker hedefini tanımlayın (bkz: .env.local.example)
+VITE_WORKER_PROXY_TARGET=http://127.0.0.1:8787
+```
+
 ### Worker (Cloudflare) Kurulumu
 
 ```bash
 cd worker
 npm install
+
+# Yerel geliştirme için .dev.vars dosyasını oluşturun (bkz: worker/README.md)
+cp .dev.vars.example .dev.vars
+npm run dev
+
+# Canlı ortama deploy için
 npx wrangler deploy
 ```
 
