@@ -67,3 +67,60 @@ export function appendAblativeSuffix(name, fallback = 'Arkadaşından') {
 
   return `${clean}'${consonantChoice}${vowelChoice}n`;
 }
+
+/**
+ * Sayılara bulunma (-de / -da / -te / -ta / -sinde / -sında) eki getirir.
+ * "X'inde / X'ında" veya "X'te / X'de" kalıbı için:
+ * Örn: 0'ında, 1'inde, 2'sinde, 3'ünde, 4'ünde, 5'inde, 6'sında, 7'sinde, 8'inde, 9'unda, 10'unda, 20'sinde, vb.
+ */
+export function formatNumberLocativeSuffix(n) {
+  const num = Number(n);
+  if (isNaN(num)) return `${n}'de`;
+
+  // Son basamak veya onlar basamağına göre Türkçe okunuş
+  const map = {
+    0: "0'ında",
+    1: "1'inde",
+    2: "2'sinde",
+    3: "3'ünde",
+    4: "4'ünde",
+    5: "5'inde",
+    6: "6'sında",
+    7: "7'sinde",
+    8: "8'inde",
+    9: "9'unda",
+    10: "10'unda",
+    20: "20'sinde",
+    30: "30'unda",
+    40: "40'ında",
+    50: "50'sinde",
+    60: "60'ında",
+    70: "70'inde",
+    80: "80'inde",
+    90: "90'ında",
+    100: "100'ünde",
+  };
+
+  if (map[num] !== undefined) {
+    return map[num];
+  }
+
+  // 11-19, 21-29 gibi ara sayılar için son rakam belirleyicidir
+  const lastDigit = num % 10;
+  if (lastDigit !== 0) {
+    const digitSuffix = {
+      1: "'inde",
+      2: "'sinde",
+      3: "'ünde",
+      4: "'ünde",
+      5: "'inde",
+      6: "'sında",
+      7: "'sinde",
+      8: "'inde",
+      9: "'unda",
+    }[lastDigit];
+    return `${num}${digitSuffix}`;
+  }
+
+  return `${num}'inde`;
+}

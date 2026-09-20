@@ -287,9 +287,10 @@ export async function initGuestDatabase() {
   currentUid = 'guest';
   currentSession = null;
 
-  // Varsayılan kategorileri ve 0 bakiyeli cüzdanı yerel motorda hazırla
+  // Varsayılan kategorileri, görev şemasını ve 0 bakiyeli cüzdanı yerel motorda hazırla
   await Promise.all([
     ensureDefaultCategories().catch((e) => console.warn('[GuestDB] Varsayılan kategoriler uyarısı:', e)),
+    ensureTaskSchema(dbInstance).catch((e) => console.warn('[GuestDB] Görev şeması uyarısı:', e)),
     dbInstance.getFirstAsync('SELECT userId FROM wallet WHERE userId = ?', ['me'])
       .then((existing) => {
         if (!existing) {
@@ -301,6 +302,18 @@ export async function initGuestDatabase() {
 
   notifyDatabaseReady();
   return dbInstance;
+}
+
+/**
+ * Görevler tablosunda intervalValue kolonunun varlığını garanti eder (Migration)
+ */
+export async function ensureTaskSchema(db) {
+  if (!db) return;
+  try {
+    await db.runAsync('ALTER TABLE tasks ADD COLUMN intervalValue INTEGER NOT NULL DEFAULT 1;');
+  } catch (_) {
+    // Kolon zaten varsa SQLite hata verir, güvenle yakalanır
+  }
 }
 
 /**
@@ -326,9 +339,10 @@ export async function initDatabase(uid) {
       console.error('[Migration] Migrasyon sırasında beklenmeyen hata:', migErr);
     }
 
-    // 2. Varsayılan kategorileri ve cüzdanı paralel kontrol et
+    // 2. Varsayılan kategorileri, görev şemasını ve cüzdanı paralel kontrol et
     await Promise.all([
       ensureDefaultCategories().catch((e) => console.warn('Varsayılan kategoriler uyarısı:', e)),
+      ensureTaskSchema(db).catch((e) => console.warn('Görev şeması uyarısı:', e)),
       db.getFirstAsync('SELECT userId FROM wallet WHERE userId = ?', ['me'])
         .then((existing) => {
           if (!existing) {

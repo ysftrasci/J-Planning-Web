@@ -18,7 +18,8 @@ CREATE TABLE IF NOT EXISTS tasks (
   notes TEXT,
   categoryId TEXT,
   priority TEXT NOT NULL DEFAULT 'MEDIUM',       -- HIGH | MEDIUM | LOW
-  period TEXT NOT NULL DEFAULT 'DAILY',          -- DAILY | WEEKLY | MONTHLY
+  period TEXT NOT NULL DEFAULT 'DAILY',          -- DAILY | WEEKLY | MONTHLY | ONCE
+  intervalValue INTEGER NOT NULL DEFAULT 1,      -- N birimde bir (örn. her 3 günde, her 2 haftada)
   ownerUserId TEXT NOT NULL DEFAULT 'me',        -- 'me' ya da arkadaşın userId'si
   assignedByUserId TEXT,                         -- görevi atayan kişi (sosyal özellik)
   assignedByName TEXT,

@@ -29,12 +29,13 @@ const taskDeletionNoticesRef = collection(db, 'taskDeletionNotices');
 const VALID_PRIORITIES = ['HIGH', 'MEDIUM', 'LOW', 'ZERO'];
 const VALID_PERIODS = ['DAILY', 'WEEKLY', 'MONTHLY', 'ONCE'];
 
-export async function assignTaskToFriend({ assignedByUid, assignedByName, assignedToUid, assignedToName, title, description, priority, period, subtaskCount, subtaskLabels }) {
+export async function assignTaskToFriend({ assignedByUid, assignedByName, assignedToUid, assignedToName, title, description, priority, period, intervalValue, subtaskCount, subtaskLabels }) {
   const cleanTitle = (title || '').trim().slice(0, 300);
   if (!cleanTitle) throw new Error('Görev adı boş olamaz.');
 
   const cleanPriority = typeof priority === 'string' && VALID_PRIORITIES.includes(priority.toUpperCase()) ? priority.toUpperCase() : 'MEDIUM';
   const cleanPeriod = typeof period === 'string' && VALID_PERIODS.includes(period.toUpperCase()) ? period.toUpperCase() : 'DAILY';
+  const interval = Math.max(1, parseInt(intervalValue, 10) || 1);
   const count = Math.max(1, Math.min(100, parseInt(subtaskCount, 10) || 1));
   const descText = typeof description === 'string' && description.trim() ? description.trim().slice(0, 1000) : null;
 
@@ -47,6 +48,7 @@ export async function assignTaskToFriend({ assignedByUid, assignedByName, assign
     description: descText,
     priority: cleanPriority,
     period: cleanPeriod,
+    intervalValue: interval,
     subtaskCount: count,
     subtaskLabels: Array.isArray(subtaskLabels) ? subtaskLabels.map((l) => String(l || '').slice(0, 200)) : null,
     status: 'PENDING',
@@ -62,13 +64,14 @@ export async function assignTaskToFriend({ assignedByUid, assignedByName, assign
   return docRef.id;
 }
 
-export async function updateAssignedTaskInFirestore(firestoreAssignmentId, { title, description, priority, period, subtaskCount, subtaskLabels }) {
+export async function updateAssignedTaskInFirestore(firestoreAssignmentId, { title, description, priority, period, intervalValue, subtaskCount, subtaskLabels }) {
   if (!firestoreAssignmentId) return;
   const cleanTitle = (title || '').trim().slice(0, 300);
   if (!cleanTitle) throw new Error('Görev adı boş olamaz.');
 
   const cleanPriority = typeof priority === 'string' && VALID_PRIORITIES.includes(priority.toUpperCase()) ? priority.toUpperCase() : 'MEDIUM';
   const cleanPeriod = typeof period === 'string' && VALID_PERIODS.includes(period.toUpperCase()) ? period.toUpperCase() : 'DAILY';
+  const interval = Math.max(1, parseInt(intervalValue, 10) || 1);
   const count = Math.max(1, Math.min(100, parseInt(subtaskCount, 10) || 1));
   const descText = typeof description === 'string' && description.trim() ? description.trim().slice(0, 1000) : null;
 
@@ -77,6 +80,7 @@ export async function updateAssignedTaskInFirestore(firestoreAssignmentId, { tit
     description: descText,
     priority: cleanPriority,
     period: cleanPeriod,
+    intervalValue: interval,
     subtaskCount: count,
     subtaskLabels: Array.isArray(subtaskLabels) ? subtaskLabels.map((l) => String(l || '').slice(0, 200)) : null,
     updatedAt: serverTimestamp(),

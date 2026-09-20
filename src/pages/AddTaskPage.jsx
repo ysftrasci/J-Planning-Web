@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react';
-import { X, Plus } from 'lucide-react';
+import { X, Plus, ChevronDown, ChevronUp, Minus } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { createTask, getActiveTasks } from '../db/taskRepository';
 import { getCategories } from '../db/categoryRepository';
 import { useAuth } from '../context/AuthContext.jsx';
 import { listenFriends } from '../services/friendService';
 import { assignTaskToFriend } from '../services/taskAssignmentService';
+import { formatPeriodFrequency } from '../utils/period';
 import GuestLimitModal from '../components/GuestLimitModal.jsx';
 import './AddTaskPage.css';
 
@@ -24,11 +25,17 @@ const DIFFICULTIES = [
 ];
 
 const PERIODS = [
-  { key: 'DAILY', label: 'Günlük' },
-  { key: 'WEEKLY', label: 'Haftalık' },
-  { key: 'MONTHLY', label: 'Aylık' },
+  { key: 'DAILY', label: 'Gün' },
+  { key: 'WEEKLY', label: 'Hafta' },
+  { key: 'MONTHLY', label: 'Ay' },
   { key: 'ONCE', label: 'Tek Seferlik' },
 ];
+
+const LIMITS = {
+  DAILY: { maxInterval: 30, maxSubtasks: 3, unitSingular: 'gün', unitPlural: 'günde' },
+  WEEKLY: { maxInterval: 12, maxSubtasks: 14, unitSingular: 'hafta', unitPlural: 'haftada' },
+  MONTHLY: { maxInterval: 6, maxSubtasks: 60, unitSingular: 'ay', unitPlural: 'ayda' },
+};
 
 export default function AddTaskPage() {
   const { user, isGuest } = useAuth();
@@ -37,11 +44,14 @@ export default function AddTaskPage() {
   const [description, setDescription] = useState('');
   const [priority, setPriority] = useState('MEDIUM');
   const [period, setPeriod] = useState('DAILY');
+  const [intervalValue, setIntervalValue] = useState(1);
+  const [subtaskCount, setSubtaskCount] = useState(1);
+  const [subtaskLabels, setSubtaskLabels] = useState(['']);
+  const [showCustomLabels, setShowCustomLabels] = useState(false);
   const [categoryId, setCategoryId] = useState(null);
   const [assignTo, setAssignTo] = useState('me'); // 'me' | friendUid
   const [categories, setCategories] = useState([]);
   const [friends, setFriends] = useState([]);
-  const [subtaskLabels, setSubtaskLabels] = useState(['']);
   const [errorMessage, setErrorMessage] = useState('');
   const [saving, setSaving] = useState(false);
   const [showLimitModal, setShowLimitModal] = useState(false);
@@ -65,14 +75,52 @@ export default function AddTaskPage() {
   }, [user, isGuest]);
 
   const isOnce = period === 'ONCE';
+  const currentLimits = LIMITS[period] || LIMITS.DAILY;
 
   const handlePeriodChange = (newPeriod) => {
     setPeriod(newPeriod);
     setPriority('MEDIUM');
+    if (newPeriod === 'ONCE') {
+      setIntervalValue(1);
+      setSubtaskCount(1);
+      setSubtaskLabels(['']);
+    } else {
+      const nextLimit = LIMITS[newPeriod];
+      if (intervalValue > nextLimit.maxInterval) {
+        setIntervalValue(nextLimit.maxInterval);
+      }
+      if (subtaskCount > nextLimit.maxSubtasks) {
+        setSubtaskCount(nextLimit.maxSubtasks);
+        syncLabelsToCount(nextLimit.maxSubtasks);
+      }
+    }
   };
 
-  const addSubtaskRow = () => setSubtaskLabels((prev) => [...prev, '']);
-  const removeSubtaskRow = (index) => setSubtaskLabels((prev) => prev.filter((_, i) => i !== index));
+  const handleIntervalChange = (val) => {
+    const num = parseInt(val, 10) || 1;
+    const clamped = Math.max(1, Math.min(currentLimits.maxInterval, num));
+    setIntervalValue(clamped);
+  };
+
+  const syncLabelsToCount = (newCount) => {
+    setSubtaskLabels((prev) => {
+      const arr = [...prev];
+      if (newCount > arr.length) {
+        while (arr.length < newCount) arr.push('');
+      } else if (newCount < arr.length) {
+        arr.length = newCount;
+      }
+      return arr;
+    });
+  };
+
+  const handleSubtaskCountChange = (val) => {
+    const num = parseInt(val, 10) || 1;
+    const clamped = Math.max(1, Math.min(currentLimits.maxSubtasks, num));
+    setSubtaskCount(clamped);
+    syncLabelsToCount(clamped);
+  };
+
   const updateSubtaskLabel = (index, value) => {
     setSubtaskLabels((prev) => prev.map((l, i) => (i === index ? value : l)));
   };
@@ -96,8 +144,9 @@ export default function AddTaskPage() {
       } catch (_) {}
     }
 
-    const subtaskCount = isOnce ? 1 : subtaskLabels.length;
-    const effectiveSubtaskLabels = isOnce ? [''] : subtaskLabels;
+    const effectiveInterval = isOnce ? 1 : intervalValue;
+    const effectiveCount = isOnce ? 1 : subtaskCount;
+    const effectiveLabels = isOnce ? [''] : subtaskLabels.slice(0, effectiveCount);
 
     if (assignTo === 'me') {
       try {
@@ -108,8 +157,9 @@ export default function AddTaskPage() {
           categoryId,
           priority,
           period,
-          subtaskCount,
-          subtaskLabels: effectiveSubtaskLabels,
+          intervalValue: effectiveInterval,
+          subtaskCount: effectiveCount,
+          subtaskLabels: effectiveLabels,
         });
         navigate('/');
       } catch (err) {
@@ -132,9 +182,10 @@ export default function AddTaskPage() {
         title: title.trim(),
         description: description ? description.trim() : '',
         period,
+        intervalValue: effectiveInterval,
         priority,
-        subtaskCount,
-        subtaskLabels: effectiveSubtaskLabels,
+        subtaskCount: effectiveCount,
+        subtaskLabels: effectiveLabels,
       });
       navigate('/assigned-by-me');
     } catch (err) {
@@ -201,8 +252,8 @@ export default function AddTaskPage() {
           </>
         )}
 
-        {/* Periyot */}
-        <label className="add-task-page__label">Periyot</label>
+        {/* Periyot Seçimi */}
+        <label className="add-task-page__label">Tekrar Sıklığı (Periyot)</label>
         <div className="add-task-page__chip-row">
           {PERIODS.map((p) => (
             <button
@@ -215,6 +266,43 @@ export default function AddTaskPage() {
             </button>
           ))}
         </div>
+
+        {/* Aralık Seçimi (Her N günde/haftada/ayda bir) - Tek Seferlik değilse */}
+        {!isOnce && (
+          <div className="add-task-page__interval-box">
+            <div className="add-task-page__interval-header">
+              <span className="add-task-page__interval-title">Tekrar Aralığı</span>
+              <span className="add-task-page__interval-badge">
+                {intervalValue === 1 ? `Her ${currentLimits.unitSingular}` : `Her ${intervalValue} ${currentLimits.unitPlural} bir`}
+              </span>
+            </div>
+            <div className="add-task-page__interval-chips">
+              {[1, 2, 3].map((val) => (
+                <button
+                  key={val}
+                  type="button"
+                  className={`add-task-page__mini-chip ${intervalValue === val ? 'add-task-page__mini-chip--selected' : ''}`}
+                  onClick={() => handleIntervalChange(val)}
+                >
+                  {val === 1 ? `Her ${currentLimits.unitSingular}` : `${val} ${currentLimits.unitPlural} bir`}
+                </button>
+              ))}
+              {/* Özel giriş */}
+              <div className="add-task-page__custom-interval">
+                <span>Özel:</span>
+                <input
+                  type="number"
+                  min="1"
+                  max={currentLimits.maxInterval}
+                  className="add-task-page__num-input"
+                  value={intervalValue}
+                  onChange={(e) => handleIntervalChange(e.target.value)}
+                />
+                <span className="add-task-page__unit-text">{currentLimits.unitSingular} (en fazla {currentLimits.maxInterval})</span>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Öncelik / Zorluk */}
         <label className="add-task-page__label">{isOnce ? 'Zorluk' : 'Öncelik'}</label>
@@ -253,43 +341,71 @@ export default function AddTaskPage() {
           ))}
         </div>
 
-        {/* Sıklık */}
+        {/* Hedef Tekrar Sayısı & Alt Adımlar - Tek Seferlik değilse */}
         {!isOnce && (
-          <div className="add-task-page__frequency-section">
-            <label className="add-task-page__label">Sıklık (kaç kez yapılmalı?)</label>
-            <p className="add-task-page__hint">
-              Görev bu periyotta birden fazla kez yapılacaksa (ör. diş fırçalama: sabah + akşam), her tekrar için bir satır ekle. İsim yazmazsan sadece sayı gösterilir.
-            </p>
+          <div className="add-task-page__frequency-card">
+            <div className="add-task-page__frequency-header">
+              <div>
+                <label className="add-task-page__label" style={{ margin: 0 }}>Periyot İçi Hedef Tekrar</label>
+                <p className="add-task-page__summary-preview">
+                  🎯 {formatPeriodFrequency({ period, intervalValue }, subtaskCount)}
+                </p>
+              </div>
 
-            {subtaskLabels.map((lbl, idx) => (
-              <div key={idx} className="add-task-page__subtask-row">
-                <input
-                  type="text"
-                  className="add-task-page__input add-task-page__subtask-input"
-                  placeholder={`${idx + 1}. tekrar (opsiyonel isim)`}
-                  value={lbl}
-                  onChange={(e) => updateSubtaskLabel(idx, e.target.value)}
-                />
-                {subtaskLabels.length > 1 && (
-                  <button
-                    type="button"
-                    className="add-task-page__remove-subtask"
-                    onClick={() => removeSubtaskRow(idx)}
-                    aria-label="Tekrarı sil"
-                  >
-                    <X size={18} />
-                  </button>
+              {/* Stepper Kontrolü */}
+              <div className="add-task-page__stepper">
+                <button
+                  type="button"
+                  className="add-task-page__stepper-btn"
+                  onClick={() => handleSubtaskCountChange(subtaskCount - 1)}
+                  disabled={subtaskCount <= 1}
+                  aria-label="Azalt"
+                >
+                  <Minus size={16} />
+                </button>
+                <span className="add-task-page__stepper-val">{subtaskCount}</span>
+                <button
+                  type="button"
+                  className="add-task-page__stepper-btn"
+                  onClick={() => handleSubtaskCountChange(subtaskCount + 1)}
+                  disabled={subtaskCount >= currentLimits.maxSubtasks}
+                  aria-label="Artır"
+                >
+                  <Plus size={16} />
+                </button>
+              </div>
+            </div>
+
+            {/* İsteğe bağlı: Tekrarları İsimlendir Akordeonu */}
+            {subtaskCount > 1 && (
+              <div className="add-task-page__accordion">
+                <button
+                  type="button"
+                  className="add-task-page__accordion-toggle"
+                  onClick={() => setShowCustomLabels(!showCustomLabels)}
+                >
+                  <span>Tekrarları İsimlendir (örn. Sabah, Akşam) — İsteğe bağlı</span>
+                  {showCustomLabels ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+                </button>
+
+                {showCustomLabels && (
+                  <div className="add-task-page__subtask-list">
+                    {Array.from({ length: subtaskCount }).map((_, idx) => (
+                      <div key={idx} className="add-task-page__subtask-row">
+                        <span className="add-task-page__subtask-idx">{idx + 1}.</span>
+                        <input
+                          type="text"
+                          className="add-task-page__input add-task-page__subtask-input"
+                          placeholder={`${idx + 1}. tekrar için isim (isteğe bağlı)`}
+                          value={subtaskLabels[idx] || ''}
+                          onChange={(e) => updateSubtaskLabel(idx, e.target.value)}
+                        />
+                      </div>
+                    ))}
+                  </div>
                 )}
               </div>
-            ))}
-
-            <button
-              type="button"
-              className="add-task-page__add-subtask-link"
-              onClick={addSubtaskRow}
-            >
-              + Tekrar Ekle
-            </button>
+            )}
           </div>
         )}
 

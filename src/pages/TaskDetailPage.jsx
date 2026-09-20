@@ -92,7 +92,7 @@ export default function TaskDetailPage() {
         } else {
           setCategoryName('');
         }
-        const todayKey = getPeriodKey(t.period, new Date());
+        const todayKey = getPeriodKey(t, new Date());
         const [studyLog, recs, jp] = await Promise.all([
           getTaskStudyLog(realId, todayKey),
           getTaskRecords(realId),
@@ -126,7 +126,7 @@ export default function TaskDetailPage() {
     e?.preventDefault();
     if (!task) return;
     const realId = task.id;
-    const todayKey = getPeriodKey(task.period, new Date());
+    const todayKey = getPeriodKey(task, new Date());
     await saveTaskStudyLog(realId, todayKey, studyTimeText);
     setStudyLogSaved(true);
     setTimeout(() => setStudyLogSaved(false), 2000);
@@ -148,7 +148,7 @@ export default function TaskDetailPage() {
 
   const currentStreak = calculateCurrentStreak(task, records);
   const maxStreak = calculateMaxStreak(task, records);
-  const completionStats = calculateCompletionStats(records);
+  const completionStats = calculateCompletionStats(records, task.subtaskCount || 1);
   const recentSummary = calculateRecentSummary(task, records);
   const isFriendAssigned = task.assignmentDirection === 'RECEIVED' && task.assignmentStatus === 'ACCEPTED';
   const isSent = task.assignmentDirection === 'SENT';
@@ -168,7 +168,7 @@ export default function TaskDetailPage() {
   };
 
   const openLateMarkConfirm = (record, action = 'COMPLETE') => {
-    const periodEnd = getPeriodEndTimestamp(task.period, record.periodKey);
+    const periodEnd = getPeriodEndTimestamp(task, record.periodKey);
     if (!isWithinLateMarkWindow(periodEnd)) {
       setErrorMessage('Bu görev 7 günden (1 hafta) eski olduğu için artık değiştirilemez.');
       return;
@@ -247,7 +247,7 @@ export default function TaskDetailPage() {
 
       <h1>{task.title}</h1>
       <p className="caption task-detail-page__subtitle">
-        {periodLabel(task.period)} görev • {PRIORITY_LABEL[task.priority]} öncelik
+        {periodLabel(task)} görev • {PRIORITY_LABEL[task.priority]} öncelik
       </p>
       {task.description && (
         <p className="caption" style={{ marginTop: 'var(--space-xs)', color: 'var(--color-text-primary)' }}>
@@ -308,9 +308,7 @@ export default function TaskDetailPage() {
       {task.period !== 'ONCE' && (
         <div className="task-detail-page__recent-summary">
           <CalendarDays size={16} />
-          <span>
-            Son {recentSummary.countedPeriods} {recentSummary.unitLabel}in {recentSummary.successCount} tanesinde tamamlandı
-          </span>
+          <span>{recentSummary.summaryText}</span>
         </div>
       )}
 
@@ -419,16 +417,17 @@ function Stat({ icon: Icon, value, label }) {
 
 function HistoryRow({ record, task, onLateMark }) {
   const isSuccess = record.status === 'SUCCESSFUL';
+  const isFrozen = record.status === 'FROZEN';
   const isPartial = record.status === 'PENDING_PARTIAL';
-  const periodEnd = getPeriodEndTimestamp(task.period, record.periodKey);
+  const periodEnd = getPeriodEndTimestamp(task, record.periodKey);
   const canLateMark = isWithinLateMarkWindow(periodEnd);
   const subtaskCount = task.subtaskCount || 1;
 
   const showsRealCompletionDate = isSuccess && record.completedAt && task.period !== 'DAILY';
   const primaryDateLabel = showsRealCompletionDate ? formatDate(new Date(record.completedAt)) : formatDate(record.periodKey);
-  const periodContextLabel = showsRealCompletionDate ? `${periodLabel(task.period)} periyodu: ${formatDate(record.periodKey)}` : null;
+  const periodContextLabel = showsRealCompletionDate ? `${periodLabel(task)} periyodu: ${formatDate(record.periodKey)}` : null;
 
-  const dotClass = isSuccess
+  const dotClass = isSuccess || isFrozen
     ? 'task-detail-page__history-dot--success'
     : isPartial
       ? 'task-detail-page__history-dot--partial'
@@ -443,9 +442,11 @@ function HistoryRow({ record, task, onLateMark }) {
         <p className="task-detail-page__history-status">
           {isSuccess
             ? `Tamamlandı${record.isLateMarked ? ' (geç işaretlendi)' : ''}`
-            : isPartial
-              ? `Devam ediyor (${record.completedSubtasks}/${subtaskCount})`
-              : 'Başarısız / Yapılmadı'}
+            : isFrozen
+              ? 'Donduruldu ❄️'
+              : isPartial
+                ? `Devam ediyor (${record.completedSubtasks || 0}/${subtaskCount})`
+                : 'Başarısız / Yapılmadı'}
         </p>
       </div>
       {canLateMark && (

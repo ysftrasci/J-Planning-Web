@@ -108,7 +108,7 @@ export default function TasksListPage() {
           : task;
 
         const taskRecords = recordsByTaskId.get(task.id) || [];
-        const currentPeriodKey = getPeriodKey(task.period, now);
+        const currentPeriodKey = getPeriodKey(task, now);
         const currentRecord = taskRecords.find((r) => r.periodKey === currentPeriodKey);
 
         const status = currentRecord ? currentRecord.status : 'PENDING';
@@ -213,7 +213,7 @@ export default function TasksListPage() {
     try {
       const result = await completeSubtask(task.id);
       if (result?.firestoreAssignmentId) {
-        const periodKey = getPeriodKey(task.period, new Date());
+        const periodKey = getPeriodKey(task, new Date());
         const isNewlyCompleted = result?.fullyCompleted === true && !result?.alreadyComplete;
         await syncCompletionStatusToFirestore(result.firestoreAssignmentId, {
           isCompleted: !!result.fullyCompleted || !!result.alreadyComplete,
@@ -256,7 +256,7 @@ export default function TasksListPage() {
     try {
       const result = await uncompleteSubtask(task.id);
       if (result?.firestoreAssignmentId) {
-        const periodKey = getPeriodKey(task.period, new Date());
+        const periodKey = getPeriodKey(task, new Date());
         await syncCompletionStatusToFirestore(result.firestoreAssignmentId, {
           isCompleted: false,
           completedSubtasks: result.completedSubtasks,

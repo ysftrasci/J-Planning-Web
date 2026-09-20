@@ -1,6 +1,6 @@
 // J-Planning — Görev Düzenle Sayfası (Web)
 import { useEffect, useState } from 'react';
-import { ChevronLeft, Plus, X, ShieldAlert } from 'lucide-react';
+import { ChevronLeft, Plus, Minus, ChevronDown, ChevronUp, ShieldAlert } from 'lucide-react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { doc, getDoc } from 'firebase/firestore';
 import { db } from '../services/firebase';
@@ -15,6 +15,7 @@ import {
 import { getCategories } from '../db/categoryRepository';
 import { useAuth } from '../context/AuthContext.jsx';
 import { updateAssignedTaskInFirestore } from '../services/taskAssignmentService';
+import { formatPeriodFrequency } from '../utils/period';
 import AppButton from '../components/AppButton.jsx';
 import './EditTaskPage.css';
 
@@ -33,11 +34,17 @@ const DIFFICULTIES = [
 ];
 
 const PERIODS = [
-  { key: 'DAILY', label: 'Günlük' },
-  { key: 'WEEKLY', label: 'Haftalık' },
-  { key: 'MONTHLY', label: 'Aylık' },
+  { key: 'DAILY', label: 'Gün' },
+  { key: 'WEEKLY', label: 'Hafta' },
+  { key: 'MONTHLY', label: 'Ay' },
   { key: 'ONCE', label: 'Tek Seferlik' },
 ];
+
+const LIMITS = {
+  DAILY: { maxInterval: 30, maxSubtasks: 3, unitSingular: 'gün', unitPlural: 'günde' },
+  WEEKLY: { maxInterval: 12, maxSubtasks: 14, unitSingular: 'hafta', unitPlural: 'haftada' },
+  MONTHLY: { maxInterval: 6, maxSubtasks: 60, unitSingular: 'ay', unitPlural: 'ayda' },
+};
 
 export default function EditTaskPage() {
   const { taskId } = useParams();
@@ -49,9 +56,12 @@ export default function EditTaskPage() {
   const [description, setDescription] = useState('');
   const [priority, setPriority] = useState('MEDIUM');
   const [period, setPeriod] = useState('DAILY');
+  const [intervalValue, setIntervalValue] = useState(1);
+  const [subtaskCount, setSubtaskCount] = useState(1);
+  const [subtaskLabels, setSubtaskLabels] = useState(['']);
+  const [showCustomLabels, setShowCustomLabels] = useState(false);
   const [categoryId, setCategoryId] = useState(null);
   const [categories, setCategories] = useState([]);
-  const [subtaskLabels, setSubtaskLabels] = useState(['']);
   const [errorMessage, setErrorMessage] = useState('');
   const [saving, setSaving] = useState(false);
   const [loaded, setLoaded] = useState(false);
@@ -82,13 +92,18 @@ export default function EditTaskPage() {
           setDescription(t.description || '');
           setPriority(t.priority || 'MEDIUM');
           setPeriod(t.period || 'DAILY');
+          setIntervalValue(Math.max(1, t.intervalValue || 1));
           setCategoryId(t.categoryId || null);
+
+          const count = Math.max(1, t.subtaskCount || 1);
+          setSubtaskCount(count);
 
           const labels = getSubtaskLabels(t);
           if (labels && labels.length > 0) {
             setSubtaskLabels(labels);
+            const hasCustomNames = labels.some((l) => l && l.trim().length > 0);
+            if (hasCustomNames) setShowCustomLabels(true);
           } else {
-            const count = t.subtaskCount || 1;
             setSubtaskLabels(Array.from({ length: count }, () => ''));
           }
           return;
@@ -103,6 +118,7 @@ export default function EditTaskPage() {
           const isReceived = data.assignedToUid === user?.uid;
 
           const count = Math.max(1, data.subtaskCount || 1);
+          const interval = Math.max(1, data.intervalValue || 1);
           const rawLabels = Array.isArray(data.subtaskLabels) && data.subtaskLabels.length > 0
             ? data.subtaskLabels
             : Array.from({ length: count }, () => '');
@@ -115,6 +131,7 @@ export default function EditTaskPage() {
               description: data.description || '',
               priority: data.priority,
               period: data.period,
+              intervalValue: interval,
               subtaskCount: count,
               subtaskLabels: rawLabels,
               assignedToUserId: data.assignedToUid,
@@ -130,6 +147,7 @@ export default function EditTaskPage() {
             description: data.description || '',
             priority: data.priority || 'MEDIUM',
             period: data.period || 'DAILY',
+            intervalValue: interval,
             assignedToUserId: data.assignedToUid,
             assignedToName: data.assignedToName,
             assignmentDirection: isSent ? 'SENT' : isReceived ? 'RECEIVED' : 'NONE',
@@ -143,7 +161,12 @@ export default function EditTaskPage() {
           setDescription(remoteTaskObj.description);
           setPriority(remoteTaskObj.priority);
           setPeriod(remoteTaskObj.period);
+          setIntervalValue(interval);
+          setSubtaskCount(count);
           setSubtaskLabels(rawLabels);
+          if (rawLabels.some((l) => l && l.trim().length > 0)) {
+            setShowCustomLabels(true);
+          }
         }
       } catch (e) {
         console.error('Görev yükleme hatası:', e);
@@ -200,14 +223,52 @@ export default function EditTaskPage() {
   }
 
   const isOnce = period === 'ONCE';
+  const currentLimits = LIMITS[period] || LIMITS.DAILY;
 
   const handlePeriodChange = (newPeriod) => {
     setPeriod(newPeriod);
     setPriority('MEDIUM');
+    if (newPeriod === 'ONCE') {
+      setIntervalValue(1);
+      setSubtaskCount(1);
+      setSubtaskLabels(['']);
+    } else {
+      const nextLimit = LIMITS[newPeriod];
+      if (intervalValue > nextLimit.maxInterval) {
+        setIntervalValue(nextLimit.maxInterval);
+      }
+      if (subtaskCount > nextLimit.maxSubtasks) {
+        setSubtaskCount(nextLimit.maxSubtasks);
+        syncLabelsToCount(nextLimit.maxSubtasks);
+      }
+    }
   };
 
-  const addSubtaskRow = () => setSubtaskLabels((prev) => [...prev, '']);
-  const removeSubtaskRow = (index) => setSubtaskLabels((prev) => prev.filter((_, i) => i !== index));
+  const handleIntervalChange = (val) => {
+    const num = parseInt(val, 10) || 1;
+    const clamped = Math.max(1, Math.min(currentLimits.maxInterval, num));
+    setIntervalValue(clamped);
+  };
+
+  const syncLabelsToCount = (newCount) => {
+    setSubtaskLabels((prev) => {
+      const arr = [...prev];
+      if (newCount > arr.length) {
+        while (arr.length < newCount) arr.push('');
+      } else if (newCount < arr.length) {
+        arr.length = newCount;
+      }
+      return arr;
+    });
+  };
+
+  const handleSubtaskCountChange = (val) => {
+    const num = parseInt(val, 10) || 1;
+    const clamped = Math.max(1, Math.min(currentLimits.maxSubtasks, num));
+    setSubtaskCount(clamped);
+    syncLabelsToCount(clamped);
+  };
+
   const updateSubtaskLabel = (index, value) => {
     setSubtaskLabels((prev) => prev.map((l, i) => (i === index ? value : l)));
   };
@@ -221,8 +282,9 @@ export default function EditTaskPage() {
       return;
     }
 
-    const subtaskCount = isOnce ? 1 : subtaskLabels.length;
-    const effectiveSubtaskLabels = isOnce ? [''] : subtaskLabels;
+    const effectiveInterval = isOnce ? 1 : intervalValue;
+    const effectiveCount = isOnce ? 1 : subtaskCount;
+    const effectiveLabels = isOnce ? [''] : subtaskLabels.slice(0, effectiveCount);
 
     setSaving(true);
     try {
@@ -232,8 +294,9 @@ export default function EditTaskPage() {
         categoryId,
         priority,
         period,
-        subtaskCount,
-        subtaskLabels: effectiveSubtaskLabels,
+        intervalValue: effectiveInterval,
+        subtaskCount: effectiveCount,
+        subtaskLabels: effectiveLabels,
       });
 
       const firestoreDocId = task.firestoreAssignmentId || (taskId !== task.id ? taskId : null);
@@ -243,8 +306,9 @@ export default function EditTaskPage() {
           description: description ? description.trim() : '',
           priority,
           period,
-          subtaskCount,
-          subtaskLabels: effectiveSubtaskLabels,
+          intervalValue: effectiveInterval,
+          subtaskCount: effectiveCount,
+          subtaskLabels: effectiveLabels,
         });
       }
 
@@ -265,34 +329,45 @@ export default function EditTaskPage() {
     <div className="edit-task-page">
       <button type="button" className="edit-task-page__back" onClick={() => navigate(-1)}>
         <ChevronLeft size={18} />
-        İptal
+        Geri
       </button>
 
       <h1>Görevi Düzenle</h1>
 
-      <form className="edit-task-page__form" onSubmit={handleSave}>
-        {errorMessage && <p className="edit-task-page__error-banner">{errorMessage}</p>}
+      {isSentToFriend && (
+        <div className="edit-task-page__hint-banner">
+          <ShieldAlert size={18} />
+          <span>
+            Bu görevi arkadaşına sen atadın. Yaptığın değişiklikler arkadaşının listesine de yansıyacaktır.
+          </span>
+        </div>
+      )}
 
-        <label className="edit-task-page__label" htmlFor="edit-task-title">Görev Adı</label>
+      {errorMessage && <p className="edit-task-page__error">{errorMessage}</p>}
+
+      <form className="edit-task-page__form" onSubmit={handleSave}>
+        <label className="edit-task-page__label" htmlFor="edit-task-title">
+          Görev Adı
+        </label>
         <input
           id="edit-task-title"
-          className="edit-task-page__input"
           type="text"
-          placeholder="Görev adı..."
+          className="edit-task-page__input"
+          placeholder="Örn: Kitap Oku, Spor Yap"
           value={title}
           onChange={(e) => setTitle(e.target.value)}
         />
 
-        <label className="edit-task-page__label" htmlFor="edit-task-description">
-          Açıklama <span className="edit-task-page__optional">(opsiyonel)</span>
+        <label className="edit-task-page__label" htmlFor="edit-task-desc">
+          Açıklama (İsteğe Bağlı)
         </label>
         <textarea
-          id="edit-task-description"
-          className="edit-task-page__textarea"
-          placeholder="Görevle ilgili ek notlar veya detaylar..."
+          id="edit-task-desc"
+          className="edit-task-page__input"
+          style={{ minHeight: '80px', resize: 'vertical' }}
+          placeholder="Görevle ilgili ek ayrıntılar..."
           value={description}
           onChange={(e) => setDescription(e.target.value)}
-          rows={3}
         />
 
         {!isSentToFriend && (
@@ -317,7 +392,7 @@ export default function EditTaskPage() {
           </>
         )}
 
-        <label className="edit-task-page__label">Tekrar Sıklığı</label>
+        <label className="edit-task-page__label">Tekrar Sıklığı (Periyot)</label>
         <div className="edit-task-page__chip-group">
           {PERIODS.map((p) => (
             <Chip
@@ -328,6 +403,42 @@ export default function EditTaskPage() {
             />
           ))}
         </div>
+
+        {/* Aralık Seçimi (Her N günde/haftada/ayda bir) - Tek Seferlik değilse */}
+        {!isOnce && (
+          <div className="edit-task-page__interval-box">
+            <div className="edit-task-page__interval-header">
+              <span className="edit-task-page__interval-title">Tekrar Aralığı</span>
+              <span className="edit-task-page__interval-badge">
+                {intervalValue === 1 ? `Her ${currentLimits.unitSingular}` : `Her ${intervalValue} ${currentLimits.unitPlural} bir`}
+              </span>
+            </div>
+            <div className="edit-task-page__interval-chips">
+              {[1, 2, 3].map((val) => (
+                <button
+                  key={val}
+                  type="button"
+                  className={`edit-task-page__mini-chip ${intervalValue === val ? 'edit-task-page__mini-chip--selected' : ''}`}
+                  onClick={() => handleIntervalChange(val)}
+                >
+                  {val === 1 ? `Her ${currentLimits.unitSingular}` : `${val} ${currentLimits.unitPlural} bir`}
+                </button>
+              ))}
+              <div className="edit-task-page__custom-interval">
+                <span>Özel:</span>
+                <input
+                  type="number"
+                  min="1"
+                  max={currentLimits.maxInterval}
+                  className="edit-task-page__num-input"
+                  value={intervalValue}
+                  onChange={(e) => handleIntervalChange(e.target.value)}
+                />
+                <span className="edit-task-page__unit-text">{currentLimits.unitSingular} (en fazla {currentLimits.maxInterval})</span>
+              </div>
+            </div>
+          </div>
+        )}
 
         <label className="edit-task-page__label">
           {isOnce ? 'Zorluk Seviyesi' : 'Öncelik'}
@@ -343,52 +454,71 @@ export default function EditTaskPage() {
           ))}
         </div>
 
+        {/* Hedef Tekrar Sayısı & Alt Adımlar - Tek Seferlik değilse */}
         {!isOnce && (
-          <div className="edit-task-page__subtasks-section">
-            <div className="edit-task-page__subtasks-header">
+          <div className="edit-task-page__frequency-card">
+            <div className="edit-task-page__frequency-header">
               <div>
-                <label className="edit-task-page__label" style={{ marginBottom: 0 }}>
-                  Periyot İçi Tekrar / Alt Adımlar
-                </label>
-                <p className="caption" style={{ marginTop: '2px', color: 'var(--color-text-secondary)' }}>
-                  Görevi gün/hafta içinde birden fazla kez yapmanız gerekiyorsa adım ekleyin.
+                <label className="edit-task-page__label" style={{ margin: 0 }}>Periyot İçi Hedef Tekrar</label>
+                <p className="edit-task-page__summary-preview">
+                  🎯 {formatPeriodFrequency({ period, intervalValue }, subtaskCount)}
                 </p>
               </div>
-              <button
-                type="button"
-                className="edit-task-page__subtask-add-btn"
-                onClick={addSubtaskRow}
-                title="Yeni Alt Adım Ekle"
-              >
-                <Plus size={16} />
-                <span>Adım Ekle</span>
-              </button>
+
+              {/* Stepper Kontrolü */}
+              <div className="edit-task-page__stepper">
+                <button
+                  type="button"
+                  className="edit-task-page__stepper-btn"
+                  onClick={() => handleSubtaskCountChange(subtaskCount - 1)}
+                  disabled={subtaskCount <= 1}
+                  aria-label="Azalt"
+                >
+                  <Minus size={16} />
+                </button>
+                <span className="edit-task-page__stepper-val">{subtaskCount}</span>
+                <button
+                  type="button"
+                  className="edit-task-page__stepper-btn"
+                  onClick={() => handleSubtaskCountChange(subtaskCount + 1)}
+                  disabled={subtaskCount >= currentLimits.maxSubtasks}
+                  aria-label="Artır"
+                >
+                  <Plus size={16} />
+                </button>
+              </div>
             </div>
 
-            <div className="edit-task-page__subtasks-list">
-              {subtaskLabels.map((label, index) => (
-                <div key={index} className="edit-task-page__subtask-row">
-                  <span className="edit-task-page__subtask-index">{index + 1}.</span>
-                  <input
-                    type="text"
-                    className="edit-task-page__subtask-input"
-                    placeholder={`Örn: ${index === 0 ? 'Sabah' : index === 1 ? 'Akşam' : `${index + 1}. Tekrar`}`}
-                    value={label}
-                    onChange={(e) => updateSubtaskLabel(index, e.target.value)}
-                  />
-                  {subtaskLabels.length > 1 && (
-                    <button
-                      type="button"
-                      className="edit-task-page__subtask-remove-btn"
-                      onClick={() => removeSubtaskRow(index)}
-                      title="Adımı Kaldır"
-                    >
-                      <X size={16} />
-                    </button>
-                  )}
-                </div>
-              ))}
-            </div>
+            {/* İsteğe bağlı: Tekrarları İsimlendir Akordeonu */}
+            {subtaskCount > 1 && (
+              <div className="edit-task-page__accordion">
+                <button
+                  type="button"
+                  className="edit-task-page__accordion-toggle"
+                  onClick={() => setShowCustomLabels(!showCustomLabels)}
+                >
+                  <span>Tekrarları İsimlendir (örn. Sabah, Akşam) — İsteğe bağlı</span>
+                  {showCustomLabels ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+                </button>
+
+                {showCustomLabels && (
+                  <div className="edit-task-page__subtask-list">
+                    {Array.from({ length: subtaskCount }).map((_, idx) => (
+                      <div key={idx} className="edit-task-page__subtask-row">
+                        <span className="edit-task-page__subtask-idx">{idx + 1}.</span>
+                        <input
+                          type="text"
+                          className="edit-task-page__input edit-task-page__subtask-input"
+                          placeholder={`${idx + 1}. tekrar için isim (isteğe bağlı)`}
+                          value={subtaskLabels[idx] || ''}
+                          onChange={(e) => updateSubtaskLabel(idx, e.target.value)}
+                        />
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         )}
 

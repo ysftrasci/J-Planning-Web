@@ -73,7 +73,7 @@ export default function AssignedByMePage() {
           {activeTasks.map((item) => {
             const isPending = item.status === 'PENDING';
             const isOnce = item.period === 'ONCE';
-            const todayKey = getPeriodKey(item.period, new Date());
+            const todayKey = getPeriodKey(item, new Date());
             const isDone = isOnce
               ? item.isCompleted === true
               : item.isCompleted === true && item.completedPeriodKey === todayKey;
@@ -125,7 +125,7 @@ export default function AssignedByMePage() {
                 )}
 
                 <div className="assigned-by-me-page__meta">
-                  {item.assignedToName || 'Arkadaşın'} • {periodLabel(item.period)} • {PRIORITY_LABEL[item.priority] || 'Orta'}
+                  {item.assignedToName || 'Arkadaşın'} • {periodLabel(item)} • {PRIORITY_LABEL[item.priority] || 'Orta'}
                 </div>
               </div>
             );

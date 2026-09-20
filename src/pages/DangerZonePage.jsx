@@ -34,7 +34,7 @@ export default function DangerZonePage() {
         const taskDataList = await Promise.all(
           tasks.map(async (task) => {
             const records = (await getTaskRecords(task.id)) || [];
-            const stats = calculateCompletionStats(records);
+            const stats = calculateCompletionStats(records, task.subtaskCount || 1);
             return { task, ...stats };
           })
         );

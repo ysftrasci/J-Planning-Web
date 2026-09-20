@@ -2,7 +2,7 @@
 // Mobildeki src/components/TaskCard.js dosyasının web karşılığı.
 // Pressable/haptics yerine iki ayrı tıklanabilir alan: kart gövdesi (detaya
 // gider) ve sağdaki daire buton (tamamla/geri al).
-import { Flame, Check, X, Circle, ArrowDownCircle, ArrowUpCircle } from 'lucide-react';
+import { Flame, Check, X, Circle, ArrowDownCircle, ArrowUpCircle, RotateCcw } from 'lucide-react';
 import { periodLabel } from '../utils/period';
 import { appendAblativeSuffix, appendDativeSuffix } from '../utils/turkishSuffix';
 import './TaskCard.css';
@@ -41,6 +41,7 @@ export default function TaskCard({
   const isReceived = task.assignmentDirection === 'RECEIVED';
   const subtaskCount = task.subtaskCount || 1;
   const hasMultipleSubtasks = subtaskCount > 1;
+  const canUndoPartial = hasMultipleSubtasks && (completedSubtasks || 0) > 0 && !isDone;
 
   const accentVar = isSent ? '--color-friend-sent' : isReceived ? '--color-friend-received' : priorityColorVar;
 
@@ -58,6 +59,12 @@ export default function TaskCard({
     } else {
       onComplete?.();
     }
+  };
+
+  const handleUndoClick = (e) => {
+    e.stopPropagation(); // kart gövdesindeki detay tıklamasını tetiklemesin
+    if (isSent) return;
+    onUncomplete?.();
   };
 
   return (
@@ -109,14 +116,27 @@ export default function TaskCard({
       </button>
 
       {!isSent && (
-        <button
-          type="button"
-          onClick={handleCheckClick}
-          aria-label={isDone ? 'Tamamlamayı geri al' : 'Tamamlandı olarak işaretle'}
-          className={`task-card__check ${isDone ? 'task-card__check--done' : isFailed ? 'task-card__check--failed' : ''}`}
-        >
-          {isDone ? <Check size={20} /> : isFailed ? <X size={20} /> : <Circle size={20} />}
-        </button>
+        <div className="task-card__actions">
+          {canUndoPartial && (
+            <button
+              type="button"
+              onClick={handleUndoClick}
+              aria-label="Son adımı geri al"
+              title="Son adımı geri al"
+              className="task-card__undo-btn"
+            >
+              <RotateCcw size={16} />
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={handleCheckClick}
+            aria-label={isDone ? 'Tamamlamayı geri al' : 'Tamamlandı olarak işaretle'}
+            className={`task-card__check ${isDone ? 'task-card__check--done' : isFailed ? 'task-card__check--failed' : ''}`}
+          >
+            {isDone ? <Check size={20} /> : isFailed ? <X size={20} /> : <Circle size={20} />}
+          </button>
+        </div>
       )}
     </div>
   );

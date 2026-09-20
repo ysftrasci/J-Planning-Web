@@ -32,11 +32,12 @@ function uuid() {
   });
 }
 
-export async function createTask({ title, description, categoryId, priority, period, subtaskCount, subtaskLabels, assignedByUserId, assignedByName }) {
+export async function createTask({ title, description, categoryId, priority, period, intervalValue = 1, subtaskCount, subtaskLabels, assignedByUserId, assignedByName }) {
   const db = getDb();
   const id = uuid();
   const now = Date.now();
   const count = Math.max(1, parseInt(subtaskCount, 10) || 1);
+  const interval = period === 'ONCE' ? 1 : Math.max(1, parseInt(intervalValue, 10) || 1);
   const labelsJson = subtaskLabels && subtaskLabels.some((l) => l && l.trim())
     ? JSON.stringify(subtaskLabels.map((l) => (l || '').trim()))
     : null;
@@ -44,8 +45,8 @@ export async function createTask({ title, description, categoryId, priority, per
   const descText = typeof description === 'string' && description.trim() ? description.trim() : null;
 
   await db.runAsync(
-    `INSERT INTO tasks (id, title, description, categoryId, priority, period, ownerUserId, assignedByUserId, assignedByName, assignmentStatus, subtaskCount, subtaskLabels, createdAt)
-     VALUES (?, ?, ?, ?, ?, ?, 'me', ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO tasks (id, title, description, categoryId, priority, period, intervalValue, ownerUserId, assignedByUserId, assignedByName, assignmentStatus, subtaskCount, subtaskLabels, createdAt)
+     VALUES (?, ?, ?, ?, ?, ?, ?, 'me', ?, ?, ?, ?, ?, ?)`,
     [
       id,
       title,
@@ -53,6 +54,7 @@ export async function createTask({ title, description, categoryId, priority, per
       categoryId ?? null,
       priority ?? 'MEDIUM',
       period ?? 'DAILY',
+      interval,
       assignedByUserId ?? null,
       assignedByName ?? null,
       assignedByUserId ? 'PENDING_ACCEPT' : 'NONE',
@@ -88,6 +90,7 @@ export async function createTaskFromAssignment(assignedTask) {
   const id = uuid();
   const now = Date.now();
   const count = Math.max(1, parseInt(assignedTask.subtaskCount, 10) || 1);
+  const interval = assignedTask.period === 'ONCE' ? 1 : Math.max(1, parseInt(assignedTask.intervalValue, 10) || 1);
   const labelsJson = assignedTask.subtaskLabels && assignedTask.subtaskLabels.length
     ? JSON.stringify(assignedTask.subtaskLabels)
     : null;
@@ -96,9 +99,9 @@ export async function createTaskFromAssignment(assignedTask) {
     : null;
 
   await db.runAsync(
-    `INSERT INTO tasks (id, title, description, categoryId, priority, period, ownerUserId, assignedByUserId, assignedByName, assignmentDirection, assignmentStatus, subtaskCount, subtaskLabels, firestoreAssignmentId, createdAt)
-     VALUES (?, ?, ?, NULL, ?, ?, 'me', ?, ?, 'RECEIVED', 'ACCEPTED', ?, ?, ?, ?)`,
-    [id, assignedTask.title, descText, assignedTask.priority, assignedTask.period, assignedTask.assignedByUid, assignedTask.assignedByName, count, labelsJson, assignedTask.id, now]
+    `INSERT INTO tasks (id, title, description, categoryId, priority, period, intervalValue, ownerUserId, assignedByUserId, assignedByName, assignmentDirection, assignmentStatus, subtaskCount, subtaskLabels, firestoreAssignmentId, createdAt)
+     VALUES (?, ?, ?, NULL, ?, ?, ?, 'me', ?, ?, 'RECEIVED', 'ACCEPTED', ?, ?, ?, ?)`,
+    [id, assignedTask.title, descText, assignedTask.priority, assignedTask.period, interval, assignedTask.assignedByUid, assignedTask.assignedByName, count, labelsJson, assignedTask.id, now]
   );
   return id;
 }
@@ -106,20 +109,21 @@ export async function createTaskFromAssignment(assignedTask) {
 // Ben bir arkadaşıma görev attığımda, kendi tarafımda da (takip edebilmem için)
 // bir kayıt oluşturulur — direction: 'SENT'. Bu görev BENİM tarafımdan
 // tamamlanamaz (sadece izleme amaçlı), UI'da bunu ayırt etmemiz gerekir.
-export async function createSentTaskRecord({ title, description, priority, period, subtaskCount, subtaskLabels, assignedToUserId, assignedToName, firestoreAssignmentId }) {
+export async function createSentTaskRecord({ title, description, priority, period, intervalValue = 1, subtaskCount, subtaskLabels, assignedToUserId, assignedToName, firestoreAssignmentId }) {
   const db = getDb();
   const id = uuid();
   const now = Date.now();
   const count = Math.max(1, parseInt(subtaskCount, 10) || 1);
+  const interval = period === 'ONCE' ? 1 : Math.max(1, parseInt(intervalValue, 10) || 1);
   const labelsJson = subtaskLabels && subtaskLabels.some((l) => l && l.trim())
     ? JSON.stringify(subtaskLabels.map((l) => (l || '').trim()))
     : null;
   const descText = typeof description === 'string' && description.trim() ? description.trim() : null;
 
   await db.runAsync(
-    `INSERT INTO tasks (id, title, description, categoryId, priority, period, ownerUserId, assignedToUserId, assignedToName, assignmentDirection, assignmentStatus, subtaskCount, subtaskLabels, firestoreAssignmentId, createdAt)
-     VALUES (?, ?, ?, NULL, ?, ?, 'me', ?, ?, 'SENT', 'ACCEPTED', ?, ?, ?, ?)`,
-    [id, title, descText, priority, period, assignedToUserId, assignedToName, count, labelsJson, firestoreAssignmentId ?? null, now]
+    `INSERT INTO tasks (id, title, description, categoryId, priority, period, intervalValue, ownerUserId, assignedToUserId, assignedToName, assignmentDirection, assignmentStatus, subtaskCount, subtaskLabels, firestoreAssignmentId, createdAt)
+     VALUES (?, ?, ?, NULL, ?, ?, ?, 'me', ?, ?, 'SENT', 'ACCEPTED', ?, ?, ?, ?)`,
+    [id, title, descText, priority, period, interval, assignedToUserId, assignedToName, count, labelsJson, firestoreAssignmentId ?? null, now]
   );
   return id;
 }
@@ -133,7 +137,7 @@ export async function findTaskByIdOrFirestoreId(idOrFirestoreId) {
   return task;
 }
 
-export async function updateTask(taskId, { title, description, categoryId, priority, period, subtaskCount, subtaskLabels }) {
+export async function updateTask(taskId, { title, description, categoryId, priority, period, intervalValue = 1, subtaskCount, subtaskLabels }) {
   const db = getDb();
   const task = await findTaskByIdOrFirestoreId(taskId);
   if (!task) throw new Error('Görev bulunamadı.');
@@ -147,13 +151,14 @@ export async function updateTask(taskId, { title, description, categoryId, prior
 
   const descText = typeof description === 'string' && description.trim() ? description.trim() : null;
   const count = Math.max(1, parseInt(subtaskCount, 10) || 1);
+  const interval = period === 'ONCE' ? 1 : Math.max(1, parseInt(intervalValue, 10) || task.intervalValue || 1);
   const labelsJson = subtaskLabels && subtaskLabels.some((l) => l && l.trim())
     ? JSON.stringify(subtaskLabels.map((l) => (l || '').trim()))
     : null;
 
   await db.runAsync(
     `UPDATE tasks
-     SET title = ?, description = ?, categoryId = ?, priority = ?, period = ?, subtaskCount = ?, subtaskLabels = ?
+     SET title = ?, description = ?, categoryId = ?, priority = ?, period = ?, intervalValue = ?, subtaskCount = ?, subtaskLabels = ?
      WHERE id = ?`,
     [
       cleanTitle,
@@ -161,6 +166,7 @@ export async function updateTask(taskId, { title, description, categoryId, prior
       categoryId ?? null,
       priority ?? 'MEDIUM',
       period ?? 'DAILY',
+      interval,
       count,
       labelsJson,
       task.id,
@@ -218,7 +224,7 @@ export function getSubtaskLabels(task) {
 // tamamlandığını döndürür.
 export async function getCurrentPeriodStatus(task) {
   const db = getDb();
-  const periodKey = getPeriodKey(task.period, new Date());
+  const periodKey = getPeriodKey(task, new Date());
   const record = await db.getFirstAsync(
     'SELECT * FROM task_records WHERE taskId = ? AND periodKey = ?',
     [task.id, periodKey]
@@ -254,7 +260,7 @@ export async function completeSubtask(taskId) {
     throw new Error('Bu görevi sen atadın, tamamlama işlemi arkadaşına ait.');
   }
 
-  const periodKey = getPeriodKey(task.period, new Date());
+  const periodKey = getPeriodKey(task, new Date());
   const existing = await db.getFirstAsync(
     'SELECT * FROM task_records WHERE taskId = ? AND periodKey = ?',
     [taskId, periodKey]
@@ -314,7 +320,7 @@ export async function uncompleteSubtask(taskId) {
   const task = await db.getFirstAsync('SELECT * FROM tasks WHERE id = ?', [taskId]);
   if (!task) throw new Error('Görev bulunamadı');
 
-  const periodKey = getPeriodKey(task.period, new Date());
+  const periodKey = getPeriodKey(task, new Date());
   const existing = await db.getFirstAsync(
     'SELECT * FROM task_records WHERE taskId = ? AND periodKey = ?',
     [taskId, periodKey]
@@ -334,6 +340,7 @@ export async function uncompleteSubtask(taskId) {
     // Hiç alt adım kalmadıysa kaydı tamamen sil (periyot yeniden PENDING sayılır).
     await db.runAsync('DELETE FROM task_records WHERE id = ?', [existing.id]);
   } else {
+    // Kısmi tamamlama durumuna geri döndür (SUCCESSFUL -> PENDING_PARTIAL).
     await db.runAsync(
       `UPDATE task_records SET status = 'PENDING_PARTIAL', completedSubtasks = ?, completedAt = NULL, jpEarned = 0, streakBonusEarned = 0 WHERE id = ?`,
       [newCompleted, existing.id]
@@ -341,16 +348,16 @@ export async function uncompleteSubtask(taskId) {
   }
 
   triggerAutoCloudSyncForCurrentUser();
-  return { completedSubtasks: Math.max(0, newCompleted), subtaskCount: task.subtaskCount, firestoreAssignmentId: task.firestoreAssignmentId };
+  return { completedSubtasks: newCompleted, subtaskCount: task.subtaskCount, firestoreAssignmentId: task.firestoreAssignmentId };
 }
 
-// Geçmişe dönük düzeltme (1 hafta / 7 gün sınırı).
+// 7 gün içinde kaçırılmış eski bir periyodu sonradan "tamamlandı" olarak işaretler.
 export async function lateMarkTaskComplete(taskId, periodKey) {
   const db = getDb();
   const task = await db.getFirstAsync('SELECT * FROM tasks WHERE id = ?', [taskId]);
   if (!task) throw new Error('Görev bulunamadı');
 
-  const periodEnd = getPeriodEndTimestamp(task.period, periodKey);
+  const periodEnd = getPeriodEndTimestamp(task, periodKey);
   if (!isWithinLateMarkWindow(periodEnd)) {
     throw new Error('Bu görev 7 günden (1 hafta) eski olduğu için artık değiştirilemez.');
   }
@@ -390,7 +397,7 @@ export async function lateMarkTaskUncomplete(taskId, periodKey) {
   const task = await db.getFirstAsync('SELECT * FROM tasks WHERE id = ?', [taskId]);
   if (!task) throw new Error('Görev bulunamadı');
 
-  const periodEnd = getPeriodEndTimestamp(task.period, periodKey);
+  const periodEnd = getPeriodEndTimestamp(task, periodKey);
   if (!isWithinLateMarkWindow(periodEnd)) {
     throw new Error('Bu görev 7 günden (1 hafta) eski olduğu için artık değiştirilemez.');
   }
@@ -453,10 +460,10 @@ export async function cleanupInvalidPastRecords() {
   }
   if (!db) return;
 
-  const tasks = await db.getAllAsync(`SELECT id, period, createdAt FROM tasks`);
+  const tasks = await db.getAllAsync(`SELECT * FROM tasks`);
   for (const task of tasks) {
     if (!task.createdAt) continue;
-    const startPeriodKey = getPeriodKey(task.period, new Date(task.createdAt));
+    const startPeriodKey = getPeriodKey(task, new Date(task.createdAt));
     await db.runAsync(
       `DELETE FROM task_records WHERE taskId = ? AND periodKey < ?`,
       [task.id, startPeriodKey]
@@ -499,16 +506,16 @@ export async function processExpiredPeriods() {
   const partialUpdates = [];
 
   for (const task of tasks) {
-    const startPeriodKey = getPeriodKey(task.period, new Date(task.createdAt || Date.now()));
-    const periodKey = getPeriodKey(task.period, new Date());
+    const startPeriodKey = getPeriodKey(task, new Date(task.createdAt || Date.now()));
+    const periodKey = getPeriodKey(task, new Date());
     let checkKey = periodKey;
 
     for (let i = 0; i < 60; i++) {
       if (checkKey < startPeriodKey) break;
 
-      const endTs = getPeriodEndTimestamp(task.period, checkKey);
+      const endTs = getPeriodEndTimestamp(task, checkKey);
       if (endTs > now) {
-        checkKey = getPreviousPeriodKey(task.period, checkKey);
+        checkKey = getPreviousPeriodKey(task, checkKey);
         continue;
       }
 
@@ -518,7 +525,7 @@ export async function processExpiredPeriods() {
       } else if (existing.status === 'PENDING_PARTIAL') {
         partialUpdates.push(existing.id);
       }
-      checkKey = getPreviousPeriodKey(task.period, checkKey);
+      checkKey = getPreviousPeriodKey(task, checkKey);
     }
   }
 
@@ -612,16 +619,18 @@ export async function updateTaskFromAssignment(assignedTaskDoc) {
   const descText = typeof assignedTaskDoc.description === 'string' && assignedTaskDoc.description.trim()
     ? assignedTaskDoc.description.trim()
     : null;
+  const interval = assignedTaskDoc.period === 'ONCE' ? 1 : Math.max(1, parseInt(assignedTaskDoc.intervalValue, 10) || 1);
 
   await db.runAsync(
     `UPDATE tasks
-     SET title = ?, description = ?, priority = ?, period = ?, subtaskCount = ?, subtaskLabels = ?
+     SET title = ?, description = ?, priority = ?, period = ?, intervalValue = ?, subtaskCount = ?, subtaskLabels = ?
      WHERE id = ?`,
     [
       assignedTaskDoc.title,
       descText,
       assignedTaskDoc.priority || 'MEDIUM',
       assignedTaskDoc.period || 'DAILY',
+      interval,
       count,
       rawLabels,
       existing.id,
