@@ -1,6 +1,7 @@
 import { getToken, onMessage } from 'firebase/messaging';
 import { doc, updateDoc, arrayUnion, arrayRemove } from 'firebase/firestore';
 import { db, messaging, auth } from './firebase';
+import { getDb } from '../db/database';
 
 let lastTriggeredMinuteKey = '';
 
@@ -253,4 +254,131 @@ export async function checkAndTriggerSchedules() {
 // Uygulama açık olduğu sürece her 15 saniyede bir zamanlamaları kontrol et
 if (typeof window !== 'undefined') {
   setInterval(checkAndTriggerSchedules, 15000);
+}
+
+const WORKER_URL = (import.meta.env.VITE_WORKER_URL || '/api/worker').replace(/\/+$/, '');
+
+/**
+ * Kullanıcının sunucudaki (Cloudflare Worker & Control Plane) hatırlatıcı ayarlarını çeker.
+ */
+export async function getUserReminderSettings() {
+  const currentUser = auth.currentUser;
+  if (!currentUser) {
+    return { reminderEnabled: true, reminderHour: 20 };
+  }
+
+  try {
+    const idToken = await currentUser.getIdToken();
+    const res = await fetch(`${WORKER_URL}/user/reminder-settings`, {
+      method: 'GET',
+      headers: {
+        Authorization: `Bearer ${idToken}`,
+      },
+    });
+
+    if (res.ok) {
+      const data = await res.json();
+      return {
+        reminderEnabled: Boolean(data.reminderEnabled),
+        reminderHour: typeof data.reminderHour === 'number' ? data.reminderHour : 20,
+      };
+    }
+  } catch (err) {
+    console.warn('[NotificationService] Reminder ayarları Worker üzerinden alınamadı, yerel deneniyor:', err);
+  }
+
+  // Yedek: SQLite app_meta'dan oku
+  try {
+    const db = getDb();
+    if (db) {
+      const [enabledRow, hourRow] = await Promise.all([
+        db.getFirstAsync("SELECT value FROM app_meta WHERE key = 'reminder_enabled' LIMIT 1;").catch(() => null),
+        db.getFirstAsync("SELECT value FROM app_meta WHERE key = 'reminder_hour' LIMIT 1;").catch(() => null),
+      ]);
+      return {
+        reminderEnabled: enabledRow ? enabledRow.value === '1' : true,
+        reminderHour: hourRow ? parseInt(hourRow.value, 10) : 20,
+      };
+    }
+  } catch (_) {}
+
+  return { reminderEnabled: true, reminderHour: 20 };
+}
+
+/**
+ * Kullanıcının hatırlatıcı ayarlarını (açık/kapalı ve saat) günceller.
+ */
+export async function updateUserReminderSettings({ reminderEnabled, reminderHour }) {
+  const currentUser = auth.currentUser;
+  if (!currentUser) {
+    throw new Error('Oturum açmış kullanıcı bulunamadı.');
+  }
+
+  const idToken = await currentUser.getIdToken();
+  const res = await fetch(`${WORKER_URL}/user/reminder-settings`, {
+    method: 'PATCH',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${idToken}`,
+    },
+    body: JSON.stringify({ reminderEnabled, reminderHour }),
+  });
+
+  if (!res.ok) {
+    let errMessage = 'Hatırlatıcı ayarları kaydedilemedi.';
+    try {
+      const data = await res.json();
+      if (data.message) errMessage = data.message;
+    } catch (_) {}
+    throw new Error(errMessage);
+  }
+
+  const result = await res.json();
+
+  // İstemci tarafı yerel SQLite app_meta'yı güncelle
+  try {
+    const db = getDb();
+    if (db) {
+      await db.runAsync(
+        "INSERT INTO app_meta (key, value) VALUES ('reminder_enabled', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value;",
+        [reminderEnabled ? '1' : '0']
+      ).catch(() => {});
+      await db.runAsync(
+        "INSERT INTO app_meta (key, value) VALUES ('reminder_hour', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value;",
+        [String(reminderHour)]
+      ).catch(() => {});
+    }
+  } catch (_) {}
+
+  return result;
+}
+
+/**
+ * Test amaçlı hatırlatıcı push bildirimini manuel tetikler (Sadece oturum açmış kullanıcının kendi hesabı).
+ */
+export async function triggerReminderTest() {
+  const currentUser = auth.currentUser;
+  if (!currentUser) {
+    throw new Error('Oturum açmış kullanıcı bulunamadı.');
+  }
+
+  const idToken = await currentUser.getIdToken();
+  const res = await fetch(`${WORKER_URL}/test/trigger-reminders`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${idToken}`,
+    },
+  });
+
+  if (!res.ok) {
+    let errMessage = 'Hatırlatıcı test isteği başarısız oldu.';
+    try {
+      const data = await res.json();
+      if (data.message) errMessage = data.message;
+    } catch (_) {}
+    throw new Error(errMessage);
+  }
+
+  return res.json();
 }

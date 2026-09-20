@@ -132,4 +132,6 @@ CREATE TABLE IF NOT EXISTS app_meta (
 
 -- 12. BAŞLANGIÇ TEMEL KAYITLARI
 INSERT OR IGNORE INTO app_meta (key, value) VALUES ('schema_version', '4');
+INSERT OR IGNORE INTO app_meta (key, value) VALUES ('reminder_enabled', '1');
+INSERT OR IGNORE INTO app_meta (key, value) VALUES ('reminder_hour', '20');
 INSERT OR IGNORE INTO wallet (userId, balance) VALUES ('me', 0);

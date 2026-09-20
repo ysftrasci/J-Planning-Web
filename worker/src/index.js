@@ -1,6 +1,7 @@
 import { createRemoteJWKSet, jwtVerify, SignJWT, importPKCS8 } from 'jose';
 import { createClient } from '@libsql/client/web';
 import canonicalSchema from '../../schema.sql';
+import { getPeriodKey, getPeriodEndTimestamp } from './periodUtils.js';
 
 // Google Firebase Public JWKS Endpoint
 const GOOGLE_JWKS = createRemoteJWKSet(
@@ -211,6 +212,27 @@ async function ensureAuditLogSchema(client) {
 }
 
 /**
+ * admin_users_index tablosunda reminder_enabled ve reminder_hour kolonlarının varlığını garanti eder
+ */
+let controlPlaneUsersIndexInitialized = false;
+async function ensureControlPlaneUsersIndexSchema(client) {
+  if (controlPlaneUsersIndexInitialized || !client) return;
+  try {
+    const tableInfo = await client.execute('PRAGMA table_info(admin_users_index);').catch(() => null);
+    const existingCols = new Set(tableInfo?.rows?.map((r) => r.name) || []);
+    if (!existingCols.has('reminder_enabled')) {
+      await client.execute('ALTER TABLE admin_users_index ADD COLUMN reminder_enabled INTEGER NOT NULL DEFAULT 1;').catch(() => {});
+    }
+    if (!existingCols.has('reminder_hour')) {
+      await client.execute('ALTER TABLE admin_users_index ADD COLUMN reminder_hour INTEGER NOT NULL DEFAULT 20;').catch(() => {});
+    }
+    controlPlaneUsersIndexInitialized = true;
+  } catch (e) {
+    console.warn('[Control Plane Users Index Schema Warning]:', e.message);
+  }
+}
+
+/**
  * Admin tarafından yapılan değişiklikleri Control Plane DB'deki admin_audit_log tablosuna kaydeder.
  * Append-only çalışır; kayıtlar asla silinemez veya güncellenemez.
  */
@@ -342,10 +364,19 @@ function extractDbUrl(data, dbName, org) {
   return `libsql://${dbName}-${org}.turso.io`;
 }
 
+const userDbSessionCache = new Map(); // dbName -> { dbUrl, token, expiresAt }
+
 /**
  * Kullanıcı için veritabanının varlığını kontrol eder, yoksa oluşturup şemayı yükler.
+ * Başarılı token'ları ~50 dakika önbellekte tutarak Turso Platform API yükünü ve gecikmeyi önler.
  */
 async function ensureUserDatabase(dbName, env) {
+  const now = Date.now();
+  const cached = userDbSessionCache.get(dbName);
+  if (cached && now < cached.expiresAt - 5 * 60 * 1000) {
+    return { dbUrl: cached.dbUrl, token: cached.token };
+  }
+
   const org = env.TURSO_ORG;
   const group = env.TURSO_GROUP || 'jplanning';
 
@@ -410,6 +441,12 @@ async function ensureUserDatabase(dbName, env) {
   if (!dbToken) {
     throw new Error('Turso token yanıtında JWT/token alanı bulunamadı');
   }
+
+  userDbSessionCache.set(dbName, {
+    dbUrl,
+    token: dbToken,
+    expiresAt: now + 3600 * 1000,
+  });
 
   // 3. Eğer yeni oluşturulduysa canonical şemayı veritabanına uygula
   if (needInitSchema && canonicalSchema) {
@@ -590,10 +627,62 @@ async function sendFcmMessage(projectId, token, payload, accessToken) {
   if (!res.ok) {
     const errText = await res.text();
     console.warn(`[Push FCM] Mesaj gönderme uyarısı (${res.status}):`, errText);
-    return { success: false, status: res.status, error: errText };
+    const isUnregistered =
+      res.status === 404 ||
+      errText.includes('UNREGISTERED') ||
+      errText.includes('NOT_FOUND') ||
+      errText.includes('registration-token-not-registered') ||
+      errText.includes('invalid-registration-token');
+
+    return { success: false, status: res.status, error: errText, isUnregistered };
   }
 
   return { success: true };
+}
+
+/**
+ * Geçersiz / ölü FCM token'larını Firestore users/{uid} dokümanındaki fcmTokens dizisinden kaldırır.
+ */
+async function removeDeadFcmTokensFromFirestore(projectId, targetUid, deadTokens, accessToken) {
+  if (!deadTokens || deadTokens.length === 0) return;
+  try {
+    const url = `https://firestore.googleapis.com/v1/projects/${projectId}/databases/(default)/documents:commit`;
+    const body = {
+      writes: [
+        {
+          transform: {
+            document: `projects/${projectId}/databases/(default)/documents/users/${targetUid}`,
+            fieldTransforms: [
+              {
+                fieldPath: 'fcmTokens',
+                removeAllFromArray: {
+                  values: deadTokens.map((t) => ({ stringValue: t })),
+                },
+              },
+            ],
+          },
+        },
+      ],
+    };
+
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(body),
+    });
+
+    if (res.ok) {
+      console.log(`[Push FCM] ${deadTokens.length} adet ölü/geçersiz token Firestore'dan başarıyla temizlendi (UID: ${targetUid}).`);
+    } else {
+      const errText = await res.text();
+      console.warn(`[Push FCM] Ölü token'lar silinirken Firestore hatası (${res.status}):`, errText);
+    }
+  } catch (err) {
+    console.warn('[Push FCM] Ölü token silme istisnası:', err.message);
+  }
 }
 
 /**
@@ -620,7 +709,297 @@ const NOTIFICATION_TEMPLATES = {
     body: `${senderName || 'Arkadaşın'}, attığın "${taskTitle || 'görev'}" görevini sildi.`,
     tag: 'task-deleted',
   }),
+  TASK_REMINDER: (count) => ({
+    title: 'J-Planning ⏰',
+    body: `Bugün tamamlaman gereken ${count} görevin var!`,
+    tag: 'task-reminder',
+    data: { url: '/' },
+  }),
 };
+
+/**
+ * Saatlik görev hatırlatıcı cron işleyicisi (Scheduled Handler)
+ * - Türkiye saatine (UTC+3) göre şu anki saati belirler
+ * - reminder_enabled = 1 ve reminder_hour = currentHour olan kullanıcıları sorgular
+ * - Her kullanıcının Turso DB'sindeki tamamlanmamış ve bugün vadesi gelen görevleri sayar
+ * - Görevi olan kullanıcılara tek özet push bildirimi gönderir
+ */
+async function handleHourlyTaskReminders(env, simulatedHour = null, specificUid = null) {
+  const tGlobalStart = Date.now();
+  const timings = {};
+  const now = new Date();
+  // Türkiye Saati (UTC+3)
+  const turkeyHour = simulatedHour !== null ? simulatedHour : ((now.getUTCHours() + 3) % 24);
+
+  const tCpStart = Date.now();
+  const controlClient = getControlPlaneClient(env);
+  if (!controlClient) {
+    console.warn('[Reminders] Control plane client bulunamadı.');
+    return { success: false, reason: 'NO_CONTROL_CLIENT', message: 'Control plane veritabanına erişilemedi.' };
+  }
+
+  await ensureControlPlaneUsersIndexSchema(controlClient);
+
+  let users = [];
+  if (specificUid) {
+    // Test Modu: Sadece bu kullanıcının profilini çek (saat ve enabled filtrelerini bypass et)
+    try {
+      const usersRes = await controlClient.execute({
+        sql: 'SELECT uid, db_name, reminder_enabled, reminder_hour FROM admin_users_index WHERE uid = ? LIMIT 1;',
+        args: [specificUid],
+      });
+      if (usersRes?.rows?.length > 0) {
+        users = usersRes.rows;
+      } else {
+        // Control plane'de henüz kaydı yoksa bile varsayılan dbName ile test et
+        users = [{ uid: specificUid, db_name: getDbNameForUser(specificUid), reminder_enabled: 1, reminder_hour: turkeyHour }];
+      }
+    } catch (e) {
+      users = [{ uid: specificUid, db_name: getDbNameForUser(specificUid), reminder_enabled: 1, reminder_hour: turkeyHour }];
+    }
+  } else {
+    // Gerçek Saatlik Cron: Sadece hatırlatıcısı açık ve saati uyuşan aktif kullanıcılar
+    const query = 'SELECT uid, db_name, reminder_enabled, reminder_hour FROM admin_users_index WHERE is_disabled = 0 AND reminder_enabled = 1 AND reminder_hour = ?;';
+    try {
+      const usersRes = await controlClient.execute({ sql: query, args: [turkeyHour] });
+      users = usersRes?.rows || [];
+    } catch (dbErr) {
+      console.warn('[Reminders] Kullanıcı listesi çekilemedi:', dbErr.message);
+      return { success: false, error: dbErr.message };
+    }
+  }
+  timings.controlPlaneMs = Date.now() - tCpStart;
+
+  if (users.length === 0) {
+    return {
+      success: true,
+      turkeyHour,
+      processedUsers: 0,
+      sentCount: 0,
+      message: specificUid
+        ? 'Kullanıcı bulunamadı veya hesap devre dışı.'
+        : `Saat ${turkeyHour}:00 için hatırlatma bekleyen aktif kullanıcı yok.`,
+      timings,
+    };
+  }
+
+  const projectId = env.FIREBASE_PROJECT_ID || 'j-planning';
+  let accessToken = null;
+  const tOAuthStart = Date.now();
+  try {
+    accessToken = await getGoogleAccessToken(env.FIREBASE_SERVICE_ACCOUNT);
+    timings.googleOAuthMs = Date.now() - tOAuthStart;
+  } catch (authErr) {
+    timings.googleOAuthMs = Date.now() - tOAuthStart;
+    console.warn('[Reminders] FCM access token alınamadı:', authErr.message);
+    return {
+      success: false,
+      error: authErr.message,
+      message: `FCM yetkilendirme hatası: ${authErr.message}`,
+      timings,
+    };
+  }
+
+  let sentCount = 0;
+  let totalDevicesNotified = 0;
+  const results = [];
+  const nowMs = Date.now();
+  const ONE_DAY_MS = 24 * 60 * 60 * 1000;
+
+  for (const user of users) {
+    const uid = user.uid;
+    const dbName = user.db_name || getDbNameForUser(uid);
+
+    try {
+      // 1. FCM Token'ları çek
+      const tFcmTokensStart = Date.now();
+      const tokens = await getTargetUserFcmTokens(projectId, uid, accessToken);
+      timings.fcmTokensFetchMs = Date.now() - tFcmTokensStart;
+
+      if (!tokens || tokens.length === 0) {
+        results.push({
+          uid,
+          status: 'NO_TOKENS',
+          message: 'Kullanıcının kayıtlı FCM bildirim anahtarı (cihaz tokenı) bulunamadı. Lütfen tarayıcı bildirim iznini verin.',
+          diagnostics: { fcmTokenCount: 0 },
+        });
+        continue;
+      }
+
+      // 2. Kullanıcının Turso DB'sine bağlan (Önbellekli)
+      const tUserDbStart = Date.now();
+      const sessionInfo = await ensureUserDatabase(dbName, env);
+      const userDbClient = createClient({
+        url: sessionInfo.dbUrl,
+        authToken: sessionInfo.token,
+      });
+      timings.userDbSessionMs = Date.now() - tUserDbStart;
+
+      // 3. Aktif görevleri çek
+      const tTasksStart = Date.now();
+      const tasksRes = await userDbClient.execute(
+        "SELECT id, title, period, intervalValue, subtaskCount, createdAt FROM tasks WHERE isArchived = 0 AND assignmentStatus != 'PENDING_ACCEPT' AND (assignmentDirection IS NULL OR assignmentDirection != 'SENT');"
+      );
+      const tasks = tasksRes?.rows || [];
+      timings.tasksFetchMs = Date.now() - tTasksStart;
+
+      if (tasks.length === 0) {
+        results.push({
+          uid,
+          status: 'NO_TASKS',
+          message: 'Kullanıcının hiç aktif görevi bulunmuyor.',
+          diagnostics: { fcmTokenCount: tokens.length, activeTasksCount: 0 },
+        });
+        continue;
+      }
+
+      // 4. Bugün biten ve tamamlanmamış görevleri paralel hesapla
+      const tRecordsStart = Date.now();
+      let dueTasksCount = 0;
+      let dueAndUncompletedCount = 0;
+
+      const taskCheckPromises = tasks.map(async (task) => {
+        const periodKey = getPeriodKey(task, new Date(nowMs));
+        const periodEnd = getPeriodEndTimestamp(task, periodKey);
+
+        // Kural: DAILY görevler her gün; diğerleri periyodun son 24 saatinde; ONCE görevler tamamlanana kadar
+        const isExpiringToday = task.period === 'ONCE' || (periodEnd - nowMs) <= ONE_DAY_MS;
+        if (!isExpiringToday) return null;
+
+        const recordRes = await userDbClient.execute({
+          sql: 'SELECT status, completedSubtasks FROM task_records WHERE taskId = ? AND periodKey = ? LIMIT 1;',
+          args: [task.id, periodKey],
+        }).catch(() => null);
+
+        const record = recordRes?.rows?.[0];
+        const isCompleted = record && (record.status === 'SUCCESSFUL' || (Number(record.completedSubtasks) >= (Number(task.subtaskCount) || 1)));
+
+        return { isCompleted };
+      });
+
+      const checkResults = await Promise.all(taskCheckPromises);
+      for (const check of checkResults) {
+        if (!check) continue;
+        dueTasksCount++;
+        if (!check.isCompleted) {
+          dueAndUncompletedCount++;
+        }
+      }
+      timings.recordsCheckMs = Date.now() - tRecordsStart;
+
+      if (dueAndUncompletedCount > 0) {
+        const template = NOTIFICATION_TEMPLATES.TASK_REMINDER(dueAndUncompletedCount);
+        let userDeliveredDevices = 0;
+        const fcmErrors = [];
+        const deadTokens = [];
+
+        // FCM gönderimlerini tüm cihazlara paralel yürüt ve süreleri ölç
+        const tFcmSendStart = Date.now();
+        const sendPromises = tokens.map(async (token) => {
+          const tSingleSend = Date.now();
+          const res = await sendFcmMessage(projectId, token, template, accessToken);
+          const dur = Date.now() - tSingleSend;
+          if (res.isUnregistered) {
+            deadTokens.push(token);
+          }
+          return { res, dur };
+        });
+        const sendResults = await Promise.all(sendPromises);
+        timings.fcmSendMs = Date.now() - tFcmSendStart;
+
+        for (const item of sendResults) {
+          if (item.res.success) {
+            userDeliveredDevices++;
+          } else if (item.res.error) {
+            fcmErrors.push(item.res.error);
+          }
+        }
+
+        // Ölü/geçersiz token'ları Firestore'dan otomatik temizle
+        let cleanedCount = 0;
+        if (deadTokens.length > 0) {
+          const tCleanupStart = Date.now();
+          await removeDeadFcmTokensFromFirestore(projectId, uid, deadTokens, accessToken);
+          timings.cleanupDeadTokensMs = Date.now() - tCleanupStart;
+          cleanedCount = deadTokens.length;
+        }
+
+        if (userDeliveredDevices > 0) {
+          sentCount++;
+          totalDevicesNotified += userDeliveredDevices;
+          results.push({
+            uid,
+            status: 'SENT',
+            uncompletedTasks: dueAndUncompletedCount,
+            deviceCount: userDeliveredDevices,
+            cleanedDeadTokensCount: cleanedCount,
+            message: `${dueAndUncompletedCount} tamamlanmamış görev için ${userDeliveredDevices} cihaza bildirim gönderildi.${cleanedCount > 0 ? ` (${cleanedCount} ölü token temizlendi)` : ''}`,
+            diagnostics: {
+              fcmTokenCount: tokens.length,
+              activeTasksCount: tasks.length,
+              dueTasksCount,
+              uncompletedTasksCount: dueAndUncompletedCount,
+              deliveredDevices: userDeliveredDevices,
+              cleanedDeadTokensCount: cleanedCount,
+            },
+          });
+        } else {
+          results.push({
+            uid,
+            status: 'FCM_SEND_FAILED',
+            message: `Bildirim cihazlara iletilemedi (FCM reddetti).${cleanedCount > 0 ? ` (${cleanedCount} ölü token temizlendi)` : ''}`,
+            diagnostics: {
+              fcmTokenCount: tokens.length,
+              activeTasksCount: tasks.length,
+              dueTasksCount,
+              uncompletedTasksCount: dueAndUncompletedCount,
+              cleanedDeadTokensCount: cleanedCount,
+              errors: fcmErrors,
+            },
+          });
+        }
+      } else {
+        results.push({
+          uid,
+          status: 'ALL_COMPLETED',
+          message: `Bugün tamamlanması gereken ${dueTasksCount} görevin tümü zaten tamamlanmış.`,
+          diagnostics: {
+            fcmTokenCount: tokens.length,
+            activeTasksCount: tasks.length,
+            dueTasksCount,
+            uncompletedTasksCount: 0,
+          },
+        });
+      }
+    } catch (userErr) {
+      console.warn(`[Reminders] Kullanıcı (${uid}) işleme hatası:`, userErr.message);
+      results.push({ uid, status: 'ERROR', error: userErr.message, message: `İşlem hatası: ${userErr.message}` });
+    }
+  }
+
+  timings.totalMs = Date.now() - tGlobalStart;
+  console.log(`[Reminders Timings] Toplam: ${timings.totalMs}ms | ControlPlane: ${timings.controlPlaneMs}ms | OAuth: ${timings.googleOAuthMs}ms | FCM Tokens: ${timings.fcmTokensFetchMs}ms | User DB: ${timings.userDbSessionMs}ms | Tasks: ${timings.tasksFetchMs}ms | Records: ${timings.recordsCheckMs}ms | FCM Send: ${timings.fcmSendMs || 0}ms | Cleanup: ${timings.cleanupDeadTokensMs || 0}ms`);
+
+  const primaryResult = results[0] || {};
+
+  return {
+    success: true,
+    isTest: Boolean(specificUid),
+    turkeyHour,
+    processedUsers: users.length,
+    sentCount,
+    deviceCount: totalDevicesNotified,
+    status: primaryResult.status || 'OK',
+    uncompletedTasks: primaryResult.uncompletedTasks || 0,
+    message: primaryResult.message || `Saat ${turkeyHour}:00 için işlem tamamlandı.`,
+    diagnostics: {
+      ...(primaryResult.diagnostics || {}),
+      timings,
+    },
+    timings,
+    details: results,
+  };
+}
 
 // Bellek içi yedek rate limiter
 const pushMemoryRateLimits = new Map();
@@ -2450,6 +2829,182 @@ export default {
       }
     }
 
+    // GET /user/reminder-settings (Kullanıcının hatırlatıcı ayarlarını oku)
+    if (request.method === 'GET' && url.pathname === '/user/reminder-settings') {
+      try {
+        const authHeader = request.headers.get('Authorization');
+        const projectId = env.FIREBASE_PROJECT_ID || 'j-planning';
+        const { uid } = await verifyFirebaseToken(authHeader, projectId);
+
+        const controlClient = getControlPlaneClient(env);
+        if (!controlClient) {
+          return jsonResponse({ error: 'CONFIG_ERROR', message: 'Control plane veritabanına erişilemiyor.' }, 500, corsHeaders);
+        }
+
+        await ensureControlPlaneUsersIndexSchema(controlClient);
+
+        const rowRes = await controlClient.execute({
+          sql: 'SELECT reminder_enabled, reminder_hour FROM admin_users_index WHERE uid = ? LIMIT 1;',
+          args: [uid],
+        });
+
+        const row = rowRes?.rows?.[0];
+        const reminderEnabled = row ? Boolean(row.reminder_enabled ?? 1) : true;
+        const reminderHour = row && typeof row.reminder_hour === 'number' ? row.reminder_hour : 20;
+
+        return jsonResponse({
+          success: true,
+          reminderEnabled,
+          reminderHour,
+        }, 200, corsHeaders);
+      } catch (err) {
+        const isAuth = err.message?.includes('Token') || err.message?.includes('Authorization');
+        if (isAuth) {
+          return jsonResponse({ error: 'UNAUTHORIZED', message: 'Oturum doğrulanamadı.' }, 401, corsHeaders);
+        }
+        return jsonResponse({ error: 'INTERNAL_ERROR', message: err.message }, 500, corsHeaders);
+      }
+    }
+
+    // PATCH /user/reminder-settings (Kullanıcının hatırlatıcı ayarlarını güncelle)
+    if (request.method === 'PATCH' && url.pathname === '/user/reminder-settings') {
+      try {
+        const authHeader = request.headers.get('Authorization');
+        const projectId = env.FIREBASE_PROJECT_ID || 'j-planning';
+        const { uid } = await verifyFirebaseToken(authHeader, projectId);
+
+        const body = await request.json().catch(() => ({}));
+        const { reminderEnabled, reminderHour } = body;
+
+        if (typeof reminderEnabled !== 'boolean') {
+          return jsonResponse({ error: 'VALIDATION_ERROR', message: 'reminderEnabled (boolean) alanı zorunludur.' }, 400, corsHeaders);
+        }
+
+        if (typeof reminderHour !== 'number' || reminderHour < 0 || reminderHour > 23 || !Number.isInteger(reminderHour)) {
+          return jsonResponse({ error: 'VALIDATION_ERROR', message: 'reminderHour (0-23 arası tam sayı) zorunludur.' }, 400, corsHeaders);
+        }
+
+        const controlClient = getControlPlaneClient(env);
+        if (!controlClient) {
+          return jsonResponse({ error: 'CONFIG_ERROR', message: 'Control plane veritabanına erişilemiyor.' }, 500, corsHeaders);
+        }
+
+        await ensureControlPlaneUsersIndexSchema(controlClient);
+
+        const now = Date.now();
+        const enabledInt = reminderEnabled ? 1 : 0;
+
+        // 1. Önce Control Plane DB (admin_users_index) güncelle - Başarısız olursa hata fırlat
+        const updateRes = await controlClient.execute({
+          sql: 'UPDATE admin_users_index SET reminder_enabled = ?, reminder_hour = ?, updated_at = ? WHERE uid = ?;',
+          args: [enabledInt, reminderHour, now, uid],
+        });
+
+        // Eğer admin_users_index'te henüz bu kullanıcı yoksa oluştur
+        if (updateRes.rowsAffected === 0) {
+          await controlClient.execute({
+            sql: `INSERT INTO admin_users_index (uid, reminder_enabled, reminder_hour, created_at, updated_at)
+                  VALUES (?, ?, ?, ?, ?)
+                  ON CONFLICT(uid) DO UPDATE SET reminder_enabled = excluded.reminder_enabled, reminder_hour = excluded.reminder_hour, updated_at = excluded.updated_at;`,
+            args: [uid, enabledInt, reminderHour, now, now],
+          });
+        }
+
+        // 2. Control plane başarılı oldu, kullanıcının Turso DB'sindeki app_meta'yı güncelle (sync)
+        try {
+          const userMetaRes = await controlClient.execute({
+            sql: 'SELECT db_name FROM admin_users_index WHERE uid = ? LIMIT 1;',
+            args: [uid],
+          });
+          const dbName = userMetaRes?.rows?.[0]?.db_name || getDbNameForUser(uid);
+          const sessionInfo = await ensureUserDatabase(dbName, env);
+          const userDbClient = createClient({
+            url: sessionInfo.dbUrl,
+            authToken: sessionInfo.token,
+          });
+
+          await userDbClient.execute({
+            sql: "INSERT INTO app_meta (key, value) VALUES ('reminder_enabled', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value;",
+            args: [String(enabledInt)],
+          }).catch(() => {});
+
+          await userDbClient.execute({
+            sql: "INSERT INTO app_meta (key, value) VALUES ('reminder_hour', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value;",
+            args: [String(reminderHour)],
+          }).catch(() => {});
+        } catch (syncDbErr) {
+          console.warn('[Reminder Settings Sync DB Warning]:', syncDbErr.message);
+        }
+
+        return jsonResponse({
+          success: true,
+          reminderEnabled,
+          reminderHour,
+        }, 200, corsHeaders);
+      } catch (err) {
+        const isAuth = err.message?.includes('Token') || err.message?.includes('Authorization');
+        if (isAuth) {
+          return jsonResponse({ error: 'UNAUTHORIZED', message: 'Oturum doğrulanamadı.' }, 401, corsHeaders);
+        }
+        return jsonResponse({ error: 'INTERNAL_ERROR', message: err.message }, 500, corsHeaders);
+      }
+    }
+
+    // POST /test/trigger-reminders (Giriş yapmış kullanıcının KENDİ hatırlatıcı push bildirimini test etmesi)
+    if (request.method === 'POST' && url.pathname === '/test/trigger-reminders') {
+      try {
+        const authHeader = request.headers.get('Authorization');
+        const projectId = env.FIREBASE_PROJECT_ID || 'j-planning';
+
+        // 1. ZORUNLU KİMLİK DOĞRULAMA (Açık/anonim erişim KESİNLİKLE yasaktır)
+        if (!authHeader) {
+          return jsonResponse({ error: 'UNAUTHORIZED', message: 'Yetkilendirme başlığı eksik.' }, 401, corsHeaders);
+        }
+
+        const { uid } = await verifyFirebaseToken(authHeader, projectId);
+        if (!uid) {
+          return jsonResponse({ error: 'UNAUTHORIZED', message: 'Geçersiz oturum.' }, 401, corsHeaders);
+        }
+
+        // 2. KÖTÜYE KULLANIM ÖNLEME / RATE LIMIT (Kullanıcı başına dakikada en fazla 5 test isteği)
+        const isRateLimitOk = await checkPushRateLimit(env, `reminder_test:${uid}`, 5);
+        if (!isRateLimitOk) {
+          return jsonResponse(
+            { error: 'RATE_LIMITED', message: 'Çok sık test isteği gönderildi. Lütfen bir dakika bekleyin.' },
+            429,
+            corsHeaders
+          );
+        }
+
+        // 3. SIKI KORUMA: YALNIZCA doğrulanmış kullanıcının KENDİ hesabı hedeflenir.
+        // Dışarıdan gelen body parametreleri asla başka bir kullanıcıyı hedefleyemez.
+        const result = await handleHourlyTaskReminders(env, null, uid);
+
+        return jsonResponse(
+          {
+            success: true,
+            uid,
+            result,
+          },
+          200,
+          corsHeaders
+        );
+      } catch (err) {
+        const isAuth =
+          err.name?.startsWith('JWT') ||
+          err.name?.startsWith('JWS') ||
+          err.message?.includes('Authorization') ||
+          err.message?.includes('Token') ||
+          err.message?.includes('token');
+
+        if (isAuth) {
+          return jsonResponse({ error: 'UNAUTHORIZED', message: 'Oturum doğrulanamadı.' }, 401, corsHeaders);
+        }
+
+        return jsonResponse({ error: 'TEST_TRIGGER_ERROR', message: err.message }, 500, corsHeaders);
+      }
+    }
+
     return jsonResponse({ error: 'NOT_FOUND', message: 'Endpoint bulunamadı' }, 404, corsHeaders);
     } catch (fatalError) {
       // Teknik detaylar (stack trace, dosya yolları vb.) sadece Worker konsoluna yazılır
@@ -2476,5 +3031,8 @@ export default {
         corsHeaders
       );
     }
+  },
+  async scheduled(event, env, ctx) {
+    ctx.waitUntil(handleHourlyTaskReminders(env));
   },
 };

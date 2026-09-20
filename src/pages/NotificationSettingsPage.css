@@ -269,3 +269,159 @@
   from { opacity: 0; transform: translateY(-4px); }
   to { opacity: 1; transform: translateY(0); }
 }
+
+/* Günlük Görev Hatırlatıcısı (Cron) Kartı */
+.notification-settings-page__section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: var(--space-xs);
+}
+
+.notification-settings-page__section-title {
+  font-size: var(--font-h3-size);
+  font-weight: var(--font-h3-weight);
+  color: var(--color-text-primary);
+  margin: 0;
+}
+
+.notification-settings-page__reminder-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+  padding: var(--space-lg);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+}
+
+.notification-settings-page__reminder-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-md);
+}
+
+.notification-settings-page__reminder-title-area {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+}
+
+.notification-settings-page__reminder-title {
+  font-size: var(--font-body-medium-size);
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+.notification-settings-page__reminder-desc {
+  font-size: var(--font-caption-size);
+  color: var(--color-text-muted);
+  line-height: 1.4;
+  margin: 0;
+}
+
+.notification-settings-page__reminder-settings {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-md);
+  padding-top: var(--space-sm);
+  border-top: 1px solid var(--color-border);
+}
+
+.notification-settings-page__hour-group {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+}
+
+.notification-settings-page__hour-label {
+  font-size: var(--font-caption-size);
+  color: var(--color-text-secondary);
+  font-weight: 500;
+}
+
+.notification-settings-page__hour-select {
+  background-color: var(--color-surface-alt);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: var(--space-xs) var(--space-sm);
+  font-size: var(--font-body-size);
+  font-weight: 600;
+  color: var(--color-text-primary);
+  outline: none;
+  cursor: pointer;
+  transition: border-color 0.2s;
+}
+
+.notification-settings-page__hour-select:focus {
+  border-color: var(--color-accent);
+}
+
+.notification-settings-page__reminder-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+}
+
+/* Modern Toggle Switch */
+.notification-switch {
+  position: relative;
+  display: inline-block;
+  width: 46px;
+  height: 26px;
+  flex-shrink: 0;
+}
+
+.notification-switch input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.notification-switch__slider {
+  position: absolute;
+  cursor: pointer;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: var(--color-border);
+  transition: 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  border-radius: 26px;
+}
+
+.notification-switch__slider:before {
+  position: absolute;
+  content: "";
+  height: 20px;
+  width: 20px;
+  left: 3px;
+  bottom: 3px;
+  background-color: #ffffff;
+  transition: 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  border-radius: 50%;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+}
+
+.notification-switch input:checked + .notification-switch__slider {
+  background-color: var(--color-accent);
+}
+
+.notification-switch input:checked + .notification-switch__slider:before {
+  transform: translateX(20px);
+}
+
+.notification-switch input:disabled + .notification-switch__slider {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.notification-settings-page__divider {
+  height: 1px;
+  background-color: var(--color-border);
+  margin: var(--space-md) 0 var(--space-xs) 0;
+}

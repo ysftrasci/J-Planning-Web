@@ -21,6 +21,9 @@
 			"fallthrough": true
 		}
 	],
+	"triggers": {
+		"crons": ["0 * * * *"]
+	},
 	"kv_namespaces": [
 		{
 			"binding": "RATE_LIMIT_KV",

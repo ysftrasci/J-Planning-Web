@@ -291,6 +291,7 @@ export async function initGuestDatabase() {
   await Promise.all([
     ensureDefaultCategories().catch((e) => console.warn('[GuestDB] Varsayılan kategoriler uyarısı:', e)),
     ensureTaskSchema(dbInstance).catch((e) => console.warn('[GuestDB] Görev şeması uyarısı:', e)),
+    ensureUserSettingsSchema(dbInstance).catch((e) => console.warn('[GuestDB] Kullanıcı ayarları şeması uyarısı:', e)),
     dbInstance.getFirstAsync('SELECT userId FROM wallet WHERE userId = ?', ['me'])
       .then((existing) => {
         if (!existing) {
@@ -313,6 +314,19 @@ export async function ensureTaskSchema(db) {
     await db.runAsync('ALTER TABLE tasks ADD COLUMN intervalValue INTEGER NOT NULL DEFAULT 1;');
   } catch (_) {
     // Kolon zaten varsa SQLite hata verir, güvenle yakalanır
+  }
+}
+
+/**
+ * Kullanıcı ayarlarını (hatırlatıcı bildirim ayarları vb.) app_meta tablosunda garanti eder (Migration)
+ */
+export async function ensureUserSettingsSchema(db) {
+  if (!db) return;
+  try {
+    await db.runAsync("INSERT OR IGNORE INTO app_meta (key, value) VALUES ('reminder_enabled', '1');");
+    await db.runAsync("INSERT OR IGNORE INTO app_meta (key, value) VALUES ('reminder_hour', '20');");
+  } catch (_) {
+    // app_meta tablosu henüz yoksa veya hata oluşursa güvenle yakalanır
   }
 }
 
@@ -343,6 +357,7 @@ export async function initDatabase(uid) {
     await Promise.all([
       ensureDefaultCategories().catch((e) => console.warn('Varsayılan kategoriler uyarısı:', e)),
       ensureTaskSchema(db).catch((e) => console.warn('Görev şeması uyarısı:', e)),
+      ensureUserSettingsSchema(db).catch((e) => console.warn('Kullanıcı ayarları şeması uyarısı:', e)),
       db.getFirstAsync('SELECT userId FROM wallet WHERE userId = ?', ['me'])
         .then((existing) => {
           if (!existing) {

@@ -8,6 +8,7 @@ import {
   Clock,
   AlertTriangle,
   Pencil,
+  Sparkles,
 } from 'lucide-react';
 import {
   WEEKDAYS,
@@ -21,6 +22,9 @@ import {
   weekdayLabel,
   formatTime,
   registerFCMPushToken,
+  getUserReminderSettings,
+  updateUserReminderSettings,
+  triggerReminderTest,
 } from '../services/notificationService.js';
 import { useAuth } from '../context/AuthContext.jsx';
 import AppButton from '../components/AppButton.jsx';
@@ -38,6 +42,12 @@ export default function NotificationSettingsPage() {
   const [permStatus, setPermStatus] = useState('default');
   const [toastMessage, setToastMessage] = useState('');
 
+  // Otomatik Hatırlatıcı (Cron) State'leri
+  const [reminderEnabled, setReminderEnabled] = useState(true);
+  const [reminderHour, setReminderHour] = useState(20);
+  const [reminderSaving, setReminderSaving] = useState(false);
+  const [testingReminder, setTestingReminder] = useState(false);
+
   const loadSchedules = async () => {
     const data = await getSchedules(user?.uid);
     setSchedules(data);
@@ -48,9 +58,96 @@ export default function NotificationSettingsPage() {
     }
   };
 
+  const loadReminderSettings = async () => {
+    try {
+      const settings = await getUserReminderSettings();
+      setReminderEnabled(Boolean(settings.reminderEnabled));
+      setReminderHour(typeof settings.reminderHour === 'number' ? settings.reminderHour : 20);
+    } catch (e) {
+      console.warn('Hatırlatıcı ayarları yüklenemedi:', e);
+    }
+  };
+
   useEffect(() => {
     loadSchedules();
+    loadReminderSettings();
   }, [user]);
+
+  const handleToggleReminder = async (newVal) => {
+    const prev = reminderEnabled;
+    setReminderEnabled(newVal);
+    setReminderSaving(true);
+    try {
+      await updateUserReminderSettings({ reminderEnabled: newVal, reminderHour });
+      setToastMessage(newVal ? 'Günlük hatırlatıcı bildirimleri açıldı.' : 'Günlük hatırlatıcı bildirimleri kapatıldı.');
+    } catch (err) {
+      setReminderEnabled(prev);
+      setToastMessage(`Ayar kaydedilemedi: ${err.message}`);
+    } finally {
+      setReminderSaving(false);
+      setTimeout(() => setToastMessage(''), 4000);
+    }
+  };
+
+  const handleChangeReminderHour = async (newHour) => {
+    const prev = reminderHour;
+    setReminderHour(newHour);
+    setReminderSaving(true);
+    try {
+      await updateUserReminderSettings({ reminderEnabled, reminderHour: newHour });
+      setToastMessage(`Hatırlatma saati ${String(newHour).padStart(2, '0')}:00 olarak güncellendi.`);
+    } catch (err) {
+      setReminderHour(prev);
+      setToastMessage(`Saat güncellenemedi: ${err.message}`);
+    } finally {
+      setReminderSaving(false);
+      setTimeout(() => setToastMessage(''), 4000);
+    }
+  };
+
+  const handleTriggerReminderTest = async () => {
+    setTestingReminder(true);
+    try {
+      const status = await getNotificationPermissionStatus();
+      if (status !== 'granted') {
+        const granted = await requestNotificationPermission();
+        setPermStatus(granted ? 'granted' : 'denied');
+        if (!granted) {
+          setToastMessage('Bildirim gönderebilmemiz için tarayıcı bildirim iznini açman gerekiyor.');
+          return;
+        }
+      }
+
+      // FCM Token henüz cihazda kayıtlı değilse Firestore'a kaydet
+      if (user?.uid && !localStorage.getItem('jplanning:current_fcm_token')) {
+        await registerFCMPushToken(user.uid);
+      }
+
+      const res = await triggerReminderTest();
+      const r = res?.result;
+
+      if (!r || r.success === false) {
+        setToastMessage(`❌ Hata: ${r?.message || r?.error || 'Test sırasında bir sorun oluştu.'}`);
+      } else if (r.status === 'SENT') {
+        setToastMessage(`✅ Test bildirimi gönderildi! (${r.uncompletedTasks} görev, ${r.deviceCount || 1} cihaza iletildi)`);
+      } else if (r.status === 'ALL_COMPLETED') {
+        setToastMessage('ℹ️ Bildirim gönderilmedi: Bugün için tamamlanması gereken tüm görevlerin zaten tamamlanmış.');
+      } else if (r.status === 'NO_TASKS') {
+        setToastMessage('ℹ️ Aktif bir görevin bulunmuyor. Test için önce bir görev oluşturmalısın.');
+      } else if (r.status === 'NO_TOKENS') {
+        setToastMessage('⚠️ Cihazında kayıtlı push bildirim anahtarı bulunamadı. Lütfen yukarıdaki "İzin Ver" butonuna tıkla.');
+      } else if (r.status === 'FCM_SEND_FAILED') {
+        setToastMessage('❌ Bildirim cihazlara iletilemedi (FCM reddetti).');
+      } else {
+        setToastMessage(r.message || 'Hatırlatıcı kontrolü tamamlandı.');
+      }
+    } catch (err) {
+      setToastMessage(`❌ Test başarısız: ${err.message}`);
+    } finally {
+      setTestingReminder(false);
+      setTimeout(() => setToastMessage(''), 6000);
+    }
+  };
 
   const handleRequestPerm = async () => {
     const granted = await requestNotificationPermission();
@@ -135,8 +232,75 @@ export default function NotificationSettingsPage() {
         </div>
       )}
 
+      {/* Günlük Görev Hatırlatıcısı (Cloudflare Cron) Kartı */}
+      <div className="notification-settings-page__section-header">
+        <h2 className="notification-settings-page__section-title">Günlük Görev Hatırlatıcısı</h2>
+      </div>
+
+      <div className="notification-settings-page__reminder-card">
+        <div className="notification-settings-page__reminder-top">
+          <div className="notification-settings-page__reminder-title-area">
+            <Clock size={22} color="var(--color-accent-dark)" />
+            <div>
+              <div className="notification-settings-page__reminder-title">Akıllı Push Hatırlatıcısı</div>
+              <p className="notification-settings-page__reminder-desc">
+                Her gün seçtiğin saatte, tamamlanmamış görevlerin varsa sana bir hatırlatma bildirimi gönderilir.
+              </p>
+            </div>
+          </div>
+          <label className="notification-switch">
+            <input
+              type="checkbox"
+              checked={reminderEnabled}
+              disabled={reminderSaving}
+              onChange={(e) => handleToggleReminder(e.target.checked)}
+            />
+            <span className="notification-switch__slider"></span>
+          </label>
+        </div>
+
+        {reminderEnabled && (
+          <div className="notification-settings-page__reminder-settings">
+            <div className="notification-settings-page__hour-group">
+              <label htmlFor="reminder-hour-select" className="notification-settings-page__hour-label">
+                Hatırlatma Saati (TR):
+              </label>
+              <select
+                id="reminder-hour-select"
+                className="notification-settings-page__hour-select"
+                value={reminderHour}
+                disabled={reminderSaving}
+                onChange={(e) => handleChangeReminderHour(parseInt(e.target.value, 10))}
+              >
+                {Array.from({ length: 24 }, (_, i) => (
+                  <option key={i} value={i}>
+                    {String(i).padStart(2, '0')}:00
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="notification-settings-page__reminder-actions">
+              <AppButton
+                title={testingReminder ? 'Test Ediliyor...' : 'Hatırlatıcıyı Test Et ⏰'}
+                variant="ghost"
+                onClick={handleTriggerReminderTest}
+                disabled={testingReminder}
+                style={{ padding: '6px 12px', fontSize: '12px' }}
+              />
+            </div>
+          </div>
+        )}
+      </div>
+
+      <div className="notification-settings-page__divider"></div>
+
+      <div className="notification-settings-page__section-header">
+        <h2 className="notification-settings-page__section-title">Özel Bildirim Zamanlamaları</h2>
+      </div>
+
       <p className="notification-settings-page__intro">
-        Haftanın istediğin günlerinde, istediğin saatlerde hatırlatma bildirimi al. Dilediğin kadar zamanlama ekleyebilirsin.
+        Haftanın istediğin günlerinde, istediğin saatlerde ek bildirimler al. Dilediğin kadar zamanlama ekleyebilirsin.
       </p>
 
       {schedules.length === 0 ? (
