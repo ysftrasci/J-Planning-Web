@@ -264,7 +264,7 @@ const WORKER_URL = (import.meta.env.VITE_WORKER_URL || '/api/worker').replace(/\
 export async function getUserReminderSettings() {
   const currentUser = auth.currentUser;
   if (!currentUser) {
-    return { reminderEnabled: true, reminderHour: 20 };
+    return { reminderEnabled: false, reminderHour: 20 };
   }
 
   try {
@@ -296,13 +296,13 @@ export async function getUserReminderSettings() {
         db.getFirstAsync("SELECT value FROM app_meta WHERE key = 'reminder_hour' LIMIT 1;").catch(() => null),
       ]);
       return {
-        reminderEnabled: enabledRow ? enabledRow.value === '1' : true,
+        reminderEnabled: enabledRow ? enabledRow.value === '1' : false,
         reminderHour: hourRow ? parseInt(hourRow.value, 10) : 20,
       };
     }
   } catch (_) {}
 
-  return { reminderEnabled: true, reminderHour: 20 };
+  return { reminderEnabled: false, reminderHour: 20 };
 }
 
 /**

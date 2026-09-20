@@ -12,7 +12,7 @@ CREATE TABLE IF NOT EXISTS admin_users_index (
     task_count INTEGER DEFAULT 0,
     jp_balance INTEGER DEFAULT 0,
     is_disabled INTEGER DEFAULT 0,
-    reminder_enabled INTEGER NOT NULL DEFAULT 1,
+    reminder_enabled INTEGER NOT NULL DEFAULT 0,
     reminder_hour INTEGER NOT NULL DEFAULT 20,
     updated_at INTEGER
 );

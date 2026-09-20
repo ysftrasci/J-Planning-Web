@@ -221,7 +221,7 @@ async function ensureControlPlaneUsersIndexSchema(client) {
     const tableInfo = await client.execute('PRAGMA table_info(admin_users_index);').catch(() => null);
     const existingCols = new Set(tableInfo?.rows?.map((r) => r.name) || []);
     if (!existingCols.has('reminder_enabled')) {
-      await client.execute('ALTER TABLE admin_users_index ADD COLUMN reminder_enabled INTEGER NOT NULL DEFAULT 1;').catch(() => {});
+      await client.execute('ALTER TABLE admin_users_index ADD COLUMN reminder_enabled INTEGER NOT NULL DEFAULT 0;').catch(() => {});
     }
     if (!existingCols.has('reminder_hour')) {
       await client.execute('ALTER TABLE admin_users_index ADD COLUMN reminder_hour INTEGER NOT NULL DEFAULT 20;').catch(() => {});
@@ -752,10 +752,10 @@ async function handleHourlyTaskReminders(env, simulatedHour = null, specificUid 
         users = usersRes.rows;
       } else {
         // Control plane'de henüz kaydı yoksa bile varsayılan dbName ile test et
-        users = [{ uid: specificUid, db_name: getDbNameForUser(specificUid), reminder_enabled: 1, reminder_hour: turkeyHour }];
+        users = [{ uid: specificUid, db_name: getDbNameForUser(specificUid), reminder_enabled: 0, reminder_hour: turkeyHour }];
       }
     } catch (e) {
-      users = [{ uid: specificUid, db_name: getDbNameForUser(specificUid), reminder_enabled: 1, reminder_hour: turkeyHour }];
+      users = [{ uid: specificUid, db_name: getDbNameForUser(specificUid), reminder_enabled: 0, reminder_hour: turkeyHour }];
     }
   } else {
     // Gerçek Saatlik Cron: Sadece hatırlatıcısı açık ve saati uyuşan aktif kullanıcılar
@@ -2849,7 +2849,7 @@ export default {
         });
 
         const row = rowRes?.rows?.[0];
-        const reminderEnabled = row ? Boolean(row.reminder_enabled ?? 1) : true;
+        const reminderEnabled = row ? Boolean(row.reminder_enabled ?? 0) : false;
         const reminderHour = row && typeof row.reminder_hour === 'number' ? row.reminder_hour : 20;
 
         return jsonResponse({

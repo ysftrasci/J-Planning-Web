@@ -43,7 +43,7 @@ export default function NotificationSettingsPage() {
   const [toastMessage, setToastMessage] = useState('');
 
   // Otomatik Hatırlatıcı (Cron) State'leri
-  const [reminderEnabled, setReminderEnabled] = useState(true);
+  const [reminderEnabled, setReminderEnabled] = useState(false);
   const [reminderHour, setReminderHour] = useState(20);
   const [reminderSaving, setReminderSaving] = useState(false);
   const [testingReminder, setTestingReminder] = useState(false);

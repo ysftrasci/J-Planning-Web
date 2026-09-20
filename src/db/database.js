@@ -323,7 +323,7 @@ export async function ensureTaskSchema(db) {
 export async function ensureUserSettingsSchema(db) {
   if (!db) return;
   try {
-    await db.runAsync("INSERT OR IGNORE INTO app_meta (key, value) VALUES ('reminder_enabled', '1');");
+    await db.runAsync("INSERT OR IGNORE INTO app_meta (key, value) VALUES ('reminder_enabled', '0');");
     await db.runAsync("INSERT OR IGNORE INTO app_meta (key, value) VALUES ('reminder_hour', '20');");
   } catch (_) {
     // app_meta tablosu henüz yoksa veya hata oluşursa güvenle yakalanır
