@@ -2,7 +2,7 @@
 importScripts('https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js');
 importScripts('https://www.gstatic.com/firebasejs/10.8.0/firebase-messaging-compat.js');
 
-const CACHE_NAME = 'j-planning-v6-turso';
+const CACHE_NAME = 'j-planning-v7-turso';
 
 // Service Worker Kurulumu & Önbelleğe alma
 self.addEventListener('install', (event) => {
@@ -88,6 +88,9 @@ self.addEventListener('fetch', (event) => {
   // Dış API'ler (Cloudflare Worker, Turso DB, Firebase vb.) doğrudan tarayıcı tarafından yönetilsin.
   if (url.origin !== self.location.origin) return;
 
+  // API proxy isteklerini (/api/*) Service Worker fetch handler'ından muaf tut (doğrudan ağa gitsin)
+  if (url.pathname.startsWith('/api/')) return;
+
   // HTML sayfa gezintisi için Network-First (Taze HTTP Header/CSP garantisi)
   if (event.request.mode === 'navigate') {
     event.respondWith(
@@ -114,7 +117,7 @@ self.addEventListener('fetch', (event) => {
       .catch(async () => {
         const cached = await caches.match(event.request);
         if (cached) return cached;
-        return new Response('', { status: 408, statusText: 'Offline' });
+        return Response.error();
       })
   );
 });
