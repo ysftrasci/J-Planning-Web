@@ -19,6 +19,30 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:ital,wght@0,300..800;1,300..800&display=swap" rel="stylesheet" />
 
+    <!-- Netlify Rozet & Drawer Engelleyici (Mobil ve Masaüstü Buton Çakışmalarını Önler) -->
+    <style>
+      #nl-badge-frame,
+      #netlify-badge,
+      #netlify-drawer,
+      iframe[title*="Netlify" i],
+      iframe[srcdoc*="nl-narrow"],
+      iframe[data-netlify-drawer] {
+        display: none !important;
+        visibility: hidden !important;
+        opacity: 0 !important;
+        pointer-events: none !important;
+        clip-path: inset(100%) !important;
+        position: absolute !important;
+        top: -9999px !important;
+        left: -9999px !important;
+        width: 0 !important;
+        height: 0 !important;
+        max-width: 0 !important;
+        max-height: 0 !important;
+        z-index: -9999 !important;
+      }
+    </style>
+
     <title>J-Planning — Görev & Odaklanma</title>
   </head>
   <body>
