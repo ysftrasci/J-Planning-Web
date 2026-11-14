@@ -10,6 +10,7 @@ import { openTursoConnection } from './sqliteEngine';
 import { openGuestLocalDatabase } from './localSqliteEngine';
 import { ensureDefaultCategories } from './categoryRepository';
 import { migrateLegacyDataIfNeeded } from './migrationService';
+import { migrateFreezeRemoval, migrateOnceCleanup } from './taskRepository';
 import { auth } from '../services/firebase';
 
 let dbInstance = null;
@@ -42,6 +43,7 @@ export function getDb() {
 
 let inFlightSessionPromise = null;
 let inFlightInitPromise = null;
+let inFlightInitUid = null;
 let dbReadyCallbacks = [];
 
 /**
@@ -257,6 +259,8 @@ export async function switchToUserDatabase(uid) {
     try {
       dbInstance.close();
     } catch (_) {}
+    dbInstance = null;
+    currentUid = null;
   }
 
   const session = await requestWorkerSession();
@@ -280,6 +284,8 @@ export async function initGuestDatabase() {
     try {
       dbInstance.close();
     } catch (_) {}
+    dbInstance = null;
+    currentUid = null;
   }
 
   const localDb = await openGuestLocalDatabase();
@@ -292,6 +298,9 @@ export async function initGuestDatabase() {
     ensureDefaultCategories().catch((e) => console.warn('[GuestDB] Varsayılan kategoriler uyarısı:', e)),
     ensureTaskSchema(dbInstance).catch((e) => console.warn('[GuestDB] Görev şeması uyarısı:', e)),
     ensureUserSettingsSchema(dbInstance).catch((e) => console.warn('[GuestDB] Kullanıcı ayarları şeması uyarısı:', e)),
+    ensureFocusSessionSchema(dbInstance).catch((e) => console.warn('[GuestDB] Focus şeması uyarısı:', e)),
+    migrateFreezeRemoval(dbInstance).catch((e) => console.error('[GuestDB] Dondurma kaldırma migrasyonu hatası:', e)),
+    migrateOnceCleanup(dbInstance).catch((e) => console.error('[GuestDB] ONCE temizlik migrasyonu hatası:', e)),
     dbInstance.getFirstAsync('SELECT userId FROM wallet WHERE userId = ?', ['me'])
       .then((existing) => {
         if (!existing) {
@@ -331,6 +340,18 @@ export async function ensureUserSettingsSchema(db) {
 }
 
 /**
+ * Odaklanma seansları tablosunda awardedMilestones kolonunun varlığını garanti eder (Migration)
+ */
+export async function ensureFocusSessionSchema(db) {
+  if (!db) return;
+  try {
+    await db.runAsync('ALTER TABLE focus_sessions ADD COLUMN awardedMilestones TEXT;');
+  } catch (_) {
+    // Kolon zaten varsa SQLite hata verir, güvenle yakalanır
+  }
+}
+
+/**
  * Kayıtlı kullanıcı için Turso veritabanını başlatır, gerekirse eski verileri taşır.
  * Paralel çağrılarda aynı başlatma Promise'ini paylaşır (deduplication).
  */
@@ -339,10 +360,11 @@ export async function initDatabase(uid) {
     return initGuestDatabase();
   }
 
-  if (inFlightInitPromise && currentUid === uid) {
+  if (inFlightInitPromise && (currentUid === uid || inFlightInitUid === uid)) {
     return inFlightInitPromise;
   }
 
+  inFlightInitUid = uid;
   const runInit = async () => {
     const db = await switchToUserDatabase(uid);
 
@@ -358,6 +380,9 @@ export async function initDatabase(uid) {
       ensureDefaultCategories().catch((e) => console.warn('Varsayılan kategoriler uyarısı:', e)),
       ensureTaskSchema(db).catch((e) => console.warn('Görev şeması uyarısı:', e)),
       ensureUserSettingsSchema(db).catch((e) => console.warn('Kullanıcı ayarları şeması uyarısı:', e)),
+      ensureFocusSessionSchema(db).catch((e) => console.warn('Focus şeması uyarısı:', e)),
+      migrateFreezeRemoval(db).catch((e) => console.error('Dondurma kaldırma migrasyonu hatası:', e)),
+      migrateOnceCleanup(db).catch((e) => console.error('ONCE temizlik migrasyonu hatası:', e)),
       db.getFirstAsync('SELECT userId FROM wallet WHERE userId = ?', ['me'])
         .then((existing) => {
           if (!existing) {
@@ -373,6 +398,7 @@ export async function initDatabase(uid) {
 
   inFlightInitPromise = runInit().finally(() => {
     inFlightInitPromise = null;
+    inFlightInitUid = null;
   });
 
   return inFlightInitPromise;
@@ -393,6 +419,7 @@ export function resetDatabaseSession(targetUid = null) {
   currentSession = null;
   inFlightSessionPromise = null;
   inFlightInitPromise = null;
+  inFlightInitUid = null;
 
   if (typeof sessionStorage !== 'undefined') {
     try {
