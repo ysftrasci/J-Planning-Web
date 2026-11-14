@@ -185,6 +185,10 @@ export async function importUserData(jsonText) {
       await db.runAsync('DELETE FROM task_records;');
       for (const row of tables.task_records) {
         if (!row.id || !row.taskId || !row.periodKey) continue;
+        let recordStatus = sanitizeString(row.status || 'FAILED', 30);
+        if (recordStatus === 'FROZEN') {
+          recordStatus = 'FAILED';
+        }
         await db.runAsync(
           `INSERT INTO task_records (id, taskId, periodKey, status, completedSubtasks, completedAt, isLateMarked, lateMarkedAt, jpEarned, streakBonusEarned)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -192,7 +196,7 @@ export async function importUserData(jsonText) {
             sanitizeString(row.id, 100),
             sanitizeString(row.taskId, 100),
             sanitizeString(row.periodKey, 30),
-            sanitizeString(row.status || 'FAILED', 30),
+            recordStatus,
             sanitizeInt(row.completedSubtasks, 0, 100, 0),
             row.completedAt ? sanitizeInt(row.completedAt, 0, Date.now() + 8640000000, Date.now()) : null,
             row.isLateMarked ? 1 : 0,
@@ -310,6 +314,16 @@ export async function importUserData(jsonText) {
             sanitizeInt(row.createdAt, 0, Date.now() + 8640000000, Date.now()),
             sanitizeInt(row.updatedAt, 0, Date.now() + 8640000000, Date.now()),
           ]
+        );
+      }
+    }
+
+    if (Array.isArray(tables.app_meta)) {
+      for (const row of tables.app_meta) {
+        if (!row.key || row.key === 'streak_freeze_count') continue;
+        await db.runAsync(
+          `INSERT INTO app_meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+          [sanitizeString(row.key, 100), sanitizeString(row.value, 1000)]
         );
       }
     }

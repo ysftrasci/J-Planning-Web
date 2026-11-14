@@ -41,6 +41,12 @@
   transition: border-color 0.2s ease, box-shadow 0.2s ease;
 }
 
+.add-task-page__textarea {
+  min-height: 120px;
+  resize: vertical;
+  line-height: 1.5;
+}
+
 .add-task-page__input:focus {
   border-color: #2D1E24;
 }
