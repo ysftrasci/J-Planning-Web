@@ -194,10 +194,14 @@ export function AuthProvider({ children }) {
               assignedTasksUnsub = listenAcceptedTasksAssignedToMe(firebaseUser.uid, async (tasks) => {
                 if (Array.isArray(tasks)) {
                   await syncReceivedTasksWithFirestore(tasks);
+                  let anyUpdated = false;
                   for (const t of tasks) {
-                    await updateTaskFromAssignment(t);
+                    const wasUpdated = await updateTaskFromAssignment(t);
+                    if (wasUpdated) anyUpdated = true;
                   }
-                  window.dispatchEvent(new Event('jplanning:cloud-sync-update'));
+                  if (anyUpdated) {
+                    window.dispatchEvent(new Event('jplanning:cloud-sync-update'));
+                  }
                 }
               });
             } catch (assignedErr) {
