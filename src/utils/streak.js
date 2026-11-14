@@ -27,7 +27,7 @@ export function calculateStreakUpTo(task, records, uptoPeriodKey) {
   let iterations = 0;
   while (iterations < 1000) {
     const rec = recordsMap.get(checkKey);
-    if (rec && (rec.status === 'SUCCESSFUL' || rec.status === 'FROZEN')) {
+    if (rec && rec.status === 'SUCCESSFUL') {
       streak += 1;
     } else {
       break;
@@ -40,12 +40,29 @@ export function calculateStreakUpTo(task, records, uptoPeriodKey) {
 }
 
 // Görevin şu anki (en güncel) serisini hesaplar — istatistik ekranı için.
+// Kural:
+//  - Güncel dönem SUCCESSFUL → o dönem dahil geriye sayılır (+1 var).
+//  - Güncel dönem FAILED     → seri 0 (dönem kesinleşmiş ve başarısız).
+//  - Güncel dönem PENDING_PARTIAL / PENDING / kayıt yok
+//                            → önceki dönemden başlanır; güncel dönem seriyi KIRMIYOR,
+//                              ama +1 de katmıyor (henüz bitmedi).
 export function calculateCurrentStreak(task, records) {
   if (task.period === 'ONCE') return 0;
   const todayKey = getPeriodKey(task, new Date());
   const recordsMap = new Map(records.map((r) => [r.periodKey, r]));
-  const startKey = recordsMap.has(todayKey) ? todayKey : getPreviousPeriodKey(task, todayKey);
-  return calculateStreakUpTo(task, records, startKey);
+  const todayRec = recordsMap.get(todayKey);
+
+  if (todayRec && todayRec.status === 'SUCCESSFUL') {
+    // Güncel dönem tamamlandı: o dönem dahil say.
+    return calculateStreakUpTo(task, records, todayKey);
+  }
+  if (todayRec && todayRec.status === 'FAILED') {
+    // Güncel dönem kesinleşmiş ve başarısız: seri kırılmış.
+    return 0;
+  }
+  // Kayıt yok, PENDING veya PENDING_PARTIAL: dönem devam ediyor.
+  // Önceki dönemden geriye say; güncel döneme dokunma.
+  return calculateStreakUpTo(task, records, getPreviousPeriodKey(task, todayKey));
 }
 
 // En uzun seri (rekor)
@@ -55,7 +72,7 @@ export function calculateMaxStreak(task, records) {
   let max = 0;
   let current = 0;
   for (const rec of sorted) {
-    if (rec.status === 'SUCCESSFUL' || rec.status === 'FROZEN') {
+    if (rec.status === 'SUCCESSFUL') {
       current += 1;
       max = Math.max(max, current);
     } else {
@@ -65,52 +82,37 @@ export function calculateMaxStreak(task, records) {
   return max;
 }
 
-// Tamamlanma oranı
-// subtaskCount = 1: Basit görevler için kesinleşmiş (SUCCESSFUL, FAILED, FROZEN) kayıtlar üzerinden ikili hesaplama.
-// subtaskCount > 1: Çoklu alt görevli işlerde PENDING_PARTIAL kayıtları da oransal olarak (completedSubtasks/subtaskCount) hesaba dahil edilir.
+// Tamamlanma oranı — ALT GÖREV bazlı hesaplama
+// Her kayıt için (N = task.subtaskCount):
+//   SUCCESSFUL     : pay += N,  payda += N  (tüm alt görevler tam sayılır)
+//   FAILED         : pay += clamp(completedSubtasks, 0, N), payda += N
+//   PENDING_PARTIAL: pay += c,  payda += c  (c = clamp; kalan alt görevler henüz "yapılmadı" sayılmaz)
+//   PENDING / kayıtsız: katkı yok
+// rate = round(pay / payda * 100); payda = 0 → rate = null (arayüzde "—")
+// Dönüş birimleri ALT GÖREV'dir.  subtaskCount=1 görevlerde dönem = alt görev → eski davranışla birebir uyumlu.
 export function calculateCompletionStats(records, subtaskCount = 1) {
-  const effectiveSubtaskCount = Math.max(1, Number(subtaskCount) || 1);
+  const N = Math.max(1, Math.round(Number(subtaskCount) || 1));
+  let pay = 0;
+  let payda = 0;
 
-  if (effectiveSubtaskCount === 1) {
-    const finalized = records.filter((r) => r.status === 'SUCCESSFUL' || r.status === 'FAILED' || r.status === 'FROZEN');
-    const successCount = finalized.filter((r) => r.status === 'SUCCESSFUL' || r.status === 'FROZEN').length;
-    const total = finalized.length;
-    const rate = total > 0 ? Math.round((successCount / total) * 100) : 0;
-    return { successCount, failedCount: total - successCount, total, rate };
-  }
-
-  // subtaskCount > 1: Kesinleşmiş kayıtlar ve devam eden kısmi kayıtlar (PENDING_PARTIAL) hesaba dahil edilir.
-  // Henüz başlanmamış (PENDING veya kaydı olmayan) periyotlar hesaba katılmaz.
-  const validRecords = records.filter(
-    (r) =>
-      r.status === 'SUCCESSFUL' ||
-      r.status === 'FAILED' ||
-      r.status === 'FROZEN' ||
-      r.status === 'PENDING_PARTIAL'
-  );
-
-  let totalScore = 0;
-  for (const rec of validRecords) {
-    if (rec.status === 'SUCCESSFUL' || rec.status === 'FROZEN') {
-      totalScore += 1.0;
-    } else if (rec.status === 'PENDING_PARTIAL') {
-      const completed = Math.max(0, Math.min(Number(rec.completedSubtasks) || 0, effectiveSubtaskCount));
-      totalScore += completed / effectiveSubtaskCount;
+  for (const rec of records) {
+    if (rec.status === 'SUCCESSFUL') {
+      pay += N;
+      payda += N;
     } else if (rec.status === 'FAILED') {
-      totalScore += 0.0;
+      const c = Math.max(0, Math.min(Math.round(Number(rec.completedSubtasks) || 0), N));
+      pay += c;
+      payda += N;
+    } else if (rec.status === 'PENDING_PARTIAL') {
+      const c = Math.max(0, Math.min(Math.round(Number(rec.completedSubtasks) || 0), N));
+      pay += c;
+      payda += c; // c=0 ise katkı yok
     }
+    // PENDING / diğer: katkı yok
   }
 
-  const total = validRecords.length;
-  const rate = total > 0 ? Math.round((totalScore / total) * 100) : 0;
-  const roundedSuccess = Number(totalScore.toFixed(1));
-
-  return {
-    successCount: roundedSuccess,
-    failedCount: total - Math.round(totalScore),
-    total,
-    rate,
-  };
+  const rate = payda > 0 ? Math.round((pay / payda) * 100) : null;
+  return { successCount: pay, failedCount: payda - pay, total: payda, rate };
 }
 
 // Güncel dönem özeti: görev periyodu DAILY ise "bu hafta kaç gün", WEEKLY/MONTHLY
@@ -132,8 +134,8 @@ export function calculateRecentSummary(task, records) {
   for (let i = 0; i < windowSize; i++) {
     const rec = recordsMap.get(checkKey);
     // Henüz kesinleşmemiş periyotlar da (kayıt yok veya PENDING_PARTIAL) pencereye dahil edilir.
-    if (rec && (rec.status === 'SUCCESSFUL' || rec.status === 'FAILED' || rec.status === 'FROZEN')) {
-      if (rec.status === 'SUCCESSFUL' || rec.status === 'FROZEN') successCount += 1;
+    if (rec && (rec.status === 'SUCCESSFUL' || rec.status === 'FAILED')) {
+      if (rec.status === 'SUCCESSFUL') successCount += 1;
       countedPeriods += 1;
     } else {
       countedPeriods += 1;

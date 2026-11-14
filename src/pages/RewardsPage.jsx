@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { HelpCircle, History, Gift, Plus, ChevronRight } from 'lucide-react';
 import { getActiveRewards, createReward, redeemReward, deleteReward } from '../db/rewardRepository';
-import { getWalletBalance, getStreakFreezeCount, buyStreakFreeze } from '../db/taskRepository';
+import { getWalletBalance } from '../db/taskRepository';
 import { useAuth } from '../context/AuthContext.jsx';
 import { listenFriends } from '../services/friendService';
 import { assignRewardToFriend, acceptAssignedReward, rejectAssignedReward, listenPendingRewardsAssignedToMe } from '../services/rewardAssignmentService';
@@ -20,7 +20,6 @@ export default function RewardsPage() {
   const { user, isGuest } = useAuth();
   const navigate = useNavigate();
   const [balance, setBalance] = useState(0);
-  const [freezeCount, setFreezeCount] = useState(0);
   const [rewards, setRewards] = useState([]);
   const [pendingRewards, setPendingRewards] = useState([]);
   const [showAddModal, setShowAddModal] = useState(false);
@@ -33,13 +32,11 @@ export default function RewardsPage() {
 
   const load = useCallback(async () => {
     try {
-      const [wBalance, fCount, rList] = await Promise.all([
+      const [wBalance, rList] = await Promise.all([
         getWalletBalance('me'),
-        getStreakFreezeCount(),
         getActiveRewards(),
       ]);
       setBalance(wBalance);
-      setFreezeCount(fCount);
       setRewards(rList);
     } catch (e) {
       console.error('Ödüller yüklenirken hata:', e);
@@ -55,16 +52,6 @@ export default function RewardsPage() {
     const unsub = listenPendingRewardsAssignedToMe(user.uid, setPendingRewards);
     return unsub;
   }, [user, isGuest]);
-
-  const handleBuyFreeze = async () => {
-    try {
-      await buyStreakFreeze(50);
-      triggerConfetti();
-      await load();
-    } catch (e) {
-      setErrorMessage(e.message);
-    }
-  };
 
   const confirmRedeem = async () => {
     if (!rewardToRedeem) return;
@@ -134,29 +121,6 @@ export default function RewardsPage() {
       </div>
 
       {errorMessage && <p className="rewards-page__error-banner">{errorMessage}</p>}
-
-      {/* Özel Güç Mağazası: Seri Dondurma Rozeti */}
-      <div className="rewards-page__section">
-        <h2 className="rewards-page__section-title">Özel Güçler 🧊</h2>
-        <div className="rewards-page__card" style={{ border: '1px solid var(--color-accent)' }}>
-          <div className="rewards-page__card-info">
-            <span className="rewards-page__card-title">Seri Dondurma Rozeti 🧊</span>
-            <span className="rewards-page__card-desc">
-              Bir gün görevi unutursanız serinizin sıfırlanmasını engeller (Mevcut: {freezeCount} Adet).
-            </span>
-            <span className="rewards-page__card-cost">50 JP</span>
-          </div>
-          <div className="rewards-page__card-actions">
-            <AppButton
-              title={balance >= 50 ? 'Satın Al (50 JP)' : 'Yetersiz JP'}
-              variant="primary"
-              disabled={balance < 50}
-              onClick={handleBuyFreeze}
-              style={{ padding: 'var(--space-sm) var(--space-md)' }}
-            />
-          </div>
-        </div>
-      </div>
 
       {pendingRewards.length > 0 && (
         <div className="rewards-page__section">
