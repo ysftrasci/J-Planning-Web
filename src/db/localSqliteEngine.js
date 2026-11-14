@@ -104,6 +104,29 @@ export class LocalSqliteConnection {
     return [];
   }
 
+  async batchAsync(statements) {
+    if (this._closed) throw new Error('Veritabanı bağlantısı kapalı.');
+    this._db.exec('BEGIN TRANSACTION;');
+    try {
+      const results = [];
+      for (const stmt of statements) {
+        if (typeof stmt === 'string') {
+          this._db.run(stmt);
+        } else {
+          this._db.run(stmt.sql, stmt.args || []);
+        }
+      }
+      this._db.exec('COMMIT;');
+      this._scheduleSave();
+      return results;
+    } catch (err) {
+      try {
+        this._db.exec('ROLLBACK;');
+      } catch (_) {}
+      throw err;
+    }
+  }
+
   async runAsync(sql, params = []) {
     if (this._closed) throw new Error('Veritabanı bağlantısı kapalı.');
     this._db.run(sql, params);
@@ -137,6 +160,9 @@ export class LocalSqliteConnection {
 
   async exec(sql) {
     return this.execAsync(sql);
+  }
+  async batch(statements) {
+    return this.batchAsync(statements);
   }
   async run(sql, params) {
     return this.runAsync(sql, params);

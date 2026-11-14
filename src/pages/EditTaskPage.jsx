@@ -11,12 +11,14 @@ import {
   createSentTaskRecord,
   createTaskFromAssignment,
   findTaskByIdOrFirestoreId,
+  getTaskRecords,
 } from '../db/taskRepository';
 import { getCategories } from '../db/categoryRepository';
 import { useAuth } from '../context/AuthContext.jsx';
 import { updateAssignedTaskInFirestore } from '../services/taskAssignmentService';
 import { formatPeriodFrequency } from '../utils/period';
 import AppButton from '../components/AppButton.jsx';
+import AppModal from '../components/AppModal.jsx';
 import './EditTaskPage.css';
 
 const PRIORITIES = [
@@ -65,6 +67,8 @@ export default function EditTaskPage() {
   const [errorMessage, setErrorMessage] = useState('');
   const [saving, setSaving] = useState(false);
   const [loaded, setLoaded] = useState(false);
+  const [showPeriodChangeModal, setShowPeriodChangeModal] = useState(false);
+  const [pendingRecordCount, setPendingRecordCount] = useState(0);
 
   useEffect(() => {
     let mounted = true;
@@ -273,15 +277,8 @@ export default function EditTaskPage() {
     setSubtaskLabels((prev) => prev.map((l, i) => (i === index ? value : l)));
   };
 
-  const handleSave = async (e) => {
-    e.preventDefault();
+  const executeSave = async (resetStatsConfirmed = false) => {
     setErrorMessage('');
-
-    if (!title.trim()) {
-      setErrorMessage('Lütfen bir görev adı gir.');
-      return;
-    }
-
     const effectiveInterval = isOnce ? 1 : intervalValue;
     const effectiveCount = isOnce ? 1 : subtaskCount;
     const effectiveLabels = isOnce ? [''] : subtaskLabels.slice(0, effectiveCount);
@@ -297,6 +294,7 @@ export default function EditTaskPage() {
         intervalValue: effectiveInterval,
         subtaskCount: effectiveCount,
         subtaskLabels: effectiveLabels,
+        resetStats: resetStatsConfirmed,
       });
 
       const firestoreDocId = task.firestoreAssignmentId || (taskId !== task.id ? taskId : null);
@@ -312,6 +310,7 @@ export default function EditTaskPage() {
         });
       }
 
+      setShowPeriodChangeModal(false);
       if (isSentToFriend) {
         navigate('/assigned-by-me');
       } else {
@@ -323,6 +322,38 @@ export default function EditTaskPage() {
     } finally {
       setSaving(false);
     }
+  };
+
+  const handleSave = async (e) => {
+    e.preventDefault();
+    setErrorMessage('');
+
+    if (!title.trim()) {
+      setErrorMessage('Lütfen bir görev adı gir.');
+      return;
+    }
+
+    const effectiveInterval = isOnce ? 1 : intervalValue;
+    const originalInterval = task.period === 'ONCE' ? 1 : (task.intervalValue || 1);
+    const periodChanged = period !== task.period;
+    const intervalChanged = effectiveInterval !== originalInterval;
+
+    if (periodChanged || intervalChanged) {
+      try {
+        const records = await getTaskRecords(task.id);
+        const count = records?.length || 0;
+        setPendingRecordCount(count);
+        setShowPeriodChangeModal(true);
+      } catch (err) {
+        console.error('Kayıt sayısı alınamadı:', err);
+        setPendingRecordCount(0);
+        setShowPeriodChangeModal(true);
+      }
+      return;
+    }
+
+    // Periyot değişmediyse doğrudan kaydet
+    await executeSave(false);
   };
 
   return (
@@ -363,8 +394,8 @@ export default function EditTaskPage() {
         </label>
         <textarea
           id="edit-task-desc"
-          className="edit-task-page__input"
-          style={{ minHeight: '80px', resize: 'vertical' }}
+          className="edit-task-page__input edit-task-page__textarea"
+          rows={5}
           placeholder="Görevle ilgili ek ayrıntılar..."
           value={description}
           onChange={(e) => setDescription(e.target.value)}
@@ -537,6 +568,32 @@ export default function EditTaskPage() {
           />
         </div>
       </form>
+
+      {showPeriodChangeModal && (
+        <AppModal
+          open={showPeriodChangeModal}
+          onClose={() => setShowPeriodChangeModal(false)}
+          title="Periyot Değişikliği Onayı"
+        >
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-md)', padding: 'var(--space-xs) 0' }}>
+            <p className="caption" style={{ lineHeight: '1.5', margin: 0, color: 'var(--color-text-primary)' }}>
+              Periyodu değiştirirsen bu görevin geçmiş istatistikleri ({pendingRecordCount} kayıt) sıfırlanır. Kazandığın JP etkilenmez.
+            </p>
+            <div style={{ display: 'flex', gap: 'var(--space-md)', justifyContent: 'flex-end', marginTop: 'var(--space-xs)' }}>
+              <AppButton
+                title="Vazgeç"
+                variant="secondary"
+                onClick={() => setShowPeriodChangeModal(false)}
+              />
+              <AppButton
+                title="Değiştir ve Sıfırla"
+                variant="danger"
+                onClick={() => executeSave(true)}
+              />
+            </div>
+          </div>
+        </AppModal>
+      )}
     </div>
   );
 }

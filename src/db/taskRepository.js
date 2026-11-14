@@ -20,6 +20,7 @@ import { calculateStreakUpTo } from '../utils/streak';
 import { calculateTaskJP, calculateOnceTaskJP } from '../utils/rewards';
 import { triggerAutoCloudSyncForCurrentUser } from '../services/cloudSyncService';
 import { deleteAssignedTaskInFirestore } from '../services/taskAssignmentService';
+import { findOrCreateCategoryByName } from './categoryRepository';
 
 function uuid() {
   if (typeof crypto !== 'undefined' && crypto.randomUUID) {
@@ -98,10 +99,27 @@ export async function createTaskFromAssignment(assignedTask) {
     ? assignedTask.description.trim()
     : null;
 
+  // Kategori eşleme: categoryName varsa B'nin kategorilerinde bul veya oluştur
+  const categoryId = await findOrCreateCategoryByName(assignedTask.categoryName);
+
   await db.runAsync(
     `INSERT INTO tasks (id, title, description, categoryId, priority, period, intervalValue, ownerUserId, assignedByUserId, assignedByName, assignmentDirection, assignmentStatus, subtaskCount, subtaskLabels, firestoreAssignmentId, createdAt)
-     VALUES (?, ?, ?, NULL, ?, ?, ?, 'me', ?, ?, 'RECEIVED', 'ACCEPTED', ?, ?, ?, ?)`,
-    [id, assignedTask.title, descText, assignedTask.priority, assignedTask.period, interval, assignedTask.assignedByUid, assignedTask.assignedByName, count, labelsJson, assignedTask.id, now]
+     VALUES (?, ?, ?, ?, ?, ?, ?, 'me', ?, ?, 'RECEIVED', 'ACCEPTED', ?, ?, ?, ?)`,
+    [
+      id,
+      assignedTask.title,
+      descText,
+      categoryId,
+      assignedTask.priority,
+      assignedTask.period,
+      interval,
+      assignedTask.assignedByUid,
+      assignedTask.assignedByName,
+      count,
+      labelsJson,
+      assignedTask.id,
+      now,
+    ]
   );
   return id;
 }
@@ -137,7 +155,17 @@ export async function findTaskByIdOrFirestoreId(idOrFirestoreId) {
   return task;
 }
 
-export async function updateTask(taskId, { title, description, categoryId, priority, period, intervalValue = 1, subtaskCount, subtaskLabels }) {
+export async function updateTask(taskId, {
+  title,
+  description,
+  categoryId,
+  priority,
+  period,
+  intervalValue = 1,
+  subtaskCount,
+  subtaskLabels,
+  resetStats = false,
+}) {
   const db = getDb();
   const task = await findTaskByIdOrFirestoreId(taskId);
   if (!task) throw new Error('Görev bulunamadı.');
@@ -150,28 +178,79 @@ export async function updateTask(taskId, { title, description, categoryId, prior
   if (!cleanTitle) throw new Error('Lütfen bir görev adı gir.');
 
   const descText = typeof description === 'string' && description.trim() ? description.trim() : null;
-  const count = Math.max(1, parseInt(subtaskCount, 10) || 1);
-  const interval = period === 'ONCE' ? 1 : Math.max(1, parseInt(intervalValue, 10) || task.intervalValue || 1);
-  const labelsJson = subtaskLabels && subtaskLabels.some((l) => l && l.trim())
-    ? JSON.stringify(subtaskLabels.map((l) => (l || '').trim()))
-    : null;
+  const isOnce = period === 'ONCE';
+  const count = isOnce ? 1 : Math.max(1, parseInt(subtaskCount, 10) || 1);
+  const interval = isOnce ? 1 : Math.max(1, parseInt(intervalValue, 10) || task.intervalValue || 1);
+  const labelsJson = isOnce
+    ? null
+    : (subtaskLabels && subtaskLabels.some((l) => l && l.trim())
+      ? JSON.stringify(subtaskLabels.map((l) => (l || '').trim()))
+      : null);
 
-  await db.runAsync(
-    `UPDATE tasks
-     SET title = ?, description = ?, categoryId = ?, priority = ?, period = ?, intervalValue = ?, subtaskCount = ?, subtaskLabels = ?
-     WHERE id = ?`,
-    [
-      cleanTitle,
-      descText,
-      categoryId ?? null,
-      priority ?? 'MEDIUM',
-      period ?? 'DAILY',
-      interval,
-      count,
-      labelsJson,
-      task.id,
-    ]
-  );
+  const periodChanged = period !== task.period;
+  const intervalChanged = interval !== (task.intervalValue || 1);
+  const shouldReset = resetStats || periodChanged || intervalChanged;
+
+  if (shouldReset) {
+    const now = Date.now();
+    const stmts = [
+      {
+        sql: 'DELETE FROM task_records WHERE taskId = ?',
+        args: [task.id],
+      },
+      {
+        sql: `UPDATE tasks
+              SET title = ?, description = ?, categoryId = ?, priority = ?, period = ?, intervalValue = ?, subtaskCount = ?, subtaskLabels = ?, createdAt = ?
+              WHERE id = ?`,
+        args: [
+          cleanTitle,
+          descText,
+          categoryId ?? null,
+          priority ?? 'MEDIUM',
+          period ?? 'DAILY',
+          interval,
+          count,
+          labelsJson,
+          now,
+          task.id,
+        ],
+      },
+    ];
+
+    if (typeof db.batchAsync === 'function') {
+      await db.batchAsync(stmts);
+    } else {
+      await db.runAsync('BEGIN TRANSACTION;');
+      try {
+        for (const s of stmts) {
+          await db.runAsync(s.sql, s.args);
+        }
+        await db.runAsync('COMMIT;');
+      } catch (err) {
+        try {
+          await db.runAsync('ROLLBACK;');
+        } catch (_) {}
+        throw err;
+      }
+    }
+  } else {
+    await db.runAsync(
+      `UPDATE tasks
+       SET title = ?, description = ?, categoryId = ?, priority = ?, period = ?, intervalValue = ?, subtaskCount = ?, subtaskLabels = ?
+       WHERE id = ?`,
+      [
+        cleanTitle,
+        descText,
+        categoryId ?? null,
+        priority ?? 'MEDIUM',
+        period ?? 'DAILY',
+        interval,
+        count,
+        labelsJson,
+        task.id,
+      ]
+    );
+  }
   triggerAutoCloudSyncForCurrentUser();
 }
 
@@ -418,39 +497,6 @@ export async function lateMarkTaskUncomplete(taskId, periodKey) {
   );
 }
 
-export async function getStreakFreezeCount() {
-  const db = getDb();
-  const row = await db.getFirstAsync(`SELECT value FROM app_meta WHERE key = 'streak_freeze_count'`);
-  return row ? Math.max(0, parseInt(row.value, 10) || 0) : 0;
-}
-
-export async function buyStreakFreeze(cost = 50) {
-  const balance = await getWalletBalance('me');
-  if (balance < cost) {
-    throw new Error(`Seri dondurma rozeti almak için en az ${cost} JP gerekiyor.`);
-  }
-  await addWalletTransaction('me', -cost, 'BUY_STREAK_FREEZE');
-  const db = getDb();
-  const current = await getStreakFreezeCount();
-  await db.runAsync(
-    `INSERT INTO app_meta (key, value) VALUES ('streak_freeze_count', ?)
-     ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
-    [String(current + 1)]
-  );
-}
-
-export async function consumeStreakFreeze() {
-  const current = await getStreakFreezeCount();
-  if (current <= 0) return false;
-  const db = getDb();
-  await db.runAsync(
-    `INSERT INTO app_meta (key, value) VALUES ('streak_freeze_count', ?)
-     ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
-    [String(current - 1)]
-  );
-  return true;
-}
-
 export async function cleanupInvalidPastRecords() {
   let db;
   try {
@@ -530,26 +576,21 @@ export async function processExpiredPeriods() {
   }
 
   if (missingInserts.length > 0) {
-    let availableFreezes = await getStreakFreezeCount();
     await Promise.all(
-      missingInserts.map(async (rec) => {
-        let status = 'FAILED';
-        if (availableFreezes > 0) {
-          availableFreezes--;
-          await consumeStreakFreeze();
-          status = 'FROZEN';
-        }
-        return db.runAsync(
-          `INSERT OR IGNORE INTO task_records (id, taskId, periodKey, status, jpEarned) VALUES (?, ?, ?, ?, 0)`,
-          [uuid(), rec.taskId, rec.periodKey, status]
-        );
-      })
+      missingInserts.map((rec) =>
+        db.runAsync(
+          `INSERT OR IGNORE INTO task_records (id, taskId, periodKey, status, jpEarned) VALUES (?, ?, ?, 'FAILED', 0)`,
+          [uuid(), rec.taskId, rec.periodKey]
+        )
+      )
     );
   }
 
   if (partialUpdates.length > 0) {
     await Promise.all(
       partialUpdates.map((id) =>
+        // completedSubtasks alanına dokunulmaz: yarım kalan sayı korunur.
+        // Yeni calculateCompletionStats bu değeri pay olarak kullanır (payda = N).
         db.runAsync(`UPDATE task_records SET status = 'FAILED' WHERE id = ?`, [id])
       )
     );
@@ -589,6 +630,19 @@ export async function addWalletTransaction(userId, amount, reason, relatedTaskId
   );
 }
 
+export const WALLET_TRANSACTION_LABELS = {
+  BUY_STREAK_FREEZE: 'Seri dondurma rozeti (kaldırıldı)',
+  FREEZE_REFUND: 'Seri dondurma iadesi',
+  TASK_COMPLETE: 'Görev tamamlama',
+  STREAK_BONUS: 'Seri tamamlama bonusu',
+  REWARD_REDEEM: 'Ödül kullanımı',
+  FOCUS_SESSION: 'Odaklanma seansı',
+};
+
+export function formatWalletTransactionReason(reason) {
+  return WALLET_TRANSACTION_LABELS[reason] || reason || 'Cüzdan hareketi';
+}
+
 export async function getWalletHistory(userId = 'me') {
   const db = getDb();
   return db.getAllAsync(
@@ -606,36 +660,74 @@ export async function updateTaskNotes(taskId, notes) {
 }
 
 export async function updateTaskFromAssignment(assignedTaskDoc) {
-  if (!assignedTaskDoc || !assignedTaskDoc.id) return;
-  const db = getDb();
+  if (!assignedTaskDoc || !assignedTaskDoc.id) return false;
+  let db;
+  try {
+    db = getDb();
+  } catch (_) {
+    return false;
+  }
+  if (!db) return false;
+
   const firestoreId = assignedTaskDoc.id;
-  const existing = await db.getFirstAsync('SELECT * FROM tasks WHERE firestoreAssignmentId = ?', [firestoreId]);
-  if (!existing) return;
+  const existing = await db.getFirstAsync(
+    'SELECT * FROM tasks WHERE firestoreAssignmentId = ?',
+    [firestoreId]
+  );
+  if (!existing) return false;
 
-  const count = Math.max(1, assignedTaskDoc.subtaskCount || 1);
-  const rawLabels = Array.isArray(assignedTaskDoc.subtaskLabels)
-    ? JSON.stringify(assignedTaskDoc.subtaskLabels)
-    : null;
-  const descText = typeof assignedTaskDoc.description === 'string' && assignedTaskDoc.description.trim()
-    ? assignedTaskDoc.description.trim()
-    : null;
-  const interval = assignedTaskDoc.period === 'ONCE' ? 1 : Math.max(1, parseInt(assignedTaskDoc.intervalValue, 10) || 1);
+  const newTitle = (assignedTaskDoc.title || '').trim();
+  if (!newTitle) return false;
 
+  const newDesc =
+    typeof assignedTaskDoc.description === 'string' && assignedTaskDoc.description.trim()
+      ? assignedTaskDoc.description.trim()
+      : null;
+
+  // Alt görev etiketleri (mevcut subtaskCount ile uyumlu tutulur)
+  const currentCount = Math.max(1, existing.subtaskCount || 1);
+  let newLabelsJson = null;
+  if (Array.isArray(assignedTaskDoc.subtaskLabels)) {
+    const labels = [];
+    for (let i = 0; i < currentCount; i++) {
+      labels.push(String(assignedTaskDoc.subtaskLabels[i] || '').trim());
+    }
+    newLabelsJson = JSON.stringify(labels);
+  }
+
+  // Kategori eşleme: B'nin kategorilerinde isimle ara veya yeni oluştur (yoksa null)
+  let targetCategoryId = null;
+  if (assignedTaskDoc.categoryName && typeof assignedTaskDoc.categoryName === 'string') {
+    targetCategoryId = await findOrCreateCategoryByName(assignedTaskDoc.categoryName);
+  }
+
+  // Değişiklik kontrolü (Idempotency: Aynı değerlerle çift yazma yapma)
+  const currentTitle = (existing.title || '').trim();
+  const currentDesc = existing.description ? existing.description.trim() : null;
+  const currentLabels = existing.subtaskLabels || null;
+  const currentCategoryId = existing.categoryId || null;
+
+  const titleChanged = currentTitle !== newTitle;
+  const descChanged = currentDesc !== newDesc;
+  const labelsChanged = currentLabels !== newLabelsJson;
+  const categoryChanged = currentCategoryId !== targetCategoryId;
+
+  if (!titleChanged && !descChanged && !labelsChanged && !categoryChanged) {
+    return false;
+  }
+
+  // Kural: B görevi kabul ettikten sonra yerel kopyada SADECE title, description,
+  // subtaskLabels ve categoryId güncellenir.
+  // Periyot, intervalValue, subtaskCount, priority, kayıtlar, seri ve tamamlama durumuna DOKUNULMAZ.
   await db.runAsync(
     `UPDATE tasks
-     SET title = ?, description = ?, priority = ?, period = ?, intervalValue = ?, subtaskCount = ?, subtaskLabels = ?
+     SET title = ?, description = ?, subtaskLabels = ?, categoryId = ?
      WHERE id = ?`,
-    [
-      assignedTaskDoc.title,
-      descText,
-      assignedTaskDoc.priority || 'MEDIUM',
-      assignedTaskDoc.period || 'DAILY',
-      interval,
-      count,
-      rawLabels,
-      existing.id,
-    ]
+    [newTitle, newDesc, newLabelsJson, targetCategoryId, existing.id]
   );
+
+  triggerAutoCloudSyncForCurrentUser();
+  return true;
 }
 
 // Atanan kişi: Firestore'da silinmiş veya artık aktif olmayan görevleri kendi SQLite veritabanından kaldırır
@@ -743,6 +835,164 @@ export async function migrateOnceRecords() {
   return msg;
 }
 
+/**
+ * Tek seferlik migrasyon: Seri dondurma (streak freeze) özelliğini kaldırır.
+ * İdempotent: app_meta tablosunda 'freeze_removed_v1' anahtarı varsa hiçbir şey yapmaz.
+ * 1. task_records tablosunda 'FROZEN' olan kayıtları 'FAILED' yapar.
+ * 2. streak_freeze_count > 0 ise cüzdana n * 50 JP iade eder (tür: FREEZE_REFUND).
+ * 3. streak_freeze_count anahtarını siler.
+ * 4. freeze_removed_v1 anahtarını yazar.
+ * Adım 1-4 tek bir batch/transaction içinde atomik olarak yürütülür.
+ */
+export async function migrateFreezeRemoval(dbInstance = null) {
+  const db = dbInstance || getDb();
+  if (!db) return;
+
+  const existingMeta = await db.getFirstAsync(
+    "SELECT value FROM app_meta WHERE key = 'freeze_removed_v1'"
+  );
+  if (existingMeta) return;
+
+  const frozenCountRow = await db.getFirstAsync(
+    "SELECT COUNT(*) as count FROM task_records WHERE status = 'FROZEN'"
+  );
+  const frozenCount = frozenCountRow ? (Number(frozenCountRow.count) || 0) : 0;
+
+  const freezeCountRow = await db.getFirstAsync(
+    "SELECT value FROM app_meta WHERE key = 'streak_freeze_count'"
+  );
+  const n = freezeCountRow ? Math.max(0, parseInt(freezeCountRow.value, 10) || 0) : 0;
+  const refundAmount = n * 50;
+
+  const stmts = [
+    {
+      sql: "UPDATE task_records SET status = 'FAILED' WHERE status = 'FROZEN'",
+      args: [],
+    },
+  ];
+
+  if (refundAmount > 0) {
+    stmts.push({
+      sql: `INSERT INTO wallet_transactions (id, userId, amount, reason, relatedTaskId, relatedRewardId, createdAt)
+            VALUES (?, 'me', ?, 'FREEZE_REFUND', NULL, NULL, ?)`,
+      args: [uuid(), refundAmount, Date.now()],
+    });
+    stmts.push({
+      sql: `INSERT INTO wallet (userId, balance) VALUES ('me', ?)
+            ON CONFLICT(userId) DO UPDATE SET balance = balance + excluded.balance`,
+      args: [refundAmount],
+    });
+  }
+
+  stmts.push({
+    sql: "DELETE FROM app_meta WHERE key = 'streak_freeze_count'",
+    args: [],
+  });
+
+  stmts.push({
+    sql: "INSERT OR REPLACE INTO app_meta (key, value) VALUES ('freeze_removed_v1', 'true')",
+    args: [],
+  });
+
+  if (typeof db.batchAsync === 'function') {
+    await db.batchAsync(stmts);
+  } else {
+    await db.runAsync('BEGIN TRANSACTION;');
+    try {
+      for (const s of stmts) {
+        await db.runAsync(s.sql, s.args);
+      }
+      await db.runAsync('COMMIT;');
+    } catch (err) {
+      try {
+        await db.runAsync('ROLLBACK;');
+      } catch (_) {}
+      throw err;
+    }
+  }
+
+  console.log(
+    `[Migration] Seri dondurma özelliği kaldırıldı: ${frozenCount} kayıt FAILED yapıldı, ${refundAmount} JP iade edildi.`
+  );
+}
+
+/**
+ * Tek seferlik onarım migrasyonu (once_cleanup_v1):
+ * - period = 'ONCE' olan görevlerin periodKey değeri 'ONCE' OLMAYAN ve status'u FAILED olan task_records satırlarını siler.
+ *   (SUCCESSFUL ve PENDING_PARTIAL kayıtlara dokunmaz).
+ * - period = 'ONCE' olup subtaskCount > 1 veya intervalValue > 1 olan görevlerde bu değerleri 1'e çeker.
+ * - İdempotenttir, tek atomik batch içinde çalışır ve app_meta'ya 'once_cleanup_v1' bayrağını yazar.
+ */
+export async function migrateOnceCleanup(dbInstance = null) {
+  const db = dbInstance || getDb();
+  if (!db) return;
+
+  const existingMeta = await db.getFirstAsync(
+    "SELECT value FROM app_meta WHERE key = 'once_cleanup_v1'"
+  );
+  if (existingMeta) return;
+
+  try {
+    const recordsToDeleteRow = await db.getFirstAsync(
+      `SELECT COUNT(*) as count FROM task_records
+       WHERE taskId IN (SELECT id FROM tasks WHERE period = 'ONCE')
+         AND periodKey != 'ONCE'
+         AND status = 'FAILED'`
+    );
+    const deleteCount = recordsToDeleteRow ? (Number(recordsToDeleteRow.count) || 0) : 0;
+
+    const tasksToFixRow = await db.getFirstAsync(
+      `SELECT COUNT(*) as count FROM tasks
+       WHERE period = 'ONCE' AND (subtaskCount > 1 OR intervalValue > 1)`
+    );
+    const fixCount = tasksToFixRow ? (Number(tasksToFixRow.count) || 0) : 0;
+
+    const stmts = [
+      {
+        sql: `DELETE FROM task_records
+              WHERE taskId IN (SELECT id FROM tasks WHERE period = 'ONCE')
+                AND periodKey != 'ONCE'
+                AND status = 'FAILED'`,
+        args: [],
+      },
+      {
+        sql: `UPDATE tasks
+              SET subtaskCount = 1, intervalValue = 1
+              WHERE period = 'ONCE' AND (subtaskCount > 1 OR intervalValue > 1)`,
+        args: [],
+      },
+      {
+        sql: "INSERT OR REPLACE INTO app_meta (key, value) VALUES ('once_cleanup_v1', 'true')",
+        args: [],
+      },
+    ];
+
+    if (typeof db.batchAsync === 'function') {
+      await db.batchAsync(stmts);
+    } else {
+      await db.runAsync('BEGIN TRANSACTION;');
+      try {
+        for (const s of stmts) {
+          await db.runAsync(s.sql, s.args);
+        }
+        await db.runAsync('COMMIT;');
+      } catch (err) {
+        try {
+          await db.runAsync('ROLLBACK;');
+        } catch (_) {}
+        throw err;
+      }
+    }
+
+    console.log(`[Migration] Tek seferlik onarım: ${deleteCount} kayıt silindi, ${fixCount} görev düzeltildi`);
+    triggerAutoCloudSyncForCurrentUser();
+  } catch (_) {
+    // Hata durumunda hiçbir şey yazılmaz, sonraki açılışta tekrar dener
+  }
+}
+
 if (typeof window !== 'undefined' && import.meta.env?.DEV) {
   window.migrateOnceRecords = migrateOnceRecords;
+  window.migrateFreezeRemoval = migrateFreezeRemoval;
+  window.migrateOnceCleanup = migrateOnceCleanup;
 }
