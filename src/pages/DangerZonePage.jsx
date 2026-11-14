@@ -10,6 +10,14 @@ const DANGER_ZONE_SUCCESS_THRESHOLD = 75; // %
 
 function formatDangerZoneStats(item) {
   const { task, total, successCount, rate } = item;
+  const N = task.subtaskCount || 1;
+
+  // Çok alt görevli görevlerde artık birim "alt görev"
+  if (N > 1) {
+    return `${total} alt görevden ${successCount}'i yapıldı (%${rate} başarı)`;
+  }
+
+  // Tekli görevler: dönem birimi (eski metin korunur)
   if (task.period === 'DAILY') {
     return `${total} gün içinde ${successCount} kez tamamlandı (%${rate} başarı)`;
   }
@@ -31,8 +39,10 @@ export default function DangerZonePage() {
     async function loadDangerData() {
       try {
         const tasks = (await getActiveTasks()) || [];
+        // Tek seferlik (ONCE) görevler Tehlikeli Alan'da listelenmez
+        const recurringTasks = tasks.filter((t) => t.period !== 'ONCE');
         const taskDataList = await Promise.all(
-          tasks.map(async (task) => {
+          recurringTasks.map(async (task) => {
             const records = (await getTaskRecords(task.id)) || [];
             const stats = calculateCompletionStats(records, task.subtaskCount || 1);
             return { task, ...stats };

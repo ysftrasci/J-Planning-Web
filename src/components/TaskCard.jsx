@@ -41,7 +41,11 @@ export default function TaskCard({
   const isReceived = task.assignmentDirection === 'RECEIVED';
   const subtaskCount = task.subtaskCount || 1;
   const hasMultipleSubtasks = subtaskCount > 1;
-  const canUndoPartial = hasMultipleSubtasks && (completedSubtasks || 0) > 0 && !isDone;
+  // Undo butonu (RotateCcw): en az 1 alt görev işaretlenmişse göster.
+  // !isDone koşulu kaldırıldı: SUCCESSFUL (tümü tamamlanmış) durumda da geri alma
+  // imkânı olmalı; check butonu zaten onUncomplete çağırıyor ama RotateCcw ikonu
+  // kullanıcıya "geri al" olduğunu daha açık gösteriyor.
+  const canUndoPartial = hasMultipleSubtasks && (completedSubtasks || 0) > 0;
 
   const accentVar = isSent ? '--color-friend-sent' : isReceived ? '--color-friend-received' : priorityColorVar;
 

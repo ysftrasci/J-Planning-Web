@@ -2,7 +2,7 @@
 importScripts('https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js');
 importScripts('https://www.gstatic.com/firebasejs/10.8.0/firebase-messaging-compat.js');
 
-const CACHE_NAME = 'j-planning-v7-turso';
+const CACHE_NAME = 'j-planning-v8-turso';
 
 // Service Worker Kurulumu & Önbelleğe alma
 self.addEventListener('install', (event) => {

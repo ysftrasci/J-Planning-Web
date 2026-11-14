@@ -47,16 +47,23 @@ import './TaskDetailPage.css';
 const PRIORITY_LABEL = { HIGH: 'Yüksek', MEDIUM: 'Orta', LOW: 'Düşük', EASY: 'Kolay', HARD: 'Zor' };
 
 function monthKeyOf(dateStr) {
+  if (!dateStr || typeof dateStr !== 'string' || dateStr === 'ONCE') return '';
   return dateStr.slice(0, 7); // "2026-07-15" -> "2026-07"
 }
 
 function monthLabelOf(monthKey) {
+  if (!monthKey || typeof monthKey !== 'string' || monthKey === 'ONCE' || monthKey.length < 7) {
+    return '';
+  }
   const d = new Date(`${monthKey}-01`);
+  if (isNaN(d.getTime())) return '';
   return d.toLocaleDateString('tr-TR', { month: 'long', year: 'numeric' });
 }
 
 function formatDate(dateInput) {
+  if (!dateInput || dateInput === 'ONCE') return '—';
   const d = dateInput instanceof Date ? dateInput : new Date(dateInput);
+  if (isNaN(d.getTime())) return '—';
   return d.toLocaleDateString('tr-TR', { day: 'numeric', month: 'long', year: 'numeric' });
 }
 
@@ -133,15 +140,16 @@ export default function TaskDetailPage() {
   };
 
   const availableMonths = useMemo(() => {
-    const months = new Set(records.map((r) => monthKeyOf(r.periodKey)));
+    if (task?.period === 'ONCE') return [];
+    const months = new Set(records.map((r) => monthKeyOf(r.periodKey)).filter(Boolean));
     return Array.from(months).sort().reverse();
-  }, [records]);
+  }, [records, task?.period]);
 
   const effectiveMonthKey = selectedMonthKey || availableMonths[0] || monthKeyOf(new Date().toISOString().slice(0, 10));
 
   const filteredRecords = useMemo(
-    () => records.filter((r) => monthKeyOf(r.periodKey) === effectiveMonthKey),
-    [records, effectiveMonthKey]
+    () => (task?.period === 'ONCE' ? records : records.filter((r) => monthKeyOf(r.periodKey) === effectiveMonthKey)),
+    [records, effectiveMonthKey, task?.period]
   );
 
   if (!task) return null;
@@ -155,6 +163,10 @@ export default function TaskDetailPage() {
   const subtaskLabels = getSubtaskLabels(task);
   const subtaskCount = task.subtaskCount || 1;
   const startDateLabel = formatDate(task.createdAt);
+
+  const onceSuccessRecord = task.period === 'ONCE' ? records.find((r) => r.status === 'SUCCESSFUL') : null;
+  const isOnceCompleted = Boolean(onceSuccessRecord);
+  const onceCompletionDate = onceSuccessRecord?.completedAt ? formatDate(onceSuccessRecord.completedAt) : null;
 
   const currentMonthIndex = availableMonths.indexOf(effectiveMonthKey);
   const canGoOlder = currentMonthIndex < availableMonths.length - 1;
@@ -274,7 +286,7 @@ export default function TaskDetailPage() {
         </div>
       )}
 
-      {subtaskCount > 1 && (
+      {subtaskCount > 1 && task.period !== 'ONCE' && (
         <div className="task-detail-page__subtask-info">
           <p className="task-detail-page__subtask-info-title">Bu periyotta {subtaskCount} kez yapılmalı:</p>
           {subtaskLabels ? (
@@ -292,15 +304,26 @@ export default function TaskDetailPage() {
           <Stat icon={Wallet} value={`${totalJP} JP`} label="Kazanılan JP" />
           <Stat
             icon={Check}
-            value={completionStats.total > 0 && completionStats.successCount > 0 ? 'Tamamlandı' : 'Bekliyor'}
+            value={isOnceCompleted ? 'Tamamlandı' : 'Bekliyor'}
             label="Durum"
           />
+          {isOnceCompleted && onceCompletionDate && (
+            <Stat icon={CalendarDays} value={onceCompletionDate} label="Tamamlanma Tarihi" />
+          )}
         </div>
       ) : (
         <div className="task-detail-page__stats-grid">
           <Stat icon={Flame} value={currentStreak} label="Güncel Seri" />
           <Stat icon={Trophy} value={maxStreak} label="En Uzun Seri" />
-          <Stat icon={PieChart} value={`%${completionStats.rate}`} label="Tamamlanma Oranı" />
+          <Stat
+            icon={PieChart}
+            value={completionStats.rate !== null ? `%${completionStats.rate}` : '—'}
+            label={
+              subtaskCount > 1 && completionStats.total > 0
+                ? `Tamamlanma (${completionStats.successCount}/${completionStats.total} alt görev)`
+                : 'Tamamlanma Oranı'
+            }
+          />
           <Stat icon={Wallet} value={`${totalJP} JP`} label="Toplam Kazanılan" />
         </div>
       )}
@@ -340,31 +363,35 @@ export default function TaskDetailPage() {
         </form>
       </div>
 
-      {availableMonths.length > 0 && (
-        <div className="task-detail-page__month-selector">
-          <button type="button" onClick={goOlderMonth} disabled={!canGoOlder} aria-label="Önceki ay">
-            <ChevronLeft size={20} />
-          </button>
-          <span className="task-detail-page__month-label">{monthLabelOf(effectiveMonthKey)}</span>
-          <button type="button" onClick={goNewerMonth} disabled={!canGoNewer} aria-label="Sonraki ay">
-            <ChevronRight size={20} />
-          </button>
-        </div>
-      )}
+      {task.period !== 'ONCE' && (
+        <>
+          {availableMonths.length > 0 && (
+            <div className="task-detail-page__month-selector">
+              <button type="button" onClick={goOlderMonth} disabled={!canGoOlder} aria-label="Önceki ay">
+                <ChevronLeft size={20} />
+              </button>
+              <span className="task-detail-page__month-label">{monthLabelOf(effectiveMonthKey)}</span>
+              <button type="button" onClick={goNewerMonth} disabled={!canGoNewer} aria-label="Sonraki ay">
+                <ChevronRight size={20} />
+              </button>
+            </div>
+          )}
 
-      {filteredRecords.length === 0 ? (
-        <EmptyState title="Bu ayda geçmiş kaydı yok" />
-      ) : (
-        <div className="task-detail-page__history-list">
-          {filteredRecords.map((record) => (
-            <HistoryRow
-              key={record.id}
-              record={record}
-              task={task}
-              onLateMark={(action) => openLateMarkConfirm(record, action)}
-            />
-          ))}
-        </div>
+          {filteredRecords.length === 0 ? (
+            <EmptyState title="Bu ayda geçmiş kaydı yok" />
+          ) : (
+            <div className="task-detail-page__history-list">
+              {filteredRecords.map((record) => (
+                <HistoryRow
+                  key={record.id}
+                  record={record}
+                  task={task}
+                  onLateMark={(action) => openLateMarkConfirm(record, action)}
+                />
+              ))}
+            </div>
+          )}
+        </>
       )}
 
       <div className="task-detail-page__footer" style={{ display: 'flex', gap: 'var(--space-md)' }}>
@@ -376,7 +403,7 @@ export default function TaskDetailPage() {
 
       <AppModal open={!!recordToLateMark} onClose={() => setRecordToLateMark(null)} title="Geçmiş Görev Düzenle">
         <p className="caption">
-          {recordToLateMark && formatDate(recordToLateMark.record.periodKey)} tarihli görevi{" "}
+          {recordToLateMark && (recordToLateMark.record.periodKey === 'ONCE' ? 'Tek seferlik' : formatDate(recordToLateMark.record.periodKey))} tarihli görevi{" "}
           <strong>{recordToLateMark?.action === 'UNCOMPLETE' ? '"Yapılmadı"' : '"Tamamlandı"'}</strong> olarak
           işaretlemek istediğine emin misin? Bu işlem puanı ve serini yeniden hesaplayacak.
         </p>
@@ -417,17 +444,30 @@ function Stat({ icon: Icon, value, label }) {
 
 function HistoryRow({ record, task, onLateMark }) {
   const isSuccess = record.status === 'SUCCESSFUL';
-  const isFrozen = record.status === 'FROZEN';
   const isPartial = record.status === 'PENDING_PARTIAL';
+  const isOnce = task.period === 'ONCE' || record.periodKey === 'ONCE';
   const periodEnd = getPeriodEndTimestamp(task, record.periodKey);
-  const canLateMark = isWithinLateMarkWindow(periodEnd);
+  const canLateMark = !isOnce && isWithinLateMarkWindow(periodEnd);
   const subtaskCount = task.subtaskCount || 1;
 
-  const showsRealCompletionDate = isSuccess && record.completedAt && task.period !== 'DAILY';
-  const primaryDateLabel = showsRealCompletionDate ? formatDate(new Date(record.completedAt)) : formatDate(record.periodKey);
-  const periodContextLabel = showsRealCompletionDate ? `${periodLabel(task)} periyodu: ${formatDate(record.periodKey)}` : null;
+  let primaryDateLabel = '';
+  let periodContextLabel = null;
 
-  const dotClass = isSuccess || isFrozen
+  if (isOnce) {
+    if (isSuccess && record.completedAt) {
+      primaryDateLabel = formatDate(record.completedAt);
+      periodContextLabel = 'Tek seferlik görev';
+    } else {
+      primaryDateLabel = 'Tek seferlik görev';
+      periodContextLabel = task.createdAt ? `Oluşturulma: ${formatDate(task.createdAt)}` : null;
+    }
+  } else {
+    const showsRealCompletionDate = isSuccess && record.completedAt && task.period !== 'DAILY';
+    primaryDateLabel = showsRealCompletionDate ? formatDate(record.completedAt) : formatDate(record.periodKey);
+    periodContextLabel = showsRealCompletionDate ? `${periodLabel(task)} periyodu: ${formatDate(record.periodKey)}` : null;
+  }
+
+  const dotClass = isSuccess
     ? 'task-detail-page__history-dot--success'
     : isPartial
       ? 'task-detail-page__history-dot--partial'
@@ -442,11 +482,9 @@ function HistoryRow({ record, task, onLateMark }) {
         <p className="task-detail-page__history-status">
           {isSuccess
             ? `Tamamlandı${record.isLateMarked ? ' (geç işaretlendi)' : ''}`
-            : isFrozen
-              ? 'Donduruldu ❄️'
-              : isPartial
-                ? `Devam ediyor (${record.completedSubtasks || 0}/${subtaskCount})`
-                : 'Başarısız / Yapılmadı'}
+            : isPartial
+              ? `Devam ediyor (${record.completedSubtasks || 0}/${subtaskCount})`
+              : 'Başarısız / Yapılmadı'}
         </p>
       </div>
       {canLateMark && (

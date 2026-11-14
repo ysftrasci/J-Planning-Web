@@ -76,6 +76,21 @@ export class TursoConnection {
     }
   }
 
+  // Parametreli veya parametresiz ifadeleri tek bir atomik batch (transaction) olarak çalıştırır.
+  async batchAsync(statements, mode = 'write') {
+    if (this._closed) throw new Error('Veritabanı bağlantısı kapalı.');
+    await this._ensureValidToken();
+    try {
+      return await this._client.batch(statements, mode);
+    } catch (err) {
+      if (this._isAuthError(err)) {
+        await this._refreshToken();
+        return await this._client.batch(statements, mode);
+      }
+      throw err;
+    }
+  }
+
   // Parametreli tek bir INSERT/UPDATE/DELETE/SELECT çalıştırır.
   async runAsync(sql, params = []) {
     if (this._closed) throw new Error('Veritabanı bağlantısı kapalı.');
@@ -106,6 +121,9 @@ export class TursoConnection {
   // Kısa isimlendirme aliasları
   async exec(sql) {
     return this.execAsync(sql);
+  }
+  async batch(statements, mode = 'write') {
+    return this.batchAsync(statements, mode);
   }
   async run(sql, params) {
     return this.runAsync(sql, params);

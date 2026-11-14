@@ -174,6 +174,9 @@ export default function AddTaskPage() {
     const friend = friends.find((f) => f.friendUid === assignTo);
     setSaving(true);
     try {
+      const selectedCategory = categories.find((c) => c.id === categoryId);
+      const categoryName = selectedCategory ? selectedCategory.name.trim() : null;
+
       await assignTaskToFriend({
         assignedByUid: user.uid,
         assignedByName: user.profile?.displayName || user.displayName || 'Arkadaşın',
@@ -181,6 +184,8 @@ export default function AddTaskPage() {
         assignedToName: friend?.friendName || 'Arkadaş',
         title: title.trim(),
         description: description ? description.trim() : '',
+        categoryId: categoryId || null,
+        categoryName: categoryName || null,
         period,
         intervalValue: effectiveInterval,
         priority,
@@ -217,10 +222,10 @@ export default function AddTaskPage() {
 
         {/* Not / Açıklama */}
         <label className="add-task-page__label" htmlFor="task-desc">Not / Açıklama (opsiyonel)</label>
-        <input
+        <textarea
           id="task-desc"
-          className="add-task-page__input"
-          type="text"
+          className="add-task-page__input add-task-page__textarea"
+          rows={5}
           placeholder="örn. Sayfa 45-60 arası okunacak"
           value={description}
           onChange={(e) => setDescription(e.target.value)}

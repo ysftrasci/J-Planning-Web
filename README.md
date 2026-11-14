@@ -57,7 +57,7 @@ npx wrangler deploy
 - **Veri Migrasyonu & Bütünlük:** Eski `IndexedDB` ve `Firestore` verilerinin 10/10 tabloda %100 Primary Key denetimiyle kayıpsız taşınması.
 - **Performans Optimizasyonu:** N+1 sorgu şelalesini önlemek için bellek içi indeksleme, toplu veri çekme ve görev tamamlama durumunun arayüze anında yansıtılması.
 - **Kimlik Doğrulama:** E-posta/şifre ile giriş-kayıt, şifre sıfırlama, e-posta doğrulama.
-- **Çekirdek Görev Sistemi:** Görev ekleme, kategoriler, alt adımlar (subtasks), geçmişe dönük işaretleme penceresi, seri (streak) takibi ve seri dondurma rozeti.
+- **Çekirdek Görev Sistemi:** Görev ekleme, kategoriler, alt adımlar (subtasks), geçmişe dönük işaretleme penceresi ve seri (streak) takibi.
 - **Ödül & Cüzdan Sistemi:** JP puan kazanımı, harcama, cüzdan hareket geçmişi, ödül hedefleri.
 - **Sosyal / Arkadaşlık Sistemi:** Kullanıcı Kodu ile arkadaş ekleme, arkadaşa gerçek zamanlı görev/ödül atama.
 - **Odaklanma Modu (Pomodoro):** Odaklanma seansları, ortam sesleri, aylık geçmiş.

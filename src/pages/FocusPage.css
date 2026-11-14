@@ -57,77 +57,58 @@
   color: var(--color-text-primary);
 }
 
-.focus-page__duration-grid {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: var(--space-md);
-}
-
-.focus-page__duration-chip {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: var(--space-md) var(--space-lg);
-  border-radius: var(--radius-lg);
-  background-color: var(--color-surface);
-  border: 1px solid var(--color-border);
-  font-size: var(--font-body-medium-size);
-  font-weight: var(--font-body-medium-weight);
-  color: var(--color-text-primary);
-  cursor: pointer;
-  transition: all 0.2s ease;
-}
-
-.focus-page__duration-chip:hover {
-  border-color: var(--color-accent);
-}
-
-.focus-page__duration-chip--selected {
-  background-color: var(--color-accent);
-  border-color: var(--color-accent);
-  color: #ffffff;
-}
-
-.focus-page__or-label {
-  font-size: var(--font-caption-size);
+/* ===== Yukarı Sayaç — Ana Ekran ===== */
+.focus-page__idle-timer {
+  font-size: 72px;
+  font-weight: 200;
   color: var(--color-text-muted);
   text-align: center;
-  margin-top: var(--space-xs);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 2px;
+  padding: var(--space-md) 0;
 }
 
-.focus-page__custom-row {
-  display: flex;
-  align-items: center;
-  gap: var(--space-sm);
+/* ===== Ödül Yol Haritası — Ana Ekran ===== */
+.focus-page__roadmap {
   background-color: var(--color-surface);
   border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-  padding: 0 var(--space-md);
+  border-radius: var(--radius-lg);
+  padding: var(--space-md) var(--space-lg);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
 }
 
-.focus-page__custom-input {
-  flex: 1;
-  border: none;
-  background: transparent;
-  padding: var(--space-md) 0;
-  font-size: var(--font-body-size);
-  color: var(--color-text-primary);
-  outline: none;
-}
-
-.focus-page__custom-suffix {
+.focus-page__roadmap-title {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
   font-size: var(--font-caption-size);
-  color: var(--color-text-muted);
+  font-weight: 600;
+  color: var(--color-accent-dark);
+  margin: 0 0 var(--space-xs) 0;
 }
 
-.focus-page__jp-card {
+.focus-page__roadmap-item {
   display: flex;
   align-items: center;
   gap: var(--space-sm);
-  background-color: var(--color-accent-soft);
-  padding: var(--space-md);
-  border-radius: var(--radius-md);
-  font-size: var(--font-caption-size);
+  font-size: var(--font-body-size);
+  color: var(--color-text-secondary);
+}
+
+.focus-page__roadmap-dot {
+  color: var(--color-text-muted);
+  font-size: 20px;
+  line-height: 1;
+}
+
+.focus-page__roadmap-time {
+  flex: 1;
+}
+
+.focus-page__roadmap-reward {
+  font-weight: 600;
   color: var(--color-accent-dark);
 }
 
@@ -278,6 +259,100 @@
   height: 100%;
   background-color: var(--color-accent);
   transition: width 1s linear;
+}
+
+/* ===== Milestone Yol Haritası — Çalışma Ekranı ===== */
+.focus-page__milestones {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-xs);
+  width: 100%;
+  max-width: 340px;
+}
+
+.focus-page__milestone {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  padding: var(--space-xs) var(--space-md);
+  border-radius: var(--radius-pill);
+  font-size: var(--font-caption-size);
+  color: rgba(255, 255, 255, 0.55);
+  transition: all 0.4s ease;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.focus-page__milestone--earned {
+  color: rgba(255, 255, 255, 0.95);
+  background-color: rgba(255, 255, 255, 0.1);
+}
+
+.focus-page__milestone--next {
+  color: rgba(255, 255, 255, 0.95);
+  background-color: rgba(255, 255, 255, 0.14);
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  font-weight: 600;
+}
+
+.focus-page__milestone--celebrating {
+  animation: milestone-pop 0.6s ease;
+  background-color: rgba(224, 109, 140, 0.35);
+  border: 1px solid rgba(255, 255, 255, 0.6);
+}
+
+@keyframes milestone-pop {
+  0% { transform: scale(1); }
+  50% { transform: scale(1.06); }
+  100% { transform: scale(1); }
+}
+
+.focus-page__milestone-check {
+  font-size: 15px;
+  min-width: 18px;
+  text-align: center;
+  line-height: 1;
+}
+
+.focus-page__milestone-label {
+  flex: 1;
+  text-align: left;
+}
+
+.focus-page__milestone-jp {
+  font-weight: 600;
+  min-width: 48px;
+  text-align: right;
+  color: rgba(255, 255, 255, 0.9);
+}
+
+.focus-page__milestone-countdown {
+  font-size: var(--font-caption-size);
+  color: rgba(255, 255, 255, 0.6);
+  margin-top: var(--space-xs);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.5px;
+}
+
+.focus-page__milestone-all-done {
+  font-size: var(--font-caption-size);
+  color: rgba(255, 255, 255, 0.8);
+  margin-top: var(--space-xs);
+  text-align: center;
+}
+
+/* ===== Toplam Kazanılan JP göstergesi ===== */
+.focus-page__earned-jp {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+  font-size: var(--font-caption-size);
+  font-weight: 600;
+  color: var(--color-accent);
+  background-color: rgba(255, 255, 255, 0.1);
+  padding: var(--space-xs) var(--space-md);
+  border-radius: var(--radius-pill);
 }
 
 .focus-page__sound-badge {
