@@ -27,3 +27,8 @@ yarn-error.log*
 serviceAccountKey.json
 credentials/
 
+
+# Yerel / dahili
+.netlify/
+scratch/
+docs/

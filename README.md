@@ -1,17 +1,16 @@
 # J-Planning — Web (PWA)
 
-J-Planning'in mobil (React Native/Expo) uygulamasının web/PWA versiyonu.
-Mevcut mobil projeye dokunulmadan, ayrı ve modern bir bulut SQLite altyapısıyla kurulmuştur.
+Telefona yüklenebilen (PWA), Türkçe bir gün planlama ve alışkanlık uygulaması: tekrarlayan görevler, seri takibi, JP puanı ve ödüller, odaklanma kronometresi, günlük notlar ve arkadaşlarla görev paylaşımı.
 
 ## Teknolojiler
 
-- **Framework:** React + Vite
-- **Yönlendirme:** react-router-dom
-- **Birincil Veritabanı (Bulut SQLite):** Turso Cloud SQLite (`@libsql/client/web`) — her kullanıcıya özel bağımsız veritabanı, scoped JWT token ile güvenli erişim.
-- **Eski Veri Katmanı (Geçiş Amaçlı):** `sql.js` + `IndexedDB` — yalnızca eski sürümlerden gelen geçmiş verilerin ilk açılışta Turso'ya taşınması ve geriye dönük uyumluluk için korunmaktadır.
-- **Backend / Proxy (Serverless):** Cloudflare Worker — Firebase Auth doğrulaması, kullanıcı başına Turso DB provisioning ve scoped token üretimi.
-- **Sosyal Katman & Kimlik Doğrulama:** Firebase (Authentication + Firestore) — profil bilgileri, arkadaşlık sistemi ve gerçek zamanlı görev/ödül atamaları.
-- **PWA:** Service worker + manifest (ana ekrana ekleme desteği)
+- **Ön yüz:** React 19 + Vite, react-router, PWA (service worker + manifest)
+- **Kişisel veri:** Turso (bulut SQLite, `@libsql/client/web`) — her kullanıcıya ayrı veritabanı, Worker'dan alınan kısa süreli token ile erişim.
+- **Misafir modu:** `sql.js` + IndexedDB — kayıt olmadan veriler yalnızca tarayıcıda tutulur; kayıt olunca buluta taşınır.
+- **Sunucu:** Cloudflare Worker (`worker/`) — oturum ve token üretimi, push bildirimi gönderme, günlük hatırlatıcı (cron), yönetici uç noktaları, hesap silme.
+- **Kimlik ve sosyal veri:** Firebase Authentication (e-posta/şifre) + Firestore (profil, arkadaşlık, görev/ödül atamaları).
+- **Bildirimler:** Firebase Cloud Messaging.
+- **Barındırma:** Netlify (`netlify.toml`; `/api/worker/*` istekleri Worker'a yönlendirilir).
 
 ## Kurulum ve Çalıştırma
 
@@ -49,29 +48,44 @@ npm run dev
 npx wrangler deploy
 ```
 
-## Durum
+### Diğer komutlar
 
-**Proje ve Turso Bulut Veritabanı Geçişi (Faz 0-6) tamamlandı.**
+```bash
+npm run lint      # oxlint
+npm run build     # üretim derlemesi (dist/)
+```
 
-- **Turso Cloud SQLite Entegrasyonu:** Kullanıcı başına izole bulut veritabanı, süreli scoped JWT token güvenliği, token süresi dolmadan otomatik yenileme mekanizması.
-- **Veri Migrasyonu & Bütünlük:** Eski `IndexedDB` ve `Firestore` verilerinin 10/10 tabloda %100 Primary Key denetimiyle kayıpsız taşınması.
-- **Performans Optimizasyonu:** N+1 sorgu şelalesini önlemek için bellek içi indeksleme, toplu veri çekme ve görev tamamlama durumunun arayüze anında yansıtılması.
-- **Kimlik Doğrulama:** E-posta/şifre ile giriş-kayıt, şifre sıfırlama, e-posta doğrulama.
-- **Çekirdek Görev Sistemi:** Görev ekleme, kategoriler, alt adımlar (subtasks), geçmişe dönük işaretleme penceresi ve seri (streak) takibi.
-- **Ödül & Cüzdan Sistemi:** JP puan kazanımı, harcama, cüzdan hareket geçmişi, ödül hedefleri.
-- **Sosyal / Arkadaşlık Sistemi:** Kullanıcı Kodu ile arkadaş ekleme, arkadaşa gerçek zamanlı görev/ödül atama.
-- **Odaklanma Modu (Pomodoro):** Odaklanma seansları, ortam sesleri, aylık geçmiş.
-- **Günlük Notlar:** Günün özeti, ders çalışma süresi takibi ve aylık geçmiş arşivi.
-- **Profil & Ayarlar:** Profil düzenleme, bildirim ayarları, JSON veri dışa/içe aktarma, Tehlikeli Alan (hesap silme).
-- **PWA & Tema:** Koyu (Dark) ve Açık (Light) tema desteği, responsive tasarım.
+### Canlıya alma
+
+Üç ayrı adımdır:
+
+1. **Worker:** `cd worker` → `npx wrangler deploy`
+2. **Firestore kuralları:** proje kökünde `node scripts/deploy-rules.mjs` (Firebase servis hesabı anahtarı gerekir; anahtar depoya girmez)
+3. **Site:** Netlify deploy
+
+Her yayında `public/sw.js` içindeki `CACHE_NAME` sürümü artırılmalıdır.
+
+## Özellikler
+
+- **Görevler:** Günlük / haftalık / aylık ve "N günde bir" tekrarlayan ya da tek seferlik görevler; öncelik veya zorluk, kategori, alt adımlar, geçmişe dönük işaretleme, seri ve tamamlanma oranı.
+- **JP ve ödüller:** Görev tamamlayınca JP kazanılır, kullanıcının tanımladığı ödüllere harcanır; cüzdan hareket geçmişi.
+- **Odaklanma:** Yukarı sayan kronometre, ortam sesleri, belirli sürelerde JP ödülü, aylık geçmiş.
+- **Günlük notlar:** Günün notu, çalışma süresi, aylık arşiv.
+- **Sosyal:** Kullanıcı kodu veya davet linkiyle arkadaş ekleme, arkadaşa görev/ödül atama, "Attıklarım" sayfasında ilerleme takibi.
+- **Bildirimler:** Arkadaşlık ve atama bildirimleri, günlük hatırlatıcı, cihaza özel zamanlamalar.
+- **Profil:** Açık/koyu tema, JSON yedek indirme/yükleme, hesap silme.
+- **Yönetici paneli** (`/admin`): yalnızca yetkili hesaplar.
 
 ## Proje Yapısı
 
 ```
 J-Planning-Web/
-├── schema.sql              Kanonik 10 veri tablosu + app_meta SQLite şeması
-├── worker/                 Cloudflare Worker (Auth doğrulama + Turso DB provisioning)
-│   ├── src/index.js        Worker giriş noktası (/session endpoint)
+├── schema.sql              Kullanıcı veritabanı şeması (Turso / SQLite)
+├── firestore.rules         Firestore güvenlik kuralları
+├── scripts/                Kural deploy'u ve yönetici betikleri
+├── public/                 sw.js, manifest, ikonlar
+├── worker/                 Cloudflare Worker
+│   ├── src/index.js        Worker giriş noktası (oturum, push, hatırlatıcı, admin)
 │   └── wrangler.jsonc      Cloudflare Worker yapılandırması
 ├── src/
 │   ├── theme.css           Renk, tipografi, spacing tanımları (CSS custom properties)
@@ -81,7 +95,8 @@ J-Planning-Web/
 │   ├── db/                 Turso bağlantı katmanı, repository'ler ve migrasyon
 │   │   ├── sqliteEngine.js         TursoConnection (@libsql/client/web) motoru
 │   │   ├── database.js             initDatabase, token yönetimi, session önbellekleme
-│   │   ├── migrationService.js     IndexedDB/Firestore -> Turso veri taşıma servisi
+│   │   ├── localSqliteEngine.js    Misafir modu (sql.js + IndexedDB)
+│   │   ├── migrationService.js     Misafir verisini Turso'ya taşıma
 │   │   ├── taskRepository.js       Görevler, periyot kayıtları ve cüzdan işlemleri
 │   │   ├── categoryRepository.js   Kategori yönetimi
 │   │   ├── rewardRepository.js     Ödül hedefleri
@@ -91,5 +106,5 @@ J-Planning-Web/
 │   ├── components/         Ortak UI bileşenleri (AppButton, AppModal, TaskCard, ...)
 │   ├── router/             Sayfa yönlendirme (AppRouter, AppLayout) + auth koruması
 │   └── pages/              Sayfa bileşenleri (görevler, kategoriler, ödüller,
-│                           arkadaşlar, odaklanma, profil, ayarlar, tehlikeli alan, ...)
+│                           arkadaşlar, odaklanma, profil, ayarlar, admin, ...)
 ```
