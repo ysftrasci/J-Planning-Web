@@ -479,3 +479,11 @@
   color: var(--color-text-muted);
   margin: 0;
 }
+
+.focus-page__restored-note {
+  margin: var(--space-sm) 0 0;
+  max-width: 320px;
+  text-align: center;
+  font-size: var(--font-caption-size);
+  color: var(--color-text-secondary);
+}

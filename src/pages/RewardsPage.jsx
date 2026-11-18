@@ -288,6 +288,7 @@ function AddRewardModal({ open, onClose, onSaved, isGuest }) {
         assignedByName: user.profile?.displayName || user.displayName || 'Kullanıcı',
         assignedToUid: assignTo,
         assignedToName: friend?.friendName ?? 'Arkadaşın',
+        friendshipId: friend?.id || null,
         title: title.trim(),
         description: description.trim(),
         cost: costNum,

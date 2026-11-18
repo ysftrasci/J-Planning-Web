@@ -1,6 +1,6 @@
 import { getToken, onMessage } from 'firebase/messaging';
 import { doc, updateDoc, arrayUnion, arrayRemove } from 'firebase/firestore';
-import { db, messaging, auth } from './firebase';
+import { db, messaging, messagingReady, auth } from './firebase';
 import { getDb } from '../db/database';
 
 let lastTriggeredMinuteKey = '';
@@ -22,9 +22,31 @@ function getStorageKey(uid) {
   return userKey;
 }
 
-export async function registerFCMPushToken(userUid) {
+const FCM_TOKEN_KEY = 'jplanning:current_fcm_token';
+const FCM_OWNER_KEY = 'jplanning:fcm_token_owner';
+// Aynı cihaz + aynı kullanıcı + aynı token için Firestore'a en fazla günde bir kez yazılır.
+const FCM_REWRITE_INTERVAL_MS = 24 * 60 * 60 * 1000;
+
+function readFcmOwner() {
+  try {
+    const raw = localStorage.getItem(FCM_OWNER_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch (_) {
+    return null;
+  }
+}
+
+/**
+ * Bu cihazın FCM token'ını alır ve kullanıcının Firestore profiline kaydeder.
+ * Bildirim izni verilmemişse hiçbir şey yapmaz (izin İSTEMEZ).
+ * @param {string} userUid
+ * @param {{ force?: boolean }} [options] force=true ise günlük yazma sınırını atlar.
+ */
+export async function registerFCMPushToken(userUid, options = {}) {
+  if (typeof window === 'undefined') return null;
   if (!('Notification' in window) || Notification.permission !== 'granted') return null;
-  if (!messaging) return null;
+  const messagingInstance = messaging || (await messagingReady);
+  if (!messagingInstance) return null;
 
   try {
     let serviceWorkerRegistration;
@@ -36,20 +58,44 @@ export async function registerFCMPushToken(userUid) {
     }
 
     const vapidKey = import.meta.env.VITE_FIREBASE_VAPID_KEY || undefined;
-    const token = await getToken(messaging, {
+    const token = await getToken(messagingInstance, {
       vapidKey,
       serviceWorkerRegistration,
     });
 
     if (token && userUid) {
+      // Token alınırken kullanıcı çıkış yaptıysa/değiştiyse yanlış hesaba yazma.
+      if (auth.currentUser?.uid !== userUid) return null;
+
+      const owner = readFcmOwner();
+      const alreadyFresh =
+        !options.force &&
+        owner &&
+        owner.uid === userUid &&
+        owner.token === token &&
+        Date.now() - (Number(owner.at) || 0) < FCM_REWRITE_INTERVAL_MS;
+
       if (typeof localStorage !== 'undefined') {
-        localStorage.setItem('jplanning:current_fcm_token', token);
+        localStorage.setItem(FCM_TOKEN_KEY, token);
       }
+      if (alreadyFresh) return token;
+
       const userRef = doc(db, 'users', userUid);
-      await updateDoc(userRef, {
-        fcmTokens: arrayUnion(token),
-        lastPushTokenAt: Date.now(),
-      }).catch(() => {});
+      let written = false;
+      try {
+        await updateDoc(userRef, {
+          fcmTokens: arrayUnion(token),
+          lastPushTokenAt: Date.now(),
+        });
+        written = true;
+      } catch (writeErr) {
+        console.warn('FCM token Firestore profiline yazılamadı:', writeErr?.code || writeErr);
+      }
+      if (written && typeof localStorage !== 'undefined') {
+        try {
+          localStorage.setItem(FCM_OWNER_KEY, JSON.stringify({ uid: userUid, token, at: Date.now() }));
+        } catch (_) {}
+      }
     }
     return token;
   } catch (err) {
@@ -63,7 +109,8 @@ export async function unregisterFCMPushToken(userUid) {
 
   try {
     let token = null;
-    if (messaging && 'Notification' in window && Notification.permission === 'granted') {
+    const messagingInstance = messaging || (await messagingReady);
+    if (messagingInstance && 'Notification' in window && Notification.permission === 'granted') {
       let serviceWorkerRegistration;
       if ('serviceWorker' in navigator) {
         serviceWorkerRegistration = await navigator.serviceWorker.register('/sw.js', {
@@ -72,13 +119,13 @@ export async function unregisterFCMPushToken(userUid) {
         await navigator.serviceWorker.ready;
       }
       const vapidKey = import.meta.env.VITE_FIREBASE_VAPID_KEY || undefined;
-      token = await getToken(messaging, {
+      token = await getToken(messagingInstance, {
         vapidKey,
         serviceWorkerRegistration,
       }).catch(() => null);
     }
 
-    const storedToken = typeof localStorage !== 'undefined' ? localStorage.getItem('jplanning:current_fcm_token') : null;
+    const storedToken = typeof localStorage !== 'undefined' ? localStorage.getItem(FCM_TOKEN_KEY) : null;
     const targetToken = token || storedToken;
 
     if (targetToken && userUid) {
@@ -89,7 +136,8 @@ export async function unregisterFCMPushToken(userUid) {
     }
 
     if (typeof localStorage !== 'undefined') {
-      localStorage.removeItem('jplanning:current_fcm_token');
+      localStorage.removeItem(FCM_TOKEN_KEY);
+      localStorage.removeItem(FCM_OWNER_KEY);
     }
     return true;
   } catch (err) {
@@ -139,7 +187,7 @@ export async function getNotificationPermissionStatus() {
 // desteklemez — bu ortamlarda bildirim sadece Service Worker üzerinden
 // (registration.showNotification) gösterilebilir. Bu yüzden önce Service
 // Worker'ı deniyoruz, o yoksa/başarısız olursa masaüstü için new Notification()'a düşüyoruz.
-export async function sendWebNotification(title, body) {
+export async function sendWebNotification(title, body, tag) {
   if (!('Notification' in window)) return false;
   if (Notification.permission !== 'granted') return false;
 
@@ -147,6 +195,7 @@ export async function sendWebNotification(title, body) {
     title,
     body: body || 'Görevlerine göz atmayı unutma!',
     icon: '/favicon.svg',
+    tag: tag || 'j-planning-notification',
   };
 
   // 1. Yöntem: Service Worker üzerinden göster (mobil dahil her yerde çalışır)
@@ -164,7 +213,7 @@ export async function sendWebNotification(title, body) {
 
   // 2. Yöntem (yedek): Doğrudan new Notification() — çoğunlukla masaüstünde çalışır
   try {
-    new Notification(payload.title, { body: payload.body, icon: payload.icon });
+    new Notification(payload.title, { body: payload.body, icon: payload.icon, tag: payload.tag });
     return true;
   } catch (e) {
     console.warn('Web bildirim hatası:', e);
@@ -176,8 +225,14 @@ export async function sendWebNotification(title, body) {
 export async function getSchedules(uid) {
   const key = getStorageKey(uid);
   if (!key) return [];
-  const raw = localStorage.getItem(key);
-  return raw ? JSON.parse(raw) : [];
+  try {
+    const raw = localStorage.getItem(key);
+    const parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch (_) {
+    // Bozuk kayıt tüm bildirim sayfasını kilitlemesin
+    return [];
+  }
 }
 
 export async function saveSchedules(schedules, uid) {
@@ -235,19 +290,27 @@ export async function checkAndTriggerSchedules() {
   if (lastTriggeredMinuteKey === minuteKey) return;
 
   const schedules = await getSchedules(activeUid);
-  for (const schedule of schedules) {
-    if (
+  const due = schedules.filter(
+    (schedule) =>
+      schedule &&
+      Array.isArray(schedule.weekdays) &&
       schedule.weekdays.includes(currentWeekday) &&
-      schedule.hour === currentHour &&
-      schedule.minute === currentMinute
-    ) {
-      lastTriggeredMinuteKey = minuteKey;
-      await sendWebNotification(
-        'J-Planning Hatırlatması 🔔',
-        schedule.label || schedule.body || 'Görevlerine göz atmayı unutma!'
-      );
-      break;
-    }
+      Number(schedule.hour) === currentHour &&
+      Number(schedule.minute) === currentMinute
+  );
+  if (due.length === 0) return;
+
+  // Önce dakikayı işaretle: bildirim gösterimi sürerken ikinci tetikleme gelmesin.
+  lastTriggeredMinuteKey = minuteKey;
+
+  // Aynı dakikaya denk gelen TÜM zamanlamalar gösterilir; her biri kendi etiketiyle
+  // (tag) gönderilir ki biri diğerinin üzerine yazmasın.
+  for (const schedule of due) {
+    await sendWebNotification(
+      'J-Planning Hatırlatması 🔔',
+      schedule.label || schedule.body || 'Görevlerine göz atmayı unutma!',
+      `j-planning-schedule-${schedule.id || 'x'}`
+    );
   }
 }
 

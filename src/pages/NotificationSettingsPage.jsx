@@ -118,9 +118,9 @@ export default function NotificationSettingsPage() {
         }
       }
 
-      // FCM Token henüz cihazda kayıtlı değilse Firestore'a kaydet
-      if (user?.uid && !localStorage.getItem('jplanning:current_fcm_token')) {
-        await registerFCMPushToken(user.uid);
+      // Test öncesi bu cihazın token'ını Firestore'a kesin olarak yaz
+      if (user?.uid) {
+        await registerFCMPushToken(user.uid, { force: true });
       }
 
       const res = await triggerReminderTest();
@@ -155,7 +155,7 @@ export default function NotificationSettingsPage() {
     setPermStatus(status);
     if (granted) {
       if (user?.uid) {
-        await registerFCMPushToken(user.uid);
+        await registerFCMPushToken(user.uid, { force: true });
       }
       setToastMessage('Bildirim ve Arka Plan Push izni başarıyla verildi! 🎉');
     } else {
@@ -441,11 +441,14 @@ function ScheduleFormModal({ open, editingSchedule, userUid, onClose, onSaved })
         setErrorMessage('Bildirim gönderebilmemiz için bildirim iznini açman gerekiyor.');
       }
 
-      const [hourStr, minuteStr] = timeString.split(':');
+      const [hourStr, minuteStr] = (timeString || '').split(':');
+      const parsedHour = parseInt(hourStr, 10);
+      const parsedMinute = parseInt(minuteStr, 10);
+      // DİKKAT: 0 geçerli bir saattir (gece 00:xx). "|| 9" kullanılırsa 00, 09'a döner.
       const payload = {
         weekdays: selectedDays,
-        hour: parseInt(hourStr, 10) || 9,
-        minute: parseInt(minuteStr, 10) || 0,
+        hour: Number.isNaN(parsedHour) ? 9 : Math.min(23, Math.max(0, parsedHour)),
+        minute: Number.isNaN(parsedMinute) ? 0 : Math.min(59, Math.max(0, parsedMinute)),
         label: label.trim(),
       };
 

@@ -182,6 +182,7 @@ export default function AddTaskPage() {
         assignedByName: user.profile?.displayName || user.displayName || 'Arkadaşın',
         assignedToUid: assignTo,
         assignedToName: friend?.friendName || 'Arkadaş',
+        friendshipId: friend?.id || null,
         title: title.trim(),
         description: description ? description.trim() : '',
         categoryId: categoryId || null,

@@ -1,8 +1,7 @@
-// J-Planning — Service Worker (PWA Çevrimdışı Çalışma & Firebase Cloud Messaging Desteği)
-importScripts('https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js');
-importScripts('https://www.gstatic.com/firebasejs/10.8.0/firebase-messaging-compat.js');
+// J-Planning — Service Worker (PWA çevrimdışı çalışma ve push bildirimleri)
+// Push mesajları aşağıdaki 'push' dinleyicisiyle doğrudan gösterilir; Firebase SDK'sı burada gerekmez.
 
-const CACHE_NAME = 'j-planning-v8-turso';
+const CACHE_NAME = 'j-planning-v9-turso';
 
 // Service Worker Kurulumu & Önbelleğe alma
 self.addEventListener('install', (event) => {
@@ -29,13 +28,15 @@ self.addEventListener('activate', (event) => {
 // sayfa tarafından postMessage ile buraya istek gönderilir, showNotification burada tetiklenir)
 self.addEventListener('message', (event) => {
   if (event.data && event.data.type === 'SHOW_NOTIFICATION') {
-    const { title, body, icon } = event.data.payload || {};
+    const { title, body, icon, tag } = event.data.payload || {};
     event.waitUntil(
       self.registration.showNotification(title || 'J-Planning', {
         body: body || 'Görevlerine göz atmayı unutma!',
         icon: icon || '/favicon.svg',
         badge: '/favicon.svg',
-        tag: 'j-planning-notification',
+        tag: tag || 'j-planning-notification',
+        // Aynı etiketli bildirim yenilendiğinde de ses/titreşim ver (sessizce üzerine yazma)
+        renotify: true,
       })
     );
   }
@@ -57,7 +58,11 @@ self.addEventListener('push', (event) => {
     body: payload.notification?.body || payload.body || 'Görevlerinize göz atmayı unutmayın!',
     icon: payload.notification?.icon || payload.icon || '/favicon.svg',
     badge: '/favicon.svg',
-    tag: 'j-planning-push-notification',
+    // Worker her bildirim türü için ayrı etiket gönderir (friend-request, task-assigned...).
+    // Böylece farklı türler birbirinin üzerine yazmaz.
+    tag: payload.notification?.tag || payload.data?.tag || payload.tag || 'j-planning-push-notification',
+    // Aynı türden yeni bildirim geldiğinde de kullanıcı uyarılsın
+    renotify: true,
     data: payload.data || {},
   };
 

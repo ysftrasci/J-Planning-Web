@@ -15,8 +15,11 @@ const SOUND_LABELS = {
   fireplace: 'Ateş / Şömine',
 };
 
-function monthKeyOf(dateStr) {
-  return dateStr.slice(0, 7);
+// Seansın bitiş anına (ms) göre YEREL saatle ay anahtarı üretir ("2026-07").
+function monthKeyOf(timestampMs) {
+  const d = new Date(timestampMs);
+  if (isNaN(d.getTime())) return '';
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
 }
 
 function monthLabelOf(monthKey) {
@@ -53,7 +56,7 @@ export default function FocusHistoryPage() {
 
   const availableMonths = useMemo(() => {
     const months = new Set(
-      sessions.map((s) => monthKeyOf(new Date(s.completedAt).toISOString()))
+      sessions.map((s) => monthKeyOf(s.completedAt)).filter(Boolean)
     );
     return Array.from(months).sort().reverse();
   }, [sessions]);
@@ -63,7 +66,7 @@ export default function FocusHistoryPage() {
   const filteredSessions = useMemo(() => {
     if (!effectiveMonthKey) return [];
     return sessions.filter(
-      (s) => monthKeyOf(new Date(s.completedAt).toISOString()) === effectiveMonthKey
+      (s) => monthKeyOf(s.completedAt) === effectiveMonthKey
     );
   }, [sessions, effectiveMonthKey]);
 

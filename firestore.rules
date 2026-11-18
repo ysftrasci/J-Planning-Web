@@ -28,6 +28,14 @@ service cloud.firestore {
         data.deletedByUid is string;
     }
 
+    // Atama yalnızca kabul edilmiş bir arkadaşlık üzerinden yapılabilir.
+    // Arkadaşlık doküman kimlikleri rastgele olduğu için istemci kimliği atamayla birlikte gönderir.
+    function isAcceptedFriendship(friendshipId, uidA, uidB) {
+      let f = get(/databases/$(database)/documents/friendships/$(friendshipId)).data;
+      return f.status == 'ACCEPTED' &&
+        ((f.fromUid == uidA && f.toUid == uidB) || (f.fromUid == uidB && f.toUid == uidA));
+    }
+
     function isNotAnonymous() {
       return request.auth != null &&
         request.auth.token.firebase.sign_in_provider != 'anonymous';
@@ -48,7 +56,10 @@ service cloud.firestore {
     }
 
     match /userCodes/{code} {
-      allow read: if request.auth != null;
+      // Yalnızca TEK kod sorgulanabilir (get). Liste (list) kapalıdır: aksi halde giriş yapan
+      // herkes tüm kullanıcıların kimlik, ad ve fotoğraf dökümünü alabilirdi.
+      allow get: if request.auth != null;
+      allow list: if request.auth != null && request.auth.token.admin == true;
       allow create: if request.auth != null && isNotAnonymous() && (request.resource.data.uid == request.auth.uid || request.auth.token.admin == true);
       allow update: if request.auth != null && isNotAnonymous() && (resource.data.uid == request.auth.uid || request.auth.token.admin == true);
       allow delete: if request.auth != null && (resource.data.uid == request.auth.uid || request.auth.token.admin == true);
@@ -57,13 +68,20 @@ service cloud.firestore {
     match /friendships/{friendshipId} {
       allow read: if request.auth != null &&
         (request.auth.uid == resource.data.fromUid || request.auth.uid == resource.data.toUid);
+      // İstek yalnızca PENDING olarak oluşturulabilir (doğrudan ACCEPTED yazılamaz) ve
+      // kişi kendine istek gönderemez.
       allow create: if request.auth != null && isNotAnonymous() &&
         request.auth.uid == request.resource.data.fromUid &&
-        request.resource.data.toUid != null;
+        request.resource.data.toUid is string &&
+        request.resource.data.toUid != request.auth.uid &&
+        request.resource.data.status == 'PENDING';
+      // Kabul işlemini SADECE isteği ALAN kişi yapabilir; yalnızca status alanı,
+      // yalnızca PENDING -> ACCEPTED yönünde değişebilir.
       allow update: if request.auth != null && isNotAnonymous() &&
-        (request.auth.uid == resource.data.fromUid || request.auth.uid == resource.data.toUid) &&
-        request.resource.data.fromUid == resource.data.fromUid &&
-        request.resource.data.toUid == resource.data.toUid;
+        request.auth.uid == resource.data.toUid &&
+        resource.data.status == 'PENDING' &&
+        request.resource.data.status == 'ACCEPTED' &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status']);
       allow delete: if request.auth != null &&
         (request.auth.uid == resource.data.fromUid || request.auth.uid == resource.data.toUid);
     }
@@ -73,7 +91,9 @@ service cloud.firestore {
         (request.auth.uid == resource.data.assignedByUid || request.auth.uid == resource.data.assignedToUid);
       allow create: if request.auth != null && isNotAnonymous() &&
         request.auth.uid == request.resource.data.assignedByUid &&
-        request.resource.data.assignedToUid != null &&
+        request.resource.data.assignedToUid is string &&
+        request.resource.data.friendshipId is string &&
+        isAcceptedFriendship(request.resource.data.friendshipId, request.auth.uid, request.resource.data.assignedToUid) &&
         isValidAssignedTaskData(request.resource.data);
       allow update: if request.auth != null && isNotAnonymous() &&
         (request.auth.uid == resource.data.assignedByUid || request.auth.uid == resource.data.assignedToUid) &&
@@ -89,7 +109,9 @@ service cloud.firestore {
         (request.auth.uid == resource.data.assignedByUid || request.auth.uid == resource.data.assignedToUid);
       allow create: if request.auth != null && isNotAnonymous() &&
         request.auth.uid == request.resource.data.assignedByUid &&
-        request.resource.data.assignedToUid != null &&
+        request.resource.data.assignedToUid is string &&
+        request.resource.data.friendshipId is string &&
+        isAcceptedFriendship(request.resource.data.friendshipId, request.auth.uid, request.resource.data.assignedToUid) &&
         isValidAssignedRewardData(request.resource.data);
       allow update: if request.auth != null && isNotAnonymous() &&
         (request.auth.uid == resource.data.assignedByUid || request.auth.uid == resource.data.assignedToUid) &&

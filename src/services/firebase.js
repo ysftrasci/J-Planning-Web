@@ -50,12 +50,18 @@ setPersistence(auth, browserLocalPersistence).catch((error) => {
 const db = getFirestore(app);
 
 let messaging = null;
-if (typeof window !== 'undefined') {
-  isSupported().then((supported) => {
-    if (supported) {
-      messaging = getMessaging(app);
-    }
-  }).catch(() => {});
-}
+// Messaging desteği asenkron belirlenir. Uygulama açılışında token kaydı gibi
+// erken çağrılar bu Promise'i bekleyerek "messaging henüz null" yarışına düşmez.
+const messagingReady =
+  typeof window !== 'undefined'
+    ? isSupported()
+        .then((supported) => {
+          if (supported) {
+            messaging = getMessaging(app);
+          }
+          return messaging;
+        })
+        .catch(() => null)
+    : Promise.resolve(null);
 
-export { app, auth, db, messaging };
+export { app, auth, db, messaging, messagingReady };

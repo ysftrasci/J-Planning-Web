@@ -10,9 +10,9 @@ import {
   isDatabaseReady,
   requestWorkerSession,
 } from '../db/database';
-import { updateTaskFromAssignment, syncReceivedTasksWithFirestore } from '../db/taskRepository';
+import { updateTaskFromAssignment, syncReceivedTasksWithFirestore, createTaskFromAssignment } from '../db/taskRepository';
 import { listenAcceptedTasksAssignedToMe } from '../services/taskAssignmentService';
-import { unregisterFCMPushToken } from '../services/notificationService';
+import { unregisterFCMPushToken, registerFCMPushToken } from '../services/notificationService';
 import { bridgeGuestDataToNewUser } from '../db/localSqliteEngine';
 
 const AuthContext = createContext(null);
@@ -140,6 +140,9 @@ export function AuthProvider({ children }) {
         // kullanıcı doğrudan /verify-email ekranına kilitlenir.
         if (!firebaseUser.emailVerified) {
           setIsAdmin(false);
+          // KRİTİK: Erken dönüşte de yükleme ekranı kapatılmalı; aksi halde
+          // doğrulanmamış kullanıcı uygulamayı yeniden açtığında sonsuz "Yükleniyor"da kalır.
+          setInitializing(false);
           return;
         }
 
@@ -168,6 +171,13 @@ export function AuthProvider({ children }) {
 
           setIsAdmin(Boolean(tokenResult?.claims?.admin));
 
+          // 2.5 PUSH BİLDİRİM: Bu cihazın FCM token'ını her açılışta/girişte tazele.
+          // İzin daha önce verilmişse sessizce kaydeder; verilmemişse hiçbir şey yapmaz
+          // (izin penceresi AÇMAZ). Ana akışı bekletmez.
+          registerFCMPushToken(firebaseUser.uid).catch((pushErr) => {
+            console.warn('[AuthContext] Push token kaydı uyarısı:', pushErr);
+          });
+
           // 3. GERÇEK ZAMANLI ASKIYA ALMA DİNLEYİCİSİ (Firestore users/{uid})
           try {
             userStatusUnsub = onSnapshot(
@@ -191,17 +201,35 @@ export function AuthProvider({ children }) {
           // 4. SOSYAL ÖZELLİK: Arkadaş Görev Atama Dinleyicisi (Sadece e-posta doğrulanmışsa başlatılır)
           if (firebaseUser.emailVerified) {
             try {
-              assignedTasksUnsub = listenAcceptedTasksAssignedToMe(firebaseUser.uid, async (tasks) => {
-                if (Array.isArray(tasks)) {
-                  await syncReceivedTasksWithFirestore(tasks);
-                  let anyUpdated = false;
+              assignedTasksUnsub = listenAcceptedTasksAssignedToMe(firebaseUser.uid, async (tasks, meta) => {
+                if (!Array.isArray(tasks)) return;
+                // GÜVENLİK: Sunucudan doğrulanmamış (önbellekten gelen, muhtemelen boş)
+                // anlık görüntüye göre ASLA yerel görev silme/güncelleme yapma.
+                // Firestore'a ulaşılamadığında liste boş gelir; buna güvenilirse
+                // kullanıcının tüm atanmış görevleri ve geçmişi silinirdi.
+                if (meta?.fromCache) return;
+                try {
+                  const result = await syncReceivedTasksWithFirestore(tasks);
+                  if (!result) return; // Veritabanı hazır değil: bir sonraki anlık görüntüde denenir
+                  let anyUpdated = Boolean(result?.deletedAny);
+                  const localIds = result?.localAssignmentIds || new Set();
+
                   for (const t of tasks) {
-                    const wasUpdated = await updateTaskFromAssignment(t);
-                    if (wasUpdated) anyUpdated = true;
+                    if (!localIds.has(t.id)) {
+                      // Firestore'da KABUL EDİLMİŞ ama yerelde olmayan görev: kabul anında
+                      // yerel kayıt yazılamamış demektir (ağ kesintisi vb.). Telafi et.
+                      await createTaskFromAssignment(t);
+                      anyUpdated = true;
+                    } else {
+                      const wasUpdated = await updateTaskFromAssignment(t);
+                      if (wasUpdated) anyUpdated = true;
+                    }
                   }
                   if (anyUpdated) {
                     window.dispatchEvent(new Event('jplanning:cloud-sync-update'));
                   }
+                } catch (syncErr) {
+                  console.warn('[AuthContext] Atanan görev eşitleme uyarısı:', syncErr);
                 }
               });
             } catch (assignedErr) {

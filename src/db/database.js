@@ -195,6 +195,12 @@ export async function requestWorkerSession(forceFreshIdToken = false) {
           sessionStorage.setItem(`jplanning_session_${currentUser.uid}`, JSON.stringify(session));
         } catch (_) {}
 
+        // Açık bir bağlantı bu kullanıcıya aitse, taze oturumu ona da bildir
+        // (bir sonraki sorguda TursoConnection yeni token'a geçer).
+        if (currentUid && currentUid === currentUser.uid) {
+          currentSession = session;
+        }
+
         return session;
       } catch (err) {
         lastError = err;
@@ -230,15 +236,75 @@ export async function requestWorkerSession(forceFreshIdToken = false) {
 /**
  * Token Yöneticisi: Proaktif ve reaktif token tazeleme (Sadece Turso için)
  */
+// Token'ın bitmesine bu kadar saniyeden az kaldıysa sorgudan ÖNCE yenilenir.
+// Worker tarafı 5 dakikadan az ömrü kalan token'ı önbellekten vermez; bu eşik
+// ondan küçük tutulur ki yenileme isteği gerçekten YENİ bir token getirsin.
+const TOKEN_REFRESH_THRESHOLD_SEC = 120;
+// Art arda yenileme denemeleri arasındaki en kısa süre (cihaz saati yanlışsa
+// her sorguda Worker'a gitmeyi engeller).
+const TOKEN_REFRESH_MIN_INTERVAL_MS = 30000;
+let inFlightTokenRefresh = null;
+let lastTokenRefreshAtMs = 0;
+
+function clearCachedSessionFor(uid) {
+  if (!uid || typeof sessionStorage === 'undefined') return;
+  try {
+    sessionStorage.removeItem(`jplanning_session_${uid}`);
+  } catch (_) {}
+}
+
+async function refreshSessionToken() {
+  // Paralel sorgular aynı anda yenileme isterse tek bir istek paylaşılır.
+  if (inFlightTokenRefresh) return inFlightTokenRefresh;
+
+  const uidAtStart = currentUid;
+  const run = (async () => {
+    // Önbellekteki (süresi dolmuş/dolmak üzere olan) oturumu at ki Worker'a gerçekten gidilsin.
+    clearCachedSessionFor(uidAtStart || auth.currentUser?.uid);
+    const session = await requestWorkerSession();
+    lastTokenRefreshAtMs = Date.now();
+    // Yenileme sürerken kullanıcı çıkış yaptıysa/değiştiyse eski oturumu geri yazma.
+    if (currentUid === uidAtStart && session?.uid === uidAtStart) {
+      currentSession = session;
+    }
+    return session.token;
+  })();
+
+  const wrapped = run.finally(() => {
+    if (inFlightTokenRefresh === wrapped) inFlightTokenRefresh = null;
+  });
+  inFlightTokenRefresh = wrapped;
+  return wrapped;
+}
+
 const tokenManager = {
   getToken: () => currentSession?.token || null,
   getDbUrl: () => currentSession?.dbUrl || null,
   getExpiresAt: () => currentSession?.expiresAt || 0,
-  refreshToken: async () => {
-    const session = await requestWorkerSession(true);
-    currentSession = session;
-    return session.token;
+
+  // PROAKTİF: Her sorgudan önce çağrılır. Token'ın ömrü yeterliyse ağ isteği yapmaz.
+  ensureFreshToken: async () => {
+    const current = currentSession?.token || null;
+    if (!current) return null;
+    const nowSec = Math.floor(Date.now() / 1000);
+    const remaining = (currentSession.expiresAt || 0) - nowSec;
+    if (remaining > TOKEN_REFRESH_THRESHOLD_SEC) return current;
+    if (Date.now() - lastTokenRefreshAtMs < TOKEN_REFRESH_MIN_INTERVAL_MS) return current;
+    try {
+      return await refreshSessionToken();
+    } catch (err) {
+      // Yenileme başarısızsa (ör. anlık ağ kesintisi) eldeki token ile dene;
+      // sorgu 401 alırsa reaktif yol (forceRefreshToken) tekrar deneyecek.
+      console.warn('[Database] Proaktif token yenileme başarısız:', err?.message || err);
+      return current;
+    }
   },
+
+  // REAKTİF: Sorgu yetki hatası (401/expired) aldığında çağrılır.
+  forceRefreshToken: async () => refreshSessionToken(),
+
+  // Geriye dönük uyumluluk
+  refreshToken: async () => refreshSessionToken(),
 };
 
 /**
@@ -420,6 +486,8 @@ export function resetDatabaseSession(targetUid = null) {
   inFlightSessionPromise = null;
   inFlightInitPromise = null;
   inFlightInitUid = null;
+  inFlightTokenRefresh = null;
+  lastTokenRefreshAtMs = 0;
 
   if (typeof sessionStorage !== 'undefined') {
     try {

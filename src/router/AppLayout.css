@@ -88,3 +88,43 @@
   font-weight: 700;
   color: var(--color-accent-dark);
 }
+
+/* Veritabanı bağlantı hatası şeridi */
+.app-layout__db-error {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  margin: var(--space-sm) var(--space-lg) 0;
+  padding: var(--space-sm) 12px;
+  border: 1px solid var(--color-danger);
+  border-radius: var(--radius-md);
+  background: var(--color-danger-soft);
+  color: var(--color-text-primary);
+}
+
+.app-layout__db-error-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.app-layout__db-error-button {
+  flex-shrink: 0;
+  padding: 8px 12px;
+  border: none;
+  border-radius: var(--radius-md);
+  background: var(--color-danger);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.app-layout__db-error-button:disabled {
+  opacity: 0.6;
+  cursor: default;
+}

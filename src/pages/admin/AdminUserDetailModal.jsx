@@ -1321,7 +1321,7 @@ export default function AdminUserDetailModal({ userMeta, onClose, onUserStatusCh
               disabled={
                 deleteLoading ||
                 (currentUserState?.email || userMeta?.email
-                  ? deleteConfirmEmail.trim().toLowerCase() !== (currentUserState?.email || userMeta?.email).trim().toLowerCase()
+                  ? deleteConfirmEmail.trim().toLowerCase() !== (currentUserState?.email || userMeta?.email || '').trim().toLowerCase()
                   : deleteConfirmEmail.trim().toUpperCase() !== 'SİL')
               }
             >

@@ -62,7 +62,8 @@ export async function getAllDailyNoteMonths() {
     'SELECT DISTINCT substr(dateKey, 1, 7) as monthKey FROM daily_notes ORDER BY monthKey DESC'
   );
   const months = rows.map((r) => r.monthKey);
-  const currentMonth = new Date().toISOString().slice(0, 7);
+  const nowLocal = new Date();
+  const currentMonth = `${nowLocal.getFullYear()}-${String(nowLocal.getMonth() + 1).padStart(2, '0')}`;
   if (!months.includes(currentMonth)) {
     months.unshift(currentMonth);
   }

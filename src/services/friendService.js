@@ -20,7 +20,7 @@ import {
   serverTimestamp,
 } from 'firebase/firestore';
 import { db } from './firebase';
-import { findUserByCode, getUserProfile } from '../db/userProfileRepository';
+import { findUserByCode } from '../db/userProfileRepository';
 import { sendPushNotification } from './pushNotificationClient';
 
 const friendshipsRef = collection(db, 'friendships');
@@ -244,13 +244,8 @@ export function listenFriends(currentUserUid, callback, onError) {
     const enriched = await Promise.all(
       uniqueRaw.map(async (friend) => {
         try {
-          let liveProfile = null;
-          if (friend.friendCode) {
-            liveProfile = await findUserByCode(friend.friendCode);
-          }
-          if (!liveProfile && friend.friendUid) {
-            liveProfile = await getUserProfile(friend.friendUid).catch(() => null);
-          }
+          // users/{uid} başkasına kapalı olduğu için yalnızca userCodes denenir.
+          const liveProfile = friend.friendCode ? await findUserByCode(friend.friendCode) : null;
           if (liveProfile) {
             return {
               ...friend,

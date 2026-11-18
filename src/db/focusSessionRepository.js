@@ -17,8 +17,12 @@ export function generateSessionId() {
   });
 }
 
+// YEREL saate göre ay anahtarı. (toISOString UTC döndürür; Türkiye'de gece
+// 00:00-03:00 arası biten seanslar bir önceki güne/aya yazılırdı.)
 function monthKeyOf(date) {
-  return date.toISOString().slice(0, 7); // "2026-07"
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  return `${y}-${m}`; // "2026-07"
 }
 
 export async function recordFocusSession({ sessionId, durationMinutes, soundKey, jpEarned, awardedMilestones }) {
@@ -26,11 +30,8 @@ export async function recordFocusSession({ sessionId, durationMinutes, soundKey,
   const id = sessionId || generateSessionId();
   const now = new Date();
 
-  // Önce awardedMilestones kolonu eklemeyi dene (yoksa ekler, varsa no-op)
-  try {
-    await db.runAsync('ALTER TABLE focus_sessions ADD COLUMN awardedMilestones TEXT');
-  } catch (_) {}
-
+  // awardedMilestones kolonu açılışta ensureFocusSessionSchema ile eklenir;
+  // eklenememişse aşağıdaki yedek INSERT eski şemayla yazar.
   const awardedJson = Array.isArray(awardedMilestones) ? JSON.stringify(awardedMilestones) : null;
   try {
     await db.runAsync(
@@ -79,10 +80,6 @@ export async function awardFocusMilestone({
   if (!sessionId || !newMilestones || newMilestones.length === 0) {
     return { addedJp: 0, totalSessionJp: 0 };
   }
-
-  try {
-    await db.runAsync('ALTER TABLE focus_sessions ADD COLUMN awardedMilestones TEXT');
-  } catch (_) {}
 
   let totalAddedJp = 0;
   const now = Date.now();

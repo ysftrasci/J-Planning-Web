@@ -1,4 +1,5 @@
-import { Routes, Route, Navigate } from 'react-router-dom';
+import { useEffect } from 'react';
+import { Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import AppLayout from './AppLayout.jsx';
 import PlaceholderPage from '../pages/PlaceholderPage.jsx';
 import LoginPage from '../pages/LoginPage.jsx';
@@ -59,11 +60,42 @@ function LoadingScreen() {
   );
 }
 
+const AUTH_REDIRECT_KEY = 'jp_auth_redirect';
+
+// Giriş sonrası dönülecek hedefi okur. Yalnızca uygulama içi, güvenli yollar kabul edilir.
+function readAuthRedirect() {
+  try {
+    const saved = window.sessionStorage.getItem(AUTH_REDIRECT_KEY);
+    if (saved && saved.startsWith('/friends/add') && !saved.startsWith('//')) return saved;
+  } catch (_) {}
+  return null;
+}
+
 function RequireAuth({ children }) {
   const { user, isGuest, initializing, signOut } = useAuth();
+  const location = useLocation();
+
+  const isFullyAuthed = Boolean(user) && !isGuest && Boolean(user?.emailVerified);
+
+  // Kullanıcı hedef sayfaya ulaştıysa bekleyen yönlendirme kaydını temizle.
+  useEffect(() => {
+    if (!isFullyAuthed) return;
+    try {
+      window.sessionStorage.removeItem(AUTH_REDIRECT_KEY);
+    } catch (_) {}
+  }, [isFullyAuthed, location.pathname]);
 
   if (initializing) return <LoadingScreen />;
-  if (!user) return <Navigate to="/login" replace />;
+  if (!user) {
+    // Arkadaşlık davet linkiyle (/friends/add?code=...) gelen ama giriş yapmamış kişi,
+    // giriş/kayıt/e-posta doğrulama sonrası aynı linke geri dönebilsin.
+    if (location.pathname.startsWith('/friends/add')) {
+      try {
+        window.sessionStorage.setItem(AUTH_REDIRECT_KEY, `${location.pathname}${location.search}`);
+      } catch (_) {}
+    }
+    return <Navigate to="/login" replace />;
+  }
 
   // Misafir kullanıcı e-posta doğrulama veya hesap silme engeline takılmaz
   if (isGuest) return children;
@@ -141,7 +173,7 @@ function RedirectIfAuthed({ children }) {
   // Misafir kullanıcı hesap oluşturmak veya giriş yapmak için login/register sayfasına erişebilmelidir
   if (isGuest) return children;
   if (user && !user.emailVerified) return <Navigate to="/verify-email" replace />;
-  if (user) return <Navigate to="/" replace />;
+  if (user) return <Navigate to={readAuthRedirect() || '/'} replace />;
   return children;
 }
 

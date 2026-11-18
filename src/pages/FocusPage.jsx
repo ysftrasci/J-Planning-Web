@@ -26,6 +26,12 @@ import {
   finalizeFocusSession,
 } from '../db/focusSessionRepository.js';
 import { triggerConfetti } from '../utils/confetti.js';
+import {
+  saveActiveFocusSession,
+  loadActiveFocusSession,
+  clearActiveFocusSession,
+} from '../utils/focusSessionStore.js';
+import { useAuth } from '../context/AuthContext.jsx';
 import './FocusPage.css';
 
 const SOUND_OPTIONS = [
@@ -71,6 +77,8 @@ function getNextMilestoneInfo(elapsedSeconds, awardedMins) {
 
 export default function FocusPage() {
   const navigate = useNavigate();
+  const { user, isGuest } = useAuth();
+  const ownerId = isGuest ? 'guest' : (user?.uid || null);
   const [selectedSound, setSelectedSound] = useState('none');
   const [showSoundPicker, setShowSoundPicker] = useState(false);
   const [showStopConfirm, setShowStopConfirm] = useState(false);
@@ -89,6 +97,8 @@ export default function FocusPage() {
   const [totalEarnedJp, setTotalEarnedJp] = useState(0);
   // Son milestone kutlaması
   const [celebratingMilestone, setCelebratingMilestone] = useState(null);
+  // Uygulama kapanıp açıldığında seans duraklatılmış olarak geri gelirse gösterilen not
+  const [restoredAfterClose, setRestoredAfterClose] = useState(false);
 
   const sessionIdRef = useRef(null);
   const intervalRef = useRef(null);
@@ -97,10 +107,26 @@ export default function FocusPage() {
   const awardedMinsRef = useRef(new Set());   // Ref kopyası (closure'da güncel kalmak için)
   const totalEarnedJpRef = useRef(0);
   const selectedSoundRef = useRef('none');
+  const ownerIdRef = useRef(ownerId);
+  ownerIdRef.current = ownerId;
 
   useEffect(() => {
     selectedSoundRef.current = selectedSound;
   }, [selectedSound]);
+
+  // Süren seansı cihazda sakla (sayfa değişince / uygulama kapanınca kaybolmasın)
+  const persistSession = useCallback(() => {
+    if (!sessionIdRef.current || !ownerIdRef.current) return;
+    saveActiveFocusSession({
+      ownerId: ownerIdRef.current,
+      sessionId: sessionIdRef.current,
+      startTime: startTimeRef.current,
+      pausedElapsed: pausedElapsedRef.current,
+      awardedMins: Array.from(awardedMinsRef.current),
+      totalEarnedJp: totalEarnedJpRef.current,
+      sound: selectedSoundRef.current,
+    });
+  }, []);
 
   // Unmount'ta temizle (sayfadan ayrılınca seans sıfırlanır, ses durdurulur)
   useEffect(() => {
@@ -141,12 +167,14 @@ export default function FocusPage() {
       setTotalEarnedJp(totalEarnedJpRef.current);
     }
 
+    persistSession();
+
     // Kutlama: en son kazanılan milestone
     const lastMin = newlyAwarded[newlyAwarded.length - 1];
     setCelebratingMilestone(lastMin);
     triggerConfetti();
     setTimeout(() => setCelebratingMilestone(null), 2500);
-  }, []);
+  }, [persistSession]);
 
   // Sekme değiştirme / ekrana geri dönme dinleyicisi
   useEffect(() => {
@@ -179,6 +207,44 @@ export default function FocusPage() {
     }, 1000);
   }, [checkAndAwardMilestones]);
 
+  // Açılışta yarım kalmış seansı geri yükle
+  useEffect(() => {
+    if (!ownerId) return;
+    if (sessionIdRef.current) {
+      // Aynı bileşen yeniden bağlandı (ör. StrictMode): sayaç durmuşsa yeniden başlat
+      if (startTimeRef.current) startTick();
+      return;
+    }
+    const saved = loadActiveFocusSession(ownerId);
+    if (!saved) return;
+
+    sessionIdRef.current = saved.sessionId;
+    pausedElapsedRef.current = saved.pausedElapsed;
+    startTimeRef.current = saved.startTime || null;
+    awardedMinsRef.current = new Set(saved.awardedMins);
+    totalEarnedJpRef.current = saved.totalEarnedJp;
+    const sound = SOUND_OPTIONS.some((o) => o.key === saved.sound) ? saved.sound : 'none';
+    selectedSoundRef.current = sound;
+    setSelectedSound(sound);
+    setAwardedMins(new Set(saved.awardedMins));
+    setTotalEarnedJp(saved.totalEarnedJp);
+    setIsCompleted(false);
+    setIsRunning(true);
+
+    if (saved.startTime) {
+      // Uygulama açıkken başka sayfaya geçilmişti: sayaç işlemeye devam ediyor
+      const elapsed = Math.floor((Date.now() - saved.startTime) / 1000) + saved.pausedElapsed;
+      setElapsedSeconds(elapsed);
+      setIsPaused(false);
+      playFocusSound(sound).catch(() => {});
+      startTick();
+    } else {
+      setElapsedSeconds(saved.pausedElapsed);
+      setIsPaused(true);
+      setRestoredAfterClose(saved.resumedAfterClose === true);
+    }
+  }, [ownerId, startTick]);
+
   const handleStart = async () => {
     const newSessionId = generateSessionId();
     sessionIdRef.current = newSessionId;
@@ -192,6 +258,8 @@ export default function FocusPage() {
     setIsRunning(true);
     setIsPaused(false);
     setIsCompleted(false);
+    setRestoredAfterClose(false);
+    persistSession();
     await playFocusSound(selectedSoundRef.current);
     startTick();
   };
@@ -203,6 +271,7 @@ export default function FocusPage() {
       pausedElapsedRef.current = Math.floor((Date.now() - startTimeRef.current) / 1000) + pausedElapsedRef.current;
     }
     startTimeRef.current = null;
+    persistSession();
     await stopFocusSound();
     setIsPaused(true);
   };
@@ -210,6 +279,8 @@ export default function FocusPage() {
   const handleResume = async () => {
     startTimeRef.current = Date.now();
     setIsPaused(false);
+    setRestoredAfterClose(false);
+    persistSession();
     await playFocusSound(selectedSoundRef.current);
     startTick();
   };
@@ -220,6 +291,8 @@ export default function FocusPage() {
     const finalMinutes = Math.floor(finalElapsed / 60);
     const finalJp = totalEarnedJpRef.current;
     startTimeRef.current = null;
+    clearActiveFocusSession();
+    setRestoredAfterClose(false);
     await stopFocusSound();
 
     setShowStopConfirm(false);
@@ -261,6 +334,7 @@ export default function FocusPage() {
     setSelectedSound(key);
     selectedSoundRef.current = key;
     setShowSoundPicker(false);
+    if (isRunning) persistSession();
     if (isRunning && !isPaused) {
       await playFocusSound(key);
     }
@@ -326,6 +400,11 @@ export default function FocusPage() {
           <span className="focus-page__running-label">
             {isPaused ? '⏸ Odaklanma Duraklatıldı' : 'Odaklanma Modu'}
           </span>
+          {isPaused && restoredAfterClose && (
+            <p className="focus-page__restored-note">
+              Uygulama kapandığı için seansın duraklatıldı. Kaldığın yerden devam edebilirsin.
+            </p>
+          )}
 
           {/* Büyük yukarı sayan sayaç */}
           <div className={`focus-page__timer ${isPaused ? 'focus-page__timer--paused' : ''}`}>

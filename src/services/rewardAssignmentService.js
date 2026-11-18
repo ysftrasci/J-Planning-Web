@@ -22,9 +22,10 @@ import { db } from './firebase';
 
 const assignedRewardsRef = collection(db, 'assignedRewards');
 
-export async function assignRewardToFriend({ assignedByUid, assignedByName, assignedToUid, assignedToName, title, description, cost }) {
+export async function assignRewardToFriend({ assignedByUid, assignedByName, assignedToUid, assignedToName, friendshipId, title, description, cost }) {
   const cleanTitle = (title || '').trim().slice(0, 300);
   if (!cleanTitle) throw new Error('Ödül adı boş olamaz.');
+  if (!friendshipId) throw new Error('Arkadaş bulunamadı. Arkadaş listesi yüklenince tekrar dene.');
 
   const cleanCost = Math.max(0, Math.min(100000, parseInt(cost, 10) || 0));
 
@@ -33,6 +34,7 @@ export async function assignRewardToFriend({ assignedByUid, assignedByName, assi
     assignedByName: (assignedByName || 'Kullanıcı').slice(0, 100),
     assignedToUid,
     assignedToName: (assignedToName || 'Arkadaşın').slice(0, 100),
+    friendshipId,
     title: cleanTitle,
     description: (description || '').slice(0, 1000),
     cost: cleanCost,

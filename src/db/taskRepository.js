@@ -33,6 +33,49 @@ function uuid() {
   });
 }
 
+// Aynı görev üzerinde art arda gelen işlemleri (hızlı çift dokunuş vb.) sıraya koyar.
+// Böylece "oku → hesapla → yaz" adımları iç içe girip çift JP / kayıp güncelleme üretmez.
+const taskOperationQueues = new Map();
+function withTaskLock(taskId, fn) {
+  const previous = taskOperationQueues.get(taskId) || Promise.resolve();
+  const next = previous.catch(() => {}).then(fn);
+  const tracked = next.finally(() => {
+    if (taskOperationQueues.get(taskId) === tracked) taskOperationQueues.delete(taskId);
+  });
+  // Zincir hatası bir sonraki işlemi engellemesin; hata çağırana "next" üzerinden gider.
+  tracked.catch(() => {});
+  taskOperationQueues.set(taskId, tracked);
+  return next;
+}
+
+// Birden fazla ifadeyi TEK atomik işlemde çalıştırır (ya hepsi yazılır ya hiçbiri).
+async function runAtomic(db, stmts) {
+  if (!stmts || stmts.length === 0) return;
+  if (typeof db.batchAsync === 'function') {
+    await db.batchAsync(stmts);
+    return;
+  }
+  for (const s of stmts) {
+    await db.runAsync(s.sql, s.args || []);
+  }
+}
+
+// Cüzdan hareketi + bakiye güncellemesi için atomik batch ifadeleri üretir.
+function buildWalletStatements(userId, amount, reason, relatedTaskId = null, relatedRewardId = null) {
+  return [
+    {
+      sql: `INSERT INTO wallet_transactions (id, userId, amount, reason, relatedTaskId, relatedRewardId, createdAt)
+            VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      args: [uuid(), userId, amount, reason, relatedTaskId, relatedRewardId, Date.now()],
+    },
+    {
+      sql: `INSERT INTO wallet (userId, balance) VALUES (?, ?)
+            ON CONFLICT(userId) DO UPDATE SET balance = balance + excluded.balance`,
+      args: [userId, amount],
+    },
+  ];
+}
+
 export async function createTask({ title, description, categoryId, priority, period, intervalValue = 1, subtaskCount, subtaskLabels, assignedByUserId, assignedByName }) {
   const db = getDb();
   const id = uuid();
@@ -80,7 +123,22 @@ export async function getActiveTasks() {
 // normal görev gibi tamamlanabilir. Kabul sonrası silinemez (bkz. deleteTask).
 // direction: 'RECEIVED' (bana atandı, ben yürütüyorum) — bu fonksiyon her zaman
 // atanan/alan tarafın kendi cihazında çağrılır.
-export async function createTaskFromAssignment(assignedTask) {
+const inFlightAssignmentCreates = new Map();
+export function createTaskFromAssignment(assignedTask) {
+  // Aynı atama için eşzamanlı iki çağrı (kabul butonu + arka plan eşitleyici)
+  // mükerrer görev oluşturmasın: devam eden işlemi paylaş.
+  const key = assignedTask?.id;
+  if (!key) return Promise.reject(new Error('Geçersiz atama kaydı.'));
+  const existingRun = inFlightAssignmentCreates.get(key);
+  if (existingRun) return existingRun;
+  const run = createTaskFromAssignmentInner(assignedTask).finally(() => {
+    if (inFlightAssignmentCreates.get(key) === run) inFlightAssignmentCreates.delete(key);
+  });
+  inFlightAssignmentCreates.set(key, run);
+  return run;
+}
+
+async function createTaskFromAssignmentInner(assignedTask) {
   const db = getDb();
   const existing = await db.getFirstAsync(
     'SELECT id FROM tasks WHERE firestoreAssignmentId = ?',
@@ -331,7 +389,11 @@ async function recalculateAndApplyJP(db, task, periodKey, existingRecord) {
 
 // Bir alt adımı tamamlar (subtaskCount=1 olan basit görevlerde tek çağrı yeterli).
 // Tüm alt adımlar tamamlanınca periyot SUCCESSFUL olur ve JP verilir.
-export async function completeSubtask(taskId) {
+export function completeSubtask(taskId) {
+  return withTaskLock(taskId, () => completeSubtaskInner(taskId));
+}
+
+async function completeSubtaskInner(taskId) {
   const db = getDb();
   const task = await db.getFirstAsync('SELECT * FROM tasks WHERE id = ?', [taskId]);
   if (!task) throw new Error('Görev bulunamadı');
@@ -372,20 +434,24 @@ export async function completeSubtask(taskId) {
   // Tam tamamlama: streak hesapla, JP ver.
   const { bonus, total, newStreak } = await recalculateAndApplyJP(db, task, periodKey, existing);
 
+  // Kayıt + cüzdan hareketi + bakiye TEK atomik işlemde yazılır:
+  // arada bağlantı kopsa bile "tamamlandı ama JP yok" durumu oluşmaz.
+  const stmts = [];
   if (existing) {
-    await db.runAsync(
-      `UPDATE task_records SET status = 'SUCCESSFUL', completedSubtasks = ?, completedAt = ?, jpEarned = ?, streakBonusEarned = ? WHERE id = ?`,
-      [newCompleted, now, total, bonus, existing.id]
-    );
+    stmts.push({
+      sql: `UPDATE task_records SET status = 'SUCCESSFUL', completedSubtasks = ?, completedAt = ?, jpEarned = ?, streakBonusEarned = ? WHERE id = ?`,
+      args: [newCompleted, now, total, bonus, existing.id],
+    });
   } else {
-    await db.runAsync(
-      `INSERT INTO task_records (id, taskId, periodKey, status, completedSubtasks, completedAt, isLateMarked, jpEarned, streakBonusEarned)
-       VALUES (?, ?, ?, 'SUCCESSFUL', ?, ?, 0, ?, ?)`,
-      [uuid(), taskId, periodKey, newCompleted, now, total, bonus]
-    );
+    stmts.push({
+      sql: `INSERT INTO task_records (id, taskId, periodKey, status, completedSubtasks, completedAt, isLateMarked, jpEarned, streakBonusEarned)
+            VALUES (?, ?, ?, 'SUCCESSFUL', ?, ?, 0, ?, ?)`,
+      args: [uuid(), taskId, periodKey, newCompleted, now, total, bonus],
+    });
   }
+  stmts.push(...buildWalletStatements('me', total, 'TASK_COMPLETE', taskId));
+  await runAtomic(db, stmts);
 
-  await addWalletTransaction('me', total, 'TASK_COMPLETE', taskId);
   triggerAutoCloudSyncForCurrentUser();
   return { alreadyComplete: false, completedSubtasks: newCompleted, subtaskCount: task.subtaskCount, fullyCompleted: true, bonus, total, newStreak, firestoreAssignmentId: task.firestoreAssignmentId };
 }
@@ -394,7 +460,11 @@ export async function completeSubtask(taskId) {
 // durumdaysa (tüm alt adımlar bitmişse), JP geri alınır ve durum PENDING'e
 // döner (bir alt adım geri açılır). Streak otomatik olarak bir sonraki
 // hesaplamada düzelir (bu periyot artık SUCCESSFUL olmadığı için).
-export async function uncompleteSubtask(taskId) {
+export function uncompleteSubtask(taskId) {
+  return withTaskLock(taskId, () => uncompleteSubtaskInner(taskId));
+}
+
+async function uncompleteSubtaskInner(taskId) {
   const db = getDb();
   const task = await db.getFirstAsync('SELECT * FROM tasks WHERE id = ?', [taskId]);
   if (!task) throw new Error('Görev bulunamadı');
@@ -411,20 +481,23 @@ export async function uncompleteSubtask(taskId) {
   const wasSuccessful = existing.status === 'SUCCESSFUL';
   const newCompleted = existing.completedSubtasks - 1;
 
+  // JP iadesi ve kayıt güncellemesi tek atomik işlemde yapılır.
+  const stmts = [];
   if (wasSuccessful && existing.jpEarned) {
-    await addWalletTransaction('me', -existing.jpEarned, 'TASK_COMPLETE', taskId);
+    stmts.push(...buildWalletStatements('me', -existing.jpEarned, 'TASK_COMPLETE', taskId));
   }
 
   if (newCompleted <= 0) {
     // Hiç alt adım kalmadıysa kaydı tamamen sil (periyot yeniden PENDING sayılır).
-    await db.runAsync('DELETE FROM task_records WHERE id = ?', [existing.id]);
+    stmts.push({ sql: 'DELETE FROM task_records WHERE id = ?', args: [existing.id] });
   } else {
     // Kısmi tamamlama durumuna geri döndür (SUCCESSFUL -> PENDING_PARTIAL).
-    await db.runAsync(
-      `UPDATE task_records SET status = 'PENDING_PARTIAL', completedSubtasks = ?, completedAt = NULL, jpEarned = 0, streakBonusEarned = 0 WHERE id = ?`,
-      [newCompleted, existing.id]
-    );
+    stmts.push({
+      sql: `UPDATE task_records SET status = 'PENDING_PARTIAL', completedSubtasks = ?, completedAt = NULL, jpEarned = 0, streakBonusEarned = 0 WHERE id = ?`,
+      args: [newCompleted, existing.id],
+    });
   }
+  await runAtomic(db, stmts);
 
   triggerAutoCloudSyncForCurrentUser();
   return { completedSubtasks: newCompleted, subtaskCount: task.subtaskCount, firestoreAssignmentId: task.firestoreAssignmentId };
@@ -575,25 +648,25 @@ export async function processExpiredPeriods() {
     }
   }
 
-  if (missingInserts.length > 0) {
-    await Promise.all(
-      missingInserts.map((rec) =>
-        db.runAsync(
-          `INSERT OR IGNORE INTO task_records (id, taskId, periodKey, status, jpEarned) VALUES (?, ?, ?, 'FAILED', 0)`,
-          [uuid(), rec.taskId, rec.periodKey]
-        )
-      )
-    );
-  }
+  // Tüm yazmalar tek tek HTTP isteği yerine 200'lük paketlerle gönderilir
+  // (uzun aradan sonra açılışta yüzlerce paralel istek atılmasını önler).
+  const stmts = [
+    ...missingInserts.map((rec) => ({
+      sql: `INSERT OR IGNORE INTO task_records (id, taskId, periodKey, status, jpEarned) VALUES (?, ?, ?, 'FAILED', 0)`,
+      args: [uuid(), rec.taskId, rec.periodKey],
+    })),
+    // completedSubtasks alanına dokunulmaz: yarım kalan sayı korunur.
+    // calculateCompletionStats ve geçmiş listesi ("2/3 yapıldı") bu değeri kullanır.
+    // "AND status = 'PENDING_PARTIAL'" koşulu: bu arada başka cihazda tamamlandıysa ezme.
+    ...partialUpdates.map((id) => ({
+      sql: `UPDATE task_records SET status = 'FAILED' WHERE id = ? AND status = 'PENDING_PARTIAL'`,
+      args: [id],
+    })),
+  ];
 
-  if (partialUpdates.length > 0) {
-    await Promise.all(
-      partialUpdates.map((id) =>
-        // completedSubtasks alanına dokunulmaz: yarım kalan sayı korunur.
-        // Yeni calculateCompletionStats bu değeri pay olarak kullanır (payda = N).
-        db.runAsync(`UPDATE task_records SET status = 'FAILED' WHERE id = ?`, [id])
-      )
-    );
+  const CHUNK_SIZE = 200;
+  for (let i = 0; i < stmts.length; i += CHUNK_SIZE) {
+    await runAtomic(db, stmts.slice(i, i + CHUNK_SIZE));
   }
 }
 
@@ -732,18 +805,25 @@ export async function updateTaskFromAssignment(assignedTaskDoc) {
 
 // Atanan kişi: Firestore'da silinmiş veya artık aktif olmayan görevleri kendi SQLite veritabanından kaldırır
 export async function syncReceivedTasksWithFirestore(activeFirestoreAssignedTasks) {
+  // Dönüş: { deletedAny, localAssignmentIds } — localAssignmentIds, eşitleme SONRASI
+  // yerelde bulunan atama (Firestore doküman) kimlikleridir.
+  const emptyResult = { deletedAny: false, localAssignmentIds: new Set() };
   let db;
   try {
     db = getDb();
   } catch (e) {
-    return;
+    return null;
   }
-  if (!db) return;
+  if (!db) return null;
+
+  // Geçerli bir liste gelmediyse hiçbir şeyi silme (boş liste "hepsi silindi" demek DEĞİLDİR
+  // kararını çağıran taraf fromCache kontrolüyle verir; burada sadece tip güvenliği).
+  if (!Array.isArray(activeFirestoreAssignedTasks)) return null;
 
   const localReceived = await db.getAllAsync(
     `SELECT id, firestoreAssignmentId FROM tasks WHERE assignmentDirection = 'RECEIVED' AND firestoreAssignmentId IS NOT NULL`
   );
-  if (!localReceived || localReceived.length === 0) return;
+  if (!localReceived || localReceived.length === 0) return emptyResult;
 
   const activeDocIds = new Set(
     Array.isArray(activeFirestoreAssignedTasks)
@@ -752,17 +832,24 @@ export async function syncReceivedTasksWithFirestore(activeFirestoreAssignedTask
   );
 
   let deletedAny = false;
+  const localAssignmentIds = new Set();
   for (const localTask of localReceived) {
     if (!activeDocIds.has(localTask.firestoreAssignmentId)) {
-      await db.runAsync('DELETE FROM task_records WHERE taskId = ?', [localTask.id]);
-      await db.runAsync('DELETE FROM task_study_logs WHERE taskId = ?', [localTask.id]);
-      await db.runAsync('DELETE FROM tasks WHERE id = ?', [localTask.id]);
+      await runAtomic(db, [
+        { sql: 'DELETE FROM task_records WHERE taskId = ?', args: [localTask.id] },
+        { sql: 'DELETE FROM task_study_logs WHERE taskId = ?', args: [localTask.id] },
+        { sql: 'UPDATE wallet_transactions SET relatedTaskId = NULL WHERE relatedTaskId = ?', args: [localTask.id] },
+        { sql: 'DELETE FROM tasks WHERE id = ?', args: [localTask.id] },
+      ]);
       deletedAny = true;
+    } else {
+      localAssignmentIds.add(localTask.firestoreAssignmentId);
     }
   }
   if (deletedAny) {
     triggerAutoCloudSyncForCurrentUser();
   }
+  return { deletedAny, localAssignmentIds };
 }
 
 export async function getTaskStudyLog(taskId, periodKey) {

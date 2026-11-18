@@ -142,6 +142,16 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
+/* Dokunmatik ekranlarda iOS, 16px'ten küçük yazı alanına odaklanınca sayfayı
+   kendiliğinden yakınlaştırır. Yakınlaştırma açık olduğu için alanları 16px tutuyoruz. */
+@media (hover: none) and (pointer: coarse) {
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
+  select,
+  textarea {
+    font-size: 16px !important;
+  }
+}
+
 h1 {
   font-size: var(--font-h1-size);
   font-weight: var(--font-h1-weight);

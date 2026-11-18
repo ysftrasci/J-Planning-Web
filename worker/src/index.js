@@ -374,7 +374,9 @@ async function ensureUserDatabase(dbName, env) {
   const now = Date.now();
   const cached = userDbSessionCache.get(dbName);
   if (cached && now < cached.expiresAt - 5 * 60 * 1000) {
-    return { dbUrl: cached.dbUrl, token: cached.token };
+    // expiresAt MUTLAKA döndürülür: istemci bunu almazsa token'ı "1 saat geçerli"
+    // varsayar; oysa önbellekteki token'ın ömrü 5 dakikaya kadar inmiş olabilir.
+    return { dbUrl: cached.dbUrl, token: cached.token, expiresAt: Math.floor(cached.expiresAt / 1000) };
   }
 
   const org = env.TURSO_ORG;
@@ -466,7 +468,7 @@ async function ensureUserDatabase(dbName, env) {
   return {
     dbUrl,
     token: dbToken,
-    expiresAt: Math.floor(Date.now() / 1000) + 3600, // 1 saat sonra
+    expiresAt: Math.floor(now / 1000) + 3600, // Token üretim isteğinin başladığı andan 1 saat sonra
   };
 }
 
@@ -585,6 +587,79 @@ async function getTargetUserFcmTokens(projectId, targetUid, accessToken) {
   const docData = await res.json();
   const rawValues = docData.fields?.fcmTokens?.arrayValue?.values || [];
   return rawValues.map((v) => v.stringValue).filter(Boolean);
+}
+
+/**
+ * İki kullanıcı arasındaki arkadaşlık ilişkisini Firestore'dan doğrular.
+ * - requireAccepted=false: fromUid -> toUid yönünde herhangi bir kayıt (PENDING/ACCEPTED) yeterlidir
+ *   (arkadaşlık isteği bildirimi için: isteği gerçekten göndermiş olmalı).
+ * - requireAccepted=true: iki yönden birinde ACCEPTED kayıt gerekir (görev bildirimleri için).
+ * Hata durumunda İSTİSNA fırlatır (çağıran bildirimi göndermez: güvenli taraf).
+ */
+async function hasFriendshipRelation(projectId, accessToken, senderUid, targetUid, requireAccepted) {
+  const url = `https://firestore.googleapis.com/v1/projects/${projectId}/databases/(default)/documents:runQuery`;
+  const buildBody = (fromUid, toUid) => ({
+    structuredQuery: {
+      from: [{ collectionId: 'friendships' }],
+      where: {
+        compositeFilter: {
+          op: 'AND',
+          filters: [
+            { fieldFilter: { field: { fieldPath: 'fromUid' }, op: 'EQUAL', value: { stringValue: fromUid } } },
+            { fieldFilter: { field: { fieldPath: 'toUid' }, op: 'EQUAL', value: { stringValue: toUid } } },
+          ],
+        },
+      },
+      limit: 10,
+    },
+  });
+
+  const runOne = async (fromUid, toUid) => {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify(buildBody(fromUid, toUid)),
+    });
+    if (!res.ok) {
+      const text = await res.text();
+      throw new Error(`Arkadaşlık doğrulama sorgusu başarısız (${res.status}): ${text.slice(0, 200)}`);
+    }
+    const rows = await res.json();
+    return (Array.isArray(rows) ? rows : [])
+      .filter((r) => r && r.document)
+      .map((r) => r.document.fields?.status?.stringValue || '');
+  };
+
+  if (!requireAccepted) {
+    const statuses = await runOne(senderUid, targetUid);
+    return statuses.length > 0;
+  }
+
+  const [sent, received] = await Promise.all([runOne(senderUid, targetUid), runOne(targetUid, senderUid)]);
+  return [...sent, ...received].includes('ACCEPTED');
+}
+
+/**
+ * Gönderenin görünen adını Firestore profilinden okur (istemciden gelen ada güvenilmez).
+ */
+async function getUserDisplayName(projectId, accessToken, uid) {
+  try {
+    const url = `https://firestore.googleapis.com/v1/projects/${projectId}/databases/(default)/documents/users/${encodeURIComponent(uid)}?mask.fieldPaths=displayName`;
+    const res = await fetch(url, { headers: { Authorization: `Bearer ${accessToken}` } });
+    if (!res.ok) return null;
+    const data = await res.json();
+    const name = data.fields?.displayName?.stringValue;
+    return typeof name === 'string' && name.trim() ? name.trim() : null;
+  } catch (_) {
+    return null;
+  }
+}
+
+/** Bildirim metnine girecek kullanıcı kaynaklı metni tek satıra indirir ve kısaltır. */
+function cleanNotificationText(value, maxLength) {
+  if (typeof value !== 'string') return '';
+  const singleLine = value.replace(/[\u0000-\u001F\u007F\u2028\u2029]+/g, ' ').replace(/\s+/g, ' ').trim();
+  return singleLine.length > maxLength ? `${singleLine.slice(0, maxLength - 1)}…` : singleLine;
 }
 
 /**
@@ -853,37 +928,54 @@ async function handleHourlyTaskReminders(env, simulatedHour = null, specificUid 
         continue;
       }
 
-      // 4. Bugün biten ve tamamlanmamış görevleri paralel hesapla
+      // 4. Bugün biten ve tamamlanmamış görevleri hesapla
+      // - Worker UTC'de çalışır; periyot hesapları "yerel tarih" metodlarını kullandığı için
+      //   zaman Türkiye saatine (UTC+3) kaydırılarak verilir. Aksi halde 00:00-03:00 arası
+      //   bir önceki günün kaydına bakılır ve çok günlük periyotların başlangıcı kayar.
+      // - Kayıtlar görev başına ayrı sorgu yerine TEK sorguda çekilir (ücretsiz planda
+      //   çağrı başına 50 alt istek sınırı vardır).
       const tRecordsStart = Date.now();
-      let dueTasksCount = 0;
-      let dueAndUncompletedCount = 0;
+      const TR_OFFSET_MS = 3 * 60 * 60 * 1000;
+      const shiftedNowMs = nowMs + TR_OFFSET_MS;
+      const shiftedNow = new Date(shiftedNowMs);
 
-      const taskCheckPromises = tasks.map(async (task) => {
-        const periodKey = getPeriodKey(task, new Date(nowMs));
-        const periodEnd = getPeriodEndTimestamp(task, periodKey);
+      const dueTasks = [];
+      for (const task of tasks) {
+        const createdAtNum = Number(task.createdAt);
+        const shiftedTask = {
+          period: task.period,
+          intervalValue: task.intervalValue,
+          createdAt: Number.isFinite(createdAtNum) && createdAtNum > 0 ? createdAtNum + TR_OFFSET_MS : null,
+        };
+        const periodKey = getPeriodKey(shiftedTask, shiftedNow);
+        const periodEnd = getPeriodEndTimestamp(shiftedTask, periodKey);
 
         // Kural: DAILY görevler her gün; diğerleri periyodun son 24 saatinde; ONCE görevler tamamlanana kadar
-        const isExpiringToday = task.period === 'ONCE' || (periodEnd - nowMs) <= ONE_DAY_MS;
-        if (!isExpiringToday) return null;
+        const isExpiringToday = task.period === 'ONCE' || (periodEnd - shiftedNowMs) <= ONE_DAY_MS;
+        if (isExpiringToday) dueTasks.push({ task, periodKey });
+      }
 
-        const recordRes = await userDbClient.execute({
-          sql: 'SELECT status, completedSubtasks FROM task_records WHERE taskId = ? AND periodKey = ? LIMIT 1;',
-          args: [task.id, periodKey],
-        }).catch(() => null);
-
-        const record = recordRes?.rows?.[0];
-        const isCompleted = record && (record.status === 'SUCCESSFUL' || (Number(record.completedSubtasks) >= (Number(task.subtaskCount) || 1)));
-
-        return { isCompleted };
-      });
-
-      const checkResults = await Promise.all(taskCheckPromises);
-      for (const check of checkResults) {
-        if (!check) continue;
-        dueTasksCount++;
-        if (!check.isCompleted) {
-          dueAndUncompletedCount++;
+      const recordByTaskAndPeriod = new Map();
+      if (dueTasks.length > 0) {
+        const periodKeys = [...new Set(dueTasks.map((d) => d.periodKey))];
+        const placeholders = periodKeys.map(() => '?').join(', ');
+        const recordsRes = await userDbClient.execute({
+          sql: `SELECT taskId, periodKey, status, completedSubtasks FROM task_records WHERE periodKey IN (${placeholders});`,
+          args: periodKeys,
+        });
+        for (const row of recordsRes?.rows || []) {
+          recordByTaskAndPeriod.set(`${row.taskId}|${row.periodKey}`, row);
         }
+      }
+
+      const dueTasksCount = dueTasks.length;
+      let dueAndUncompletedCount = 0;
+      for (const { task, periodKey } of dueTasks) {
+        const record = recordByTaskAndPeriod.get(`${task.id}|${periodKey}`);
+        const isCompleted =
+          record &&
+          (record.status === 'SUCCESSFUL' || Number(record.completedSubtasks) >= (Number(task.subtaskCount) || 1));
+        if (!isCompleted) dueAndUncompletedCount++;
       }
       timings.recordsCheckMs = Date.now() - tRecordsStart;
 
@@ -1139,7 +1231,6 @@ export default {
           {
             error: 'INTERNAL_ERROR',
             message: 'Doğrulama sırasında bir hata oluştu.',
-            detail: err.message,
           },
           500,
           corsHeaders
@@ -1267,7 +1358,6 @@ export default {
           {
             error: 'INTERNAL_ERROR',
             message: 'Kullanıcı listesi alınırken hata oluştu.',
-            detail: err.message,
           },
           500,
           corsHeaders
@@ -1381,7 +1471,6 @@ export default {
           {
             error: 'INTERNAL_ERROR',
             message: 'İstatistikler alınırken hata oluştu.',
-            detail: err.message,
           },
           500,
           corsHeaders
@@ -1517,7 +1606,6 @@ export default {
           {
             error: 'INTERNAL_ERROR',
             message: 'Kullanıcı detayları alınamadı.',
-            detail: err.message,
           },
           500,
           corsHeaders
@@ -1596,7 +1684,6 @@ export default {
           {
             error: 'INTERNAL_ERROR',
             message: 'Kullanıcı durumu güncellenemedi.',
-            detail: err.message,
           },
           500,
           corsHeaders
@@ -1724,7 +1811,7 @@ export default {
         if (err.isForbidden) {
           return jsonResponse({ error: 'FORBIDDEN', message: 'Yetkisiz erişim.' }, 403, corsHeaders);
         }
-        return jsonResponse({ error: 'INTERNAL_ERROR', message: 'Görev güncellenemedi.', detail: err.message }, 500, corsHeaders);
+        return jsonResponse({ error: 'INTERNAL_ERROR', message: 'Görev güncellenemedi.' }, 500, corsHeaders);
       }
     }
 
@@ -1836,7 +1923,7 @@ export default {
         if (err.isForbidden) {
           return jsonResponse({ error: 'FORBIDDEN', message: 'Yetkisiz erişim.' }, 403, corsHeaders);
         }
-        return jsonResponse({ error: 'INTERNAL_ERROR', message: 'Görev silinemedi.', detail: err.message }, 500, corsHeaders);
+        return jsonResponse({ error: 'INTERNAL_ERROR', message: 'Görev silinemedi.' }, 500, corsHeaders);
       }
     }
 
@@ -1940,7 +2027,7 @@ export default {
         if (err.isForbidden) {
           return jsonResponse({ error: 'FORBIDDEN', message: 'Yetkisiz erişim.' }, 403, corsHeaders);
         }
-        return jsonResponse({ error: 'INTERNAL_ERROR', message: 'Cüzdan bakiyesi güncellenemedi.', detail: err.message }, 500, corsHeaders);
+        return jsonResponse({ error: 'INTERNAL_ERROR', message: 'Cüzdan bakiyesi güncellenemedi.' }, 500, corsHeaders);
       }
     }
 
@@ -2057,7 +2144,7 @@ export default {
         if (err.isForbidden) {
           return jsonResponse({ error: 'FORBIDDEN', message: 'Yetkisiz erişim.' }, 403, corsHeaders);
         }
-        return jsonResponse({ error: 'INTERNAL_ERROR', message: 'Ödül güncellenemedi.', detail: err.message }, 500, corsHeaders);
+        return jsonResponse({ error: 'INTERNAL_ERROR', message: 'Ödül güncellenemedi.' }, 500, corsHeaders);
       }
     }
 
@@ -2110,7 +2197,7 @@ export default {
         if (err.isForbidden) {
           return jsonResponse({ error: 'FORBIDDEN', message: 'Yetkisiz erişim.' }, 403, corsHeaders);
         }
-        return jsonResponse({ error: 'INTERNAL_ERROR', message: 'Kullanıcı kodu kaydedilemedi.', detail: err.message }, 500, corsHeaders);
+        return jsonResponse({ error: 'INTERNAL_ERROR', message: 'Kullanıcı kodu kaydedilemedi.' }, 500, corsHeaders);
       }
     }
 
@@ -2292,7 +2379,7 @@ export default {
         if (err.isForbidden) {
           return jsonResponse({ error: 'FORBIDDEN', message: 'Yetkisiz erişim.' }, 403, corsHeaders);
         }
-        return jsonResponse({ error: 'INTERNAL_ERROR', message: 'Kullanıcı silinemedi.', detail: err.message }, 500, corsHeaders);
+        return jsonResponse({ error: 'INTERNAL_ERROR', message: 'Kullanıcı silinemedi.' }, 500, corsHeaders);
       }
     }
 
@@ -2332,7 +2419,6 @@ export default {
               {
                 error: 'API_DISABLED',
                 message: 'Google Cloud projenizde Identity Toolkit API etkinleştirilmemiş. Lütfen GCP Konsolu üzerinden Identity Toolkit API’yi etkinleştirin.',
-                detail: errMsg,
               },
               403,
               corsHeaders
@@ -2373,7 +2459,7 @@ export default {
         if (err.isForbidden) {
           return jsonResponse({ error: 'FORBIDDEN', message: 'Yetkisiz erişim.' }, 403, corsHeaders);
         }
-        return jsonResponse({ error: 'INTERNAL_ERROR', message: 'Şifre sıfırlanamadı.', detail: err.message }, 500, corsHeaders);
+        return jsonResponse({ error: 'INTERNAL_ERROR', message: 'Şifre sıfırlanamadı.' }, 500, corsHeaders);
       }
     }
 
@@ -2477,7 +2563,7 @@ export default {
         if (err.isForbidden) {
           return jsonResponse({ error: 'FORBIDDEN', message: 'Yetkisiz erişim.' }, 403, corsHeaders);
         }
-        return jsonResponse({ error: 'INTERNAL_ERROR', message: 'Audit loglar alınamadı.', detail: err.message }, 500, corsHeaders);
+        return jsonResponse({ error: 'INTERNAL_ERROR', message: 'Audit loglar alınamadı.' }, 500, corsHeaders);
       }
     }
 
@@ -2576,7 +2662,6 @@ export default {
           {
             error: 'INTERNAL_ERROR',
             message: 'Hesap veritabanı silinirken bir hata oluştu.',
-            detail: err.message,
           },
           500,
           corsHeaders
@@ -2684,7 +2769,6 @@ export default {
           {
             error: 'DATABASE_UNAVAILABLE',
             message: 'Veritabanı servisine şu anda ulaşılamıyor. Lütfen birkaç saniye sonra tekrar deneyin.',
-            detail: err.message,
             retryable: true,
           },
           503,
@@ -2760,6 +2844,40 @@ export default {
         // 6. Google OAuth2 Access Token Al (Önbellekten veya OAuth üzerinden)
         const googleAccessToken = await getGoogleAccessToken(env.FIREBASE_SERVICE_ACCOUNT);
 
+        // 6.5 YETKİ: Gönderen ile hedef arasında gerçek bir ilişki var mı?
+        // (Bu kontrol olmadan giriş yapmış herhangi biri, UID'sini bildiği herkese bildirim atabilirdi.)
+        if (type === 'TASK_REMINDER') {
+          return jsonResponse(
+            { error: 'INVALID_TYPE', message: 'Bu bildirim tipi istemciden gönderilemez.' },
+            400,
+            corsHeaders
+          );
+        }
+        let isRelated = false;
+        try {
+          isRelated = await hasFriendshipRelation(
+            projectId,
+            googleAccessToken,
+            senderUid,
+            targetUid,
+            type !== 'FRIEND_REQUEST'
+          );
+        } catch (relErr) {
+          console.warn('[Push Notification] Arkadaşlık doğrulanamadı:', relErr.message);
+          return jsonResponse(
+            { error: 'RELATION_CHECK_FAILED', message: 'Bildirim yetkisi şu anda doğrulanamadı.' },
+            503,
+            corsHeaders
+          );
+        }
+        if (!isRelated) {
+          return jsonResponse(
+            { error: 'NOT_FRIENDS', message: 'Yalnızca arkadaşlarına bildirim gönderebilirsin.' },
+            403,
+            corsHeaders
+          );
+        }
+
         // 7. Hedef Kullanıcının FCM Token'larını Firestore'dan Çek
         const fcmTokens = await getTargetUserFcmTokens(projectId, targetUid, googleAccessToken);
         if (!fcmTokens || fcmTokens.length === 0) {
@@ -2774,9 +2892,11 @@ export default {
           );
         }
 
-        // 8. Sabit Şablondan Mesajı Oluştur (Client serbest metin enjekte edemez)
-        const senderName = (params.senderName || jwtPayload.name || 'Arkadaşın').trim().slice(0, 100);
-        const taskTitle = (params.taskTitle || '').trim().slice(0, 200);
+        // 8. Sabit Şablondan Mesajı Oluştur
+        // Gönderen adı İSTEMCİDEN ALINMAZ; Firestore profilinden okunur (serbest metin enjeksiyonu engeli).
+        const profileName = await getUserDisplayName(projectId, googleAccessToken, senderUid);
+        const senderName = cleanNotificationText(profileName || jwtPayload.name || 'Arkadaşın', 40) || 'Arkadaşın';
+        const taskTitle = cleanNotificationText(params?.taskTitle, 80);
 
         const template = NOTIFICATION_TEMPLATES[type](senderName, taskTitle);
         const notificationPayload = {
@@ -2793,12 +2913,21 @@ export default {
 
         // 9. Tüm Kayıtlı Cihazlara Push Gönder
         let successCount = 0;
+        const deadTokens = [];
         await Promise.all(
           fcmTokens.map(async (token) => {
             const sendRes = await sendFcmMessage(projectId, token, notificationPayload, googleAccessToken);
             if (sendRes.success) successCount++;
+            else if (sendRes.isUnregistered) deadTokens.push(token);
           })
         );
+
+        // Artık geçersiz olan cihaz token'larını temizle (yanıtı bekletmeden)
+        if (deadTokens.length > 0) {
+          const cleanup = removeDeadFcmTokensFromFirestore(projectId, targetUid, deadTokens, googleAccessToken);
+          if (ctx?.waitUntil) ctx.waitUntil(cleanup);
+          else await cleanup;
+        }
 
         return jsonResponse(
           {
@@ -2822,7 +2951,7 @@ export default {
         }
 
         return jsonResponse(
-          { error: 'INTERNAL_ERROR', message: 'Bildirim gönderilemedi.', detail: err.message },
+          { error: 'INTERNAL_ERROR', message: 'Bildirim gönderilemedi.' },
           500,
           corsHeaders
         );
@@ -2862,7 +2991,8 @@ export default {
         if (isAuth) {
           return jsonResponse({ error: 'UNAUTHORIZED', message: 'Oturum doğrulanamadı.' }, 401, corsHeaders);
         }
-        return jsonResponse({ error: 'INTERNAL_ERROR', message: err.message }, 500, corsHeaders);
+        console.error('[Worker GET /user/reminder-settings Error]:', err.message);
+        return jsonResponse({ error: 'INTERNAL_ERROR', message: 'Hatırlatıcı ayarları alınamadı.' }, 500, corsHeaders);
       }
     }
 
@@ -2946,7 +3076,8 @@ export default {
         if (isAuth) {
           return jsonResponse({ error: 'UNAUTHORIZED', message: 'Oturum doğrulanamadı.' }, 401, corsHeaders);
         }
-        return jsonResponse({ error: 'INTERNAL_ERROR', message: err.message }, 500, corsHeaders);
+        console.error('[Worker PATCH /user/reminder-settings Error]:', err.message);
+        return jsonResponse({ error: 'INTERNAL_ERROR', message: 'Hatırlatıcı ayarları kaydedilemedi.' }, 500, corsHeaders);
       }
     }
 
@@ -3001,7 +3132,8 @@ export default {
           return jsonResponse({ error: 'UNAUTHORIZED', message: 'Oturum doğrulanamadı.' }, 401, corsHeaders);
         }
 
-        return jsonResponse({ error: 'TEST_TRIGGER_ERROR', message: err.message }, 500, corsHeaders);
+        console.error('[Worker POST /test/trigger-reminders Error]:', err.message);
+        return jsonResponse({ error: 'TEST_TRIGGER_ERROR', message: 'Test bildirimi gönderilemedi.' }, 500, corsHeaders);
       }
     }
 

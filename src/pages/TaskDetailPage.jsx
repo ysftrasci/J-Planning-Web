@@ -29,7 +29,7 @@ import {
   saveTaskStudyLog,
   findTaskByIdOrFirestoreId,
 } from '../db/taskRepository';
-import { getPeriodEndTimestamp, isWithinLateMarkWindow, periodLabel, getPeriodKey } from '../utils/period';
+import { getPeriodEndTimestamp, isWithinLateMarkWindow, periodLabel, getPeriodKey, toDateStr } from '../utils/period';
 import {
   calculateCurrentStreak,
   calculateMaxStreak,
@@ -145,7 +145,7 @@ export default function TaskDetailPage() {
     return Array.from(months).sort().reverse();
   }, [records, task?.period]);
 
-  const effectiveMonthKey = selectedMonthKey || availableMonths[0] || monthKeyOf(new Date().toISOString().slice(0, 10));
+  const effectiveMonthKey = selectedMonthKey || availableMonths[0] || monthKeyOf(toDateStr(new Date()));
 
   const filteredRecords = useMemo(
     () => (task?.period === 'ONCE' ? records : records.filter((r) => monthKeyOf(r.periodKey) === effectiveMonthKey)),
@@ -449,6 +449,13 @@ function HistoryRow({ record, task, onLateMark }) {
   const periodEnd = getPeriodEndTimestamp(task, record.periodKey);
   const canLateMark = !isOnce && isWithinLateMarkWindow(periodEnd);
   const subtaskCount = task.subtaskCount || 1;
+  // Alt görevli görevlerde, başarısız periyotta kaç adımın yapıldığını göster (ör. "2/3 yapıldı").
+  // Alt görev sayısı sonradan düşürülmüş olabilir; değer 0..N aralığına sıkıştırılır.
+  const doneSubtasks = Math.max(0, Math.min(subtaskCount, Math.round(Number(record.completedSubtasks) || 0)));
+  const failedLabel =
+    subtaskCount > 1
+      ? `Başarısız (${doneSubtasks}/${subtaskCount} yapıldı)`
+      : 'Başarısız / Yapılmadı';
 
   let primaryDateLabel = '';
   let periodContextLabel = null;
@@ -483,8 +490,8 @@ function HistoryRow({ record, task, onLateMark }) {
           {isSuccess
             ? `Tamamlandı${record.isLateMarked ? ' (geç işaretlendi)' : ''}`
             : isPartial
-              ? `Devam ediyor (${record.completedSubtasks || 0}/${subtaskCount})`
-              : 'Başarısız / Yapılmadı'}
+              ? `Devam ediyor (${doneSubtasks}/${subtaskCount})`
+              : failedLabel}
         </p>
       </div>
       {canLateMark && (

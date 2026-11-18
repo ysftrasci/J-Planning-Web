@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Send, Plus, CheckCircle2, Search, X, SlidersHorizontal, Filter, BookOpen, AlertCircle } from 'lucide-react';
 import {
@@ -11,7 +11,7 @@ import {
 } from '../db/taskRepository';
 import { getCategories } from '../db/categoryRepository';
 import { calculateCurrentStreak } from '../utils/streak';
-import { getPeriodKey } from '../utils/period';
+import { getPeriodKey, getPeriodEndTimestamp, toDateStr } from '../utils/period';
 import { isDatabaseReady, waitForDatabaseReady } from '../db/database';
 import { useAuth } from '../context/AuthContext.jsx';
 import {
@@ -64,7 +64,15 @@ export default function TasksListPage() {
     return unsub;
   }, [user, isGuest]);
 
-  const load = useCallback(async () => {
+  // Listenin en son hangi gün ve ne zaman yüklendiği (gün değişimi / uzun arka plan sonrası yenileme için)
+  const lastLoadedDayRef = useRef('');
+  const lastLoadedAtRef = useRef(0);
+
+  // silent=true: mevcut liste ekranda kalır, yükleme göstergesi çıkmadan arka planda tazelenir.
+  const loadInFlightRef = useRef(0);
+  const load = useCallback(async (options) => {
+    const silent = options?.silent === true;
+    loadInFlightRef.current += 1;
     // Veritabanı henüz başlatılma aşamasındaysa kullanıcıya hata fırlatmak yerine hazır olmasını bekle
     if (!isDatabaseReady()) {
       setLoading(true);
@@ -72,6 +80,7 @@ export default function TasksListPage() {
         await waitForDatabaseReady(8000);
       } catch (_) {
         if (!isDatabaseReady()) {
+          loadInFlightRef.current -= 1;
           setLoading(false);
           return;
         }
@@ -79,7 +88,7 @@ export default function TasksListPage() {
     }
 
     try {
-      setLoading(true);
+      if (!silent) setLoading(true);
       await processExpiredPeriods();
 
       const [tasks, categories, allRecords] = await Promise.all([
@@ -103,10 +112,6 @@ export default function TasksListPage() {
       const items = (tasks || []).map((task) => {
         if (task.assignmentDirection === 'SENT') return null;
 
-        const displayTask = task.assignedByUserId && friendNameByUid[task.assignedByUserId]
-          ? { ...task, assignedByName: friendNameByUid[task.assignedByUserId] }
-          : task;
-
         const taskRecords = recordsByTaskId.get(task.id) || [];
         const currentPeriodKey = getPeriodKey(task, now);
         const currentRecord = taskRecords.find((r) => r.periodKey === currentPeriodKey);
@@ -115,7 +120,7 @@ export default function TasksListPage() {
         const completedSubtasks = currentRecord ? (currentRecord.completedSubtasks || 0) : 0;
         const streak = calculateCurrentStreak(task, taskRecords);
 
-        return { task: displayTask, status, completedSubtasks, streak };
+        return { task, status, completedSubtasks, streak };
       });
 
       items.forEach((item) => {
@@ -130,6 +135,8 @@ export default function TasksListPage() {
       });
 
       setSections(Array.from(grouped.entries()).map(([title, data]) => ({ title, data })));
+      lastLoadedDayRef.current = toDateStr(now);
+      lastLoadedAtRef.current = Date.now();
     } catch (err) {
       if (err.message?.includes('Veritabanı henüz başlatılmadı')) {
         setLoading(true);
@@ -137,16 +144,19 @@ export default function TasksListPage() {
       }
       console.error('Görev listesi yüklenirken hata:', err);
     } finally {
+      loadInFlightRef.current -= 1;
       setLoading(false);
     }
-  }, [friendNameByUid]);
+  }, []);
 
   useEffect(() => {
-    load();
+    load({ silent: lastLoadedAtRef.current > 0 });
   }, [load]);
 
   useEffect(() => {
     const handleDbReady = () => {
+      // İlk yükleme zaten veritabanının hazır olmasını bekliyorsa ikinci kez yükleme.
+      if (loadInFlightRef.current > 0) return;
       load();
     };
     window.addEventListener('jplanning:database-ready', handleDbReady);
@@ -155,9 +165,42 @@ export default function TasksListPage() {
     };
   }, [load]);
 
+  // GÜN DEĞİŞİMİ / ARKA PLANDAN DÖNÜŞ: Telefonda uygulama kapanmadan günlerce açık
+  // kalabilir. Gün değiştiyse (veya 5 dakikadan uzun süre arka planda kaldıysa)
+  // listeyi sessizce tazele; aksi halde dünün "tamamlandı" işaretleri görünmeye devam eder.
+  useEffect(() => {
+    const STALE_MS = 5 * 60 * 1000;
+    const refreshIfStale = () => {
+      if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return;
+      if (!lastLoadedAtRef.current) return; // İlk yükleme henüz bitmedi
+      const dayChanged = lastLoadedDayRef.current !== toDateStr(new Date());
+      const stale = Date.now() - lastLoadedAtRef.current > STALE_MS;
+      if (dayChanged || stale) {
+        lastLoadedAtRef.current = Date.now(); // Art arda tetiklenmeyi önle
+        load({ silent: true });
+      }
+    };
+    const dayCheckTimer = setInterval(() => {
+      // Uygulama açıkken gece yarısı geçilirse
+      if (lastLoadedDayRef.current && lastLoadedDayRef.current !== toDateStr(new Date())) {
+        refreshIfStale();
+      }
+    }, 60 * 1000);
+
+    document.addEventListener('visibilitychange', refreshIfStale);
+    window.addEventListener('focus', refreshIfStale);
+    window.addEventListener('pageshow', refreshIfStale);
+    return () => {
+      clearInterval(dayCheckTimer);
+      document.removeEventListener('visibilitychange', refreshIfStale);
+      window.removeEventListener('focus', refreshIfStale);
+      window.removeEventListener('pageshow', refreshIfStale);
+    };
+  }, [load]);
+
   useEffect(() => {
     const handleCloudUpdate = () => {
-      load();
+      load({ silent: true });
     };
     window.addEventListener('jplanning:cloud-sync-update', handleCloudUpdate);
     return () => {
@@ -220,6 +263,7 @@ export default function TasksListPage() {
           completedSubtasks: result.completedSubtasks,
           subtaskCount: result.subtaskCount,
           periodKey,
+          periodEndMs: getPeriodEndTimestamp(task, periodKey),
           assignedByUid: task.assignedByUserId,
           taskTitle: task.title,
           completedByName: user?.profile?.displayName || user?.displayName || 'Arkadaşın',
@@ -293,14 +337,21 @@ export default function TasksListPage() {
   };
 
   const filteredSections = useMemo(() => {
-    const query = searchQuery.trim().toLowerCase();
-    
+    // Türkçe büyük/küçük harf kuralları (İ↔i, I↔ı) ile karşılaştır
+    const norm = (s) => (s || '').toLocaleLowerCase('tr-TR');
+    const query = norm(searchQuery.trim());
+
     return sections.map((section) => {
-      const filteredData = section.data.filter(({ task }) => {
+      // Arkadaş adları ayrı dinleyiciden gelir; listeyi yeniden yüklemeden burada uygulanır.
+      const namedData = section.data.map((item) => {
+        const liveName = item.task.assignedByUserId && friendNameByUid[item.task.assignedByUserId];
+        return liveName ? { ...item, task: { ...item.task, assignedByName: liveName } } : item;
+      });
+      const filteredData = namedData.filter(({ task }) => {
         if (query) {
-          const matchTitle = (task.title || '').toLowerCase().includes(query);
-          const matchDesc = (task.description || '').toLowerCase().includes(query);
-          const matchAssigner = (task.assignedByName || '').toLowerCase().includes(query);
+          const matchTitle = norm(task.title).includes(query);
+          const matchDesc = norm(task.description).includes(query);
+          const matchAssigner = norm(task.assignedByName).includes(query);
           if (!matchTitle && !matchDesc && !matchAssigner) return false;
         }
 
@@ -327,7 +378,7 @@ export default function TasksListPage() {
         data: filteredData,
       };
     }).filter((section) => section.data.length > 0);
-  }, [sections, searchQuery, periodFilter, priorityFilter, sourceFilter]);
+  }, [sections, friendNameByUid, searchQuery, periodFilter, priorityFilter, sourceFilter]);
 
   const hasActiveFilters = periodFilter !== 'ALL' || priorityFilter !== 'ALL' || sourceFilter !== 'ALL';
   const totalTasksCount = sections.reduce((sum, s) => sum + s.data.length, 0);

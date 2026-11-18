@@ -20,7 +20,6 @@ import {
   serverTimestamp,
 } from 'firebase/firestore';
 import { db, auth } from './firebase';
-import { getUserProfile } from '../db/userProfileRepository';
 import { sendPushNotification } from './pushNotificationClient';
 
 const assignedTasksRef = collection(db, 'assignedTasks');
@@ -29,9 +28,16 @@ const taskDeletionNoticesRef = collection(db, 'taskDeletionNotices');
 const VALID_PRIORITIES = ['HIGH', 'MEDIUM', 'LOW', 'ZERO'];
 const VALID_PERIODS = ['DAILY', 'WEEKLY', 'MONTHLY', 'ONCE'];
 
-export async function assignTaskToFriend({ assignedByUid, assignedByName, assignedToUid, assignedToName, title, description, priority, period, intervalValue, subtaskCount, subtaskLabels }) {
+function cleanCategoryName(categoryName) {
+  return typeof categoryName === 'string' && categoryName.trim()
+    ? categoryName.trim().slice(0, 100)
+    : null;
+}
+
+export async function assignTaskToFriend({ assignedByUid, assignedByName, assignedToUid, assignedToName, friendshipId, title, description, categoryName, priority, period, intervalValue, subtaskCount, subtaskLabels }) {
   const cleanTitle = (title || '').trim().slice(0, 300);
   if (!cleanTitle) throw new Error('Görev adı boş olamaz.');
+  if (!friendshipId) throw new Error('Arkadaş bulunamadı. Arkadaş listesi yüklenince tekrar dene.');
 
   const cleanPriority = typeof priority === 'string' && VALID_PRIORITIES.includes(priority.toUpperCase()) ? priority.toUpperCase() : 'MEDIUM';
   const cleanPeriod = typeof period === 'string' && VALID_PERIODS.includes(period.toUpperCase()) ? period.toUpperCase() : 'DAILY';
@@ -44,8 +50,10 @@ export async function assignTaskToFriend({ assignedByUid, assignedByName, assign
     assignedByName: (assignedByName || 'Kullanıcı').slice(0, 100),
     assignedToUid,
     assignedToName: (assignedToName || 'Arkadaşın').slice(0, 100),
+    friendshipId,
     title: cleanTitle,
     description: descText,
+    categoryName: cleanCategoryName(categoryName),
     priority: cleanPriority,
     period: cleanPeriod,
     intervalValue: interval,
@@ -64,7 +72,9 @@ export async function assignTaskToFriend({ assignedByUid, assignedByName, assign
   return docRef.id;
 }
 
-export async function updateAssignedTaskInFirestore(firestoreAssignmentId, { title, description, priority, period, intervalValue, subtaskCount, subtaskLabels }) {
+// NOT: categoryName parametresi HİÇ verilmezse (undefined) Firestore'daki mevcut
+// kategoriye dokunulmaz. null/boş verilirse kategori kaldırılır.
+export async function updateAssignedTaskInFirestore(firestoreAssignmentId, { title, description, categoryName, priority, period, intervalValue, subtaskCount, subtaskLabels }) {
   if (!firestoreAssignmentId) return;
   const cleanTitle = (title || '').trim().slice(0, 300);
   if (!cleanTitle) throw new Error('Görev adı boş olamaz.');
@@ -75,7 +85,7 @@ export async function updateAssignedTaskInFirestore(firestoreAssignmentId, { tit
   const count = Math.max(1, Math.min(100, parseInt(subtaskCount, 10) || 1));
   const descText = typeof description === 'string' && description.trim() ? description.trim().slice(0, 1000) : null;
 
-  await updateDoc(doc(db, 'assignedTasks', firestoreAssignmentId), {
+  const payload = {
     title: cleanTitle,
     description: descText,
     priority: cleanPriority,
@@ -84,7 +94,12 @@ export async function updateAssignedTaskInFirestore(firestoreAssignmentId, { tit
     subtaskCount: count,
     subtaskLabels: Array.isArray(subtaskLabels) ? subtaskLabels.map((l) => String(l || '').slice(0, 200)) : null,
     updatedAt: serverTimestamp(),
-  });
+  };
+  if (categoryName !== undefined) {
+    payload.categoryName = cleanCategoryName(categoryName);
+  }
+
+  await updateDoc(doc(db, 'assignedTasks', firestoreAssignmentId), payload);
 }
 
 export async function acceptAssignedTask(taskId) {
@@ -114,24 +129,10 @@ export function listenPendingTasksAssignedToMe(currentUserUid, callback, onError
   );
   return onSnapshot(
     q,
-    async (snap) => {
-      const rawTasks = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-      // assignedByName, atama anındaki ismi saklar (snapshot) — göstermeden
-      // önce arkadaşın güncel profilinden ismi tazele.
-      const enriched = await Promise.all(
-        rawTasks.map(async (task) => {
-          try {
-            const profile = await getUserProfile(task.assignedByUid);
-            if (profile?.displayName) {
-              return { ...task, assignedByName: profile.displayName };
-            }
-          } catch (e) {
-            // Profil okunamazsa elimizdeki isimle devam et.
-          }
-          return task;
-        })
-      );
-      callback(enriched);
+    (snap) => {
+      // assignedByName atama anındaki ismi taşır. Atayanın users/{uid} profili
+      // güvenlik kuralları gereği okunamadığı için bu isim olduğu gibi gösterilir.
+      callback(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
     },
     (error) => {
       console.error('[TaskAssignment] listenPendingTasks error:', error);
@@ -147,10 +148,17 @@ export function listenAcceptedTasksAssignedToMe(currentUserUid, callback, onErro
     where('assignedToUid', '==', currentUserUid),
     where('status', '==', 'ACCEPTED')
   );
+  // includeMetadataChanges: önbellekten gelen ilk (muhtemelen boş) anlık görüntüden sonra
+  // sunucu doğrulaması geldiğinde içerik aynı olsa bile yeniden tetiklenmesi için.
+  // İkinci parametre ile çağırana verinin kaynağı bildirilir (fromCache).
   return onSnapshot(
     q,
+    { includeMetadataChanges: true },
     (snap) => {
-      callback(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
+      callback(
+        snap.docs.map((d) => ({ id: d.id, ...d.data() })),
+        { fromCache: snap.metadata.fromCache, hasPendingWrites: snap.metadata.hasPendingWrites }
+      );
     },
     (error) => {
       console.error('[TaskAssignment] listenAcceptedTasks error:', error);
@@ -183,16 +191,24 @@ export async function syncCompletionStatusToFirestore(firestoreAssignmentId, {
   completedSubtasks,
   subtaskCount,
   periodKey,
+  periodEndMs,
   assignedByUid,
   taskTitle,
   completedByName,
   isNewlyCompleted,
 }) {
   if (!firestoreAssignmentId) return;
+  // Atayan kişi, atananın periyot çapasını (createdAt) bilmez; bu yüzden tamamlanan
+  // periyodun BİTİŞ ANI da yazılır. Atayan taraf "şu an < bitiş" ise "Tamamlandı" gösterir.
+  const safePeriodEnd =
+    typeof periodEndMs === 'number' && Number.isFinite(periodEndMs) && periodEndMs < 8640000000000000
+      ? periodEndMs
+      : null;
   try {
     await updateDoc(doc(db, 'assignedTasks', firestoreAssignmentId), {
       isCompleted: !!isCompleted,
       completedPeriodKey: periodKey ?? null,
+      completedPeriodEndMs: isCompleted ? safePeriodEnd : null,
       completedSubtasks: completedSubtasks ?? 0,
       subtaskCount: subtaskCount ?? 1,
       lastUpdatedAt: serverTimestamp(),

@@ -62,6 +62,22 @@ function getCreatedAtMs(item) {
   return null;
 }
 
+// Atanan kişinin görevi İÇİNDE BULUNDUĞUMUZ periyotta tamamlayıp tamamlamadığını söyler.
+// Tercih edilen yol: atananın yazdığı periyot bitiş anı (completedPeriodEndMs).
+// Eski kayıtlarda bu alan yoksa periyot anahtarı karşılaştırmasına düşülür.
+function isAssignedTaskDoneNow(item, isOnce) {
+  if (item.isCompleted !== true) return false;
+  if (isOnce) return true;
+  if (typeof item.completedPeriodEndMs === 'number' && item.completedPeriodEndMs > 0) {
+    return Date.now() < item.completedPeriodEndMs;
+  }
+  // Yedek yol: createdAt bir Firestore Timestamp'tir; doğrudan new Date()'e verilirse
+  // geçersiz tarih üretir. Önce milisaniyeye çevir.
+  const createdAtMs = getCreatedAtMs(item);
+  const todayKey = getPeriodKey({ ...item, createdAt: createdAtMs || null }, new Date());
+  return item.completedPeriodKey === todayKey;
+}
+
 function normCategoryKey(name) {
   return (name || '').trim().toLocaleLowerCase('tr-TR');
 }
@@ -431,10 +447,7 @@ export default function AssignedByMePage() {
               {displayTasks.map((item) => {
                 const isPending = item.status === 'PENDING';
                 const isOnce = item.period === 'ONCE';
-                const todayKey = getPeriodKey(item, new Date());
-                const isDone = isOnce
-                  ? item.isCompleted === true
-                  : item.isCompleted === true && item.completedPeriodKey === todayKey;
+                const isDone = isAssignedTaskDoneNow(item, isOnce);
                 const StatusIcon = isPending ? Hourglass : isDone ? CheckCircle2 : Clock;
                 const statusClass = isPending
                   ? 'assigned-by-me-page__status--pending'

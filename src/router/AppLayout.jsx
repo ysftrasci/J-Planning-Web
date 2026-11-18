@@ -1,6 +1,8 @@
 import { NavLink, Outlet } from 'react-router-dom';
 import { CheckSquare, Gift, Users, Timer, User } from 'lucide-react';
+import { useState } from 'react';
 import PWAInstallPrompt from '../components/PWAInstallPrompt.jsx';
+import { useAuth } from '../context/AuthContext.jsx';
 import GuestBanner from '../components/GuestBanner.jsx';
 import './AppLayout.css';
 
@@ -14,10 +16,42 @@ const TABS = [
   { to: '/profile', label: 'Profil', icon: User },
 ];
 
+// Veritabanına bağlanılamadığında gösterilir. Bu olmadan kullanıcı boş bir görev
+// listesi görür ve verilerinin silindiğini sanar.
+function DatabaseErrorBanner() {
+  const { dbError } = useAuth();
+  const [retrying, setRetrying] = useState(false);
+
+  if (!dbError) return null;
+
+  // Tam yeniden yükleme: veritabanı bağlantısıyla birlikte, ilk açılışta başlatılamamış
+  // olan gerçek zamanlı dinleyiciler (atanan görevler, hesap durumu) de baştan kurulur.
+  const handleRetry = () => {
+    if (retrying) return;
+    setRetrying(true);
+    window.location.reload();
+  };
+
+  return (
+    <div className="app-layout__db-error" role="alert">
+      <div className="app-layout__db-error-text">
+        <strong>Verilerine şu anda ulaşılamıyor</strong>
+        <span>
+          Görevlerin silinmedi; bağlantı kurulunca geri gelecek. İnternet bağlantını kontrol edip tekrar dene.
+        </span>
+      </div>
+      <button type="button" className="app-layout__db-error-button" onClick={handleRetry} disabled={retrying}>
+        {retrying ? 'Deneniyor…' : 'Tekrar Dene'}
+      </button>
+    </div>
+  );
+}
+
 export default function AppLayout() {
   return (
     <div className="app-layout">
       <GuestBanner />
+      <DatabaseErrorBanner />
       <main className="app-layout__main">
         <Outlet />
       </main>
