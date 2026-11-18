@@ -66,17 +66,23 @@ export function calculateCurrentStreak(task, records) {
 }
 
 // En uzun seri (rekor)
+// Yalnızca ARDIŞIK dönemler sayılır: iki başarılı kayıt arasında kaydı olmayan bir dönem
+// varsa (ör. hiç işaretlenmemiş eski bir dönem) seri orada kırılır.
 export function calculateMaxStreak(task, records) {
   if (task.period === 'ONCE') return 0;
   const sorted = [...records].sort((a, b) => (a.periodKey < b.periodKey ? -1 : 1));
   let max = 0;
   let current = 0;
+  let lastSuccessKey = null;
   for (const rec of sorted) {
     if (rec.status === 'SUCCESSFUL') {
-      current += 1;
+      const contiguous = lastSuccessKey !== null && getPreviousPeriodKey(task, rec.periodKey) === lastSuccessKey;
+      current = contiguous ? current + 1 : 1;
+      lastSuccessKey = rec.periodKey;
       max = Math.max(max, current);
     } else {
       current = 0;
+      lastSuccessKey = null;
     }
   }
   return max;

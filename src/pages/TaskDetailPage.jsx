@@ -12,11 +12,9 @@ import {
   Wallet,
   CalendarDays,
   Check,
-  Clock,
   FileText,
   Pencil,
 } from 'lucide-react';
-import { getDb } from '../db/database';
 import {
   getTaskRecords,
   deleteTask,
@@ -25,11 +23,9 @@ import {
   getSubtaskLabels,
   getTotalJPEarnedForTask,
   updateTaskNotes,
-  getTaskStudyLog,
-  saveTaskStudyLog,
   findTaskByIdOrFirestoreId,
 } from '../db/taskRepository';
-import { getPeriodEndTimestamp, isWithinLateMarkWindow, periodLabel, getPeriodKey, toDateStr } from '../utils/period';
+import { getPeriodEndTimestamp, isWithinLateMarkWindow, periodLabel, toDateStr } from '../utils/period';
 import {
   calculateCurrentStreak,
   calculateMaxStreak,
@@ -75,11 +71,8 @@ export default function TaskDetailPage() {
   const [task, setTask] = useState(null);
   const [records, setRecords] = useState([]);
   const [totalJP, setTotalJP] = useState(0);
-  const [categoryName, setCategoryName] = useState('');
   const [taskNotes, setTaskNotes] = useState('');
-  const [studyTimeText, setStudyTimeText] = useState('');
   const [notesSaved, setNotesSaved] = useState(false);
-  const [studyLogSaved, setStudyLogSaved] = useState(false);
   const [selectedMonthKey, setSelectedMonthKey] = useState(null);
   const [recordToLateMark, setRecordToLateMark] = useState(null); // { record, action: 'COMPLETE' | 'UNCOMPLETE' }
   const [showDeleteModal, setShowDeleteModal] = useState(false);
@@ -87,25 +80,17 @@ export default function TaskDetailPage() {
 
   const load = useCallback(async () => {
     try {
-      const db = getDb();
       const t = await findTaskByIdOrFirestoreId(taskId);
       setTask(t);
       if (t) {
         const realId = t.id;
         setTaskNotes(t.notes || '');
-        if (t.categoryId) {
-          const cat = await db.getFirstAsync('SELECT name FROM categories WHERE id = ?', [t.categoryId]);
-          setCategoryName(cat ? cat.name : '');
-        } else {
-          setCategoryName('');
-        }
-        const todayKey = getPeriodKey(t, new Date());
-        const [studyLog, recs, jp] = await Promise.all([
-          getTaskStudyLog(realId, todayKey),
+        // Not: YKS çalışma süresi kartı Aşama 19'da kaldırıldı (çalışma süresi Günün Özeti'nde);
+        // eski çalışma süresi ve kategori okumaları da kaldırıldı.
+        const [recs, jp] = await Promise.all([
           getTaskRecords(realId),
           getTotalJPEarnedForTask(realId),
         ]);
-        setStudyTimeText(studyLog?.studyTimeText || '');
         setRecords(recs || []);
         setTotalJP(jp);
       } else {
@@ -129,15 +114,6 @@ export default function TaskDetailPage() {
     setTimeout(() => setNotesSaved(false), 2000);
   };
 
-  const handleSaveStudyLog = async (e) => {
-    e?.preventDefault();
-    if (!task) return;
-    const realId = task.id;
-    const todayKey = getPeriodKey(task, new Date());
-    await saveTaskStudyLog(realId, todayKey, studyTimeText);
-    setStudyLogSaved(true);
-    setTimeout(() => setStudyLogSaved(false), 2000);
-  };
 
   const availableMonths = useMemo(() => {
     if (task?.period === 'ONCE') return [];

@@ -4,12 +4,10 @@ import { ChevronLeft, Plus, Minus, ChevronDown, ChevronUp, ShieldAlert } from 'l
 import { useNavigate, useParams } from 'react-router-dom';
 import { doc, getDoc } from 'firebase/firestore';
 import { db } from '../services/firebase';
-import { getDb } from '../db/database';
 import {
   updateTask,
   getSubtaskLabels,
   createSentTaskRecord,
-  createTaskFromAssignment,
   findTaskByIdOrFirestoreId,
   getTaskRecords,
 } from '../db/taskRepository';

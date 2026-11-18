@@ -4,7 +4,7 @@ export function getStoredTheme() {
   try {
     if (typeof window === 'undefined') return 'light';
     return localStorage.getItem(THEME_KEY) || 'light';
-  } catch (e) {
+  } catch {
     return 'light';
   }
 }
@@ -12,7 +12,7 @@ export function getStoredTheme() {
 export function setStoredTheme(theme) {
   try {
     localStorage.setItem(THEME_KEY, theme);
-  } catch (e) {
+  } catch {
     // kısıtlı ortamlar için yut
   }
   applyTheme(theme);
@@ -26,11 +26,11 @@ export function applyTheme(theme) {
     if (metaTheme) {
       metaTheme.setAttribute('content', theme === 'dark' ? '#161513' : '#FAF9F6');
     }
-  } catch (e) {}
+  } catch {}
 }
 
 if (typeof window !== 'undefined') {
   try {
     applyTheme(getStoredTheme());
-  } catch (e) {}
+  } catch {}
 }

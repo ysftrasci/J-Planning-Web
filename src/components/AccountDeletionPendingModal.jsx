@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { AlertTriangle, RefreshCw } from 'lucide-react';
+import { AlertTriangle } from 'lucide-react';
 import AppModal from './AppModal';
 import AppButton from './AppButton';
 import { deleteAccountCompletely, abandonAccountDeletionAndReset } from '../services/deleteAccountService';
@@ -45,7 +45,7 @@ export default function AccountDeletionPendingModal({ open, uid, onSuccess, onSi
     try {
       await abandonAccountDeletionAndReset(uid);
       if (onSignOut) await onSignOut();
-    } catch (err) {
+    } catch {
       setError(
         'Hesap sıfırlama işlemi başarısız oldu (Ağ hatası). Lütfen internet bağlantını kontrol et veya destek@jplanning.com ile iletişime geç.'
       );

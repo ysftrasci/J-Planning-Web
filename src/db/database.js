@@ -53,7 +53,7 @@ export function notifyDatabaseReady() {
   const cbs = [...dbReadyCallbacks];
   dbReadyCallbacks = [];
   cbs.forEach((cb) => {
-    try { cb(); } catch (_) {}
+    try { cb(); } catch {}
   });
   if (typeof window !== 'undefined') {
     window.dispatchEvent(new CustomEvent('jplanning:database-ready'));
@@ -124,7 +124,7 @@ export async function requestWorkerSession(forceFreshIdToken = false) {
           return cached;
         }
       }
-    } catch (_) {}
+    } catch {}
   }
 
   // Halihazırda devam eden bir oturum isteği varsa ve taze token zorlanmıyorsa, aynı Promise'i paylaş
@@ -166,7 +166,7 @@ export async function requestWorkerSession(forceFreshIdToken = false) {
             const errData = await response.json();
             if (errData.message) errMessage = errData.message;
             if (errData.error) errCode = errData.error;
-          } catch (_) {}
+          } catch {}
 
           if (response.status === 403 && (errCode === 'ACCOUNT_DISABLED' || errMessage.includes('askıya'))) {
             resetDatabaseSession();
@@ -193,7 +193,7 @@ export async function requestWorkerSession(forceFreshIdToken = false) {
 
         try {
           sessionStorage.setItem(`jplanning_session_${currentUser.uid}`, JSON.stringify(session));
-        } catch (_) {}
+        } catch {}
 
         // Açık bir bağlantı bu kullanıcıya aitse, taze oturumu ona da bildir
         // (bir sonraki sorguda TursoConnection yeni token'a geçer).
@@ -250,7 +250,7 @@ function clearCachedSessionFor(uid) {
   if (!uid || typeof sessionStorage === 'undefined') return;
   try {
     sessionStorage.removeItem(`jplanning_session_${uid}`);
-  } catch (_) {}
+  } catch {}
 }
 
 async function refreshSessionToken() {
@@ -324,7 +324,7 @@ export async function switchToUserDatabase(uid) {
   if (dbInstance) {
     try {
       dbInstance.close();
-    } catch (_) {}
+    } catch {}
     dbInstance = null;
     currentUid = null;
   }
@@ -349,7 +349,7 @@ export async function initGuestDatabase() {
   if (dbInstance) {
     try {
       dbInstance.close();
-    } catch (_) {}
+    } catch {}
     dbInstance = null;
     currentUid = null;
   }
@@ -387,7 +387,7 @@ export async function ensureTaskSchema(db) {
   if (!db) return;
   try {
     await db.runAsync('ALTER TABLE tasks ADD COLUMN intervalValue INTEGER NOT NULL DEFAULT 1;');
-  } catch (_) {
+  } catch {
     // Kolon zaten varsa SQLite hata verir, güvenle yakalanır
   }
 }
@@ -400,7 +400,7 @@ export async function ensureUserSettingsSchema(db) {
   try {
     await db.runAsync("INSERT OR IGNORE INTO app_meta (key, value) VALUES ('reminder_enabled', '0');");
     await db.runAsync("INSERT OR IGNORE INTO app_meta (key, value) VALUES ('reminder_hour', '20');");
-  } catch (_) {
+  } catch {
     // app_meta tablosu henüz yoksa veya hata oluşursa güvenle yakalanır
   }
 }
@@ -412,7 +412,7 @@ export async function ensureFocusSessionSchema(db) {
   if (!db) return;
   try {
     await db.runAsync('ALTER TABLE focus_sessions ADD COLUMN awardedMilestones TEXT;');
-  } catch (_) {
+  } catch {
     // Kolon zaten varsa SQLite hata verir, güvenle yakalanır
   }
 }
@@ -478,7 +478,7 @@ export function resetDatabaseSession(targetUid = null) {
   if (dbInstance) {
     try {
       dbInstance.close();
-    } catch (_) {}
+    } catch {}
   }
   dbInstance = null;
   currentUid = null;
@@ -503,7 +503,7 @@ export function resetDatabaseSession(targetUid = null) {
         }
         keysToRemove.forEach((k) => sessionStorage.removeItem(k));
       }
-    } catch (_) {}
+    } catch {}
   }
 }
 

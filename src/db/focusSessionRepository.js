@@ -45,7 +45,7 @@ export async function recordFocusSession({ sessionId, durationMinutes, soundKey,
          awardedMilestones = excluded.awardedMilestones`,
       [id, durationMinutes, soundKey || null, jpEarned || 0, monthKeyOf(now), now.getTime(), awardedJson]
     );
-  } catch (_) {
+  } catch {
     // Kolon henüz yoksa eski şemayla yaz
     await db.runAsync(
       `INSERT INTO focus_sessions (id, durationMinutes, soundKey, jpEarned, monthKey, completedAt)
@@ -133,7 +133,7 @@ export async function awardFocusMilestone({
          awardedMilestones = excluded.awardedMilestones`,
       [sessionId, durationMinutes, soundKey || null, sessionTotalJp, monthKey, now, awardedJson]
     );
-  } catch (_) {
+  } catch {
     await db.runAsync(
       `INSERT INTO focus_sessions (id, durationMinutes, soundKey, jpEarned, monthKey, completedAt)
        VALUES (?, ?, ?, ?, ?, ?)

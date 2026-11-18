@@ -463,7 +463,7 @@ export async function resetMigrationFlag(uid, tursoDb) {
   if (tursoDb) {
     try {
       await tursoDb.runAsync("DELETE FROM app_meta WHERE key = 'legacy_data_migrated_v1'");
-    } catch (_) {}
+    } catch {}
   }
   console.log('[Migration] Migrasyon bayrağı sıfırlandı.');
 }

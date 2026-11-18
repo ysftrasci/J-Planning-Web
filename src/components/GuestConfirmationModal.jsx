@@ -1,6 +1,6 @@
 import AppModal from './AppModal.jsx';
 import AppButton from './AppButton.jsx';
-import { Info, ShieldAlert } from 'lucide-react';
+import { ShieldAlert } from 'lucide-react';
 
 export default function GuestConfirmationModal({ open, onConfirm, onClose, loading = false }) {
   if (!open) return null;

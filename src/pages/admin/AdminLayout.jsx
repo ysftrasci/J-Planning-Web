@@ -1,5 +1,5 @@
 // J-Planning — Admin Panel Layout (Faz 2)
-import { useState } from 'react';
+import { Suspense, useState } from 'react';
 import { NavLink, Outlet, Link, useNavigate } from 'react-router-dom';
 import {
   Users,
@@ -12,7 +12,6 @@ import {
   X,
   History,
   Settings,
-  Layers,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import './AdminLayout.css';
@@ -182,7 +181,9 @@ export default function AdminLayout() {
 
         {/* Sayfa Gövdesi */}
         <main className="admin-page-content">
-          <Outlet />
+          <Suspense fallback={<div style={{ padding: 24, opacity: 0.7 }}>Yükleniyor…</div>}>
+            <Outlet />
+          </Suspense>
         </main>
       </div>
     </div>

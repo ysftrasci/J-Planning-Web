@@ -12,11 +12,10 @@ import {
 } from '../db/database';
 import { updateTaskFromAssignment, syncReceivedTasksWithFirestore, createTaskFromAssignment } from '../db/taskRepository';
 import { listenAcceptedTasksAssignedToMe } from '../services/taskAssignmentService';
-import { unregisterFCMPushToken, registerFCMPushToken } from '../services/notificationService';
+import { unregisterFCMPushToken, registerFCMPushToken, syncNotificationSetup } from '../services/notificationService';
 import { bridgeGuestDataToNewUser } from '../db/localSqliteEngine';
 
 const AuthContext = createContext(null);
-const WORKER_URL = (import.meta.env.VITE_WORKER_URL || '/api/worker').replace(/\/+$/, '');
 
 function createGuestUserObject() {
   return {
@@ -177,6 +176,8 @@ export function AuthProvider({ children }) {
           registerFCMPushToken(firebaseUser.uid).catch((pushErr) => {
             console.warn('[AuthContext] Push token kaydı uyarısı:', pushErr);
           });
+          // Saat dilimini sunucuya bildir, eski cihaz-içi zamanlamaları sunucuya taşı (arka planda)
+          syncNotificationSetup(firebaseUser.uid).catch(() => {});
 
           // 3. GERÇEK ZAMANLI ASKIYA ALMA DİNLEYİCİSİ (Firestore users/{uid})
           try {
@@ -240,7 +241,7 @@ export function AuthProvider({ children }) {
           // Prototype zincirini koruyarak profile alanını bağla
           try {
             firebaseUser.profile = profile;
-          } catch (_) { }
+          } catch { }
           setUser(firebaseUser);
         } catch (error) {
           console.error('Giriş sonrası veritabanı hazırlığı başarısız:', error);
@@ -324,7 +325,7 @@ export function AuthProvider({ children }) {
         // Token süresi dolmak üzereyse veya önbellekte yoksa oturumu güvenli şekilde doğrula
         // (database.js içindeki inFlightSessionPromise deduplication sayesinde paralel çağrılar tek istekte birleşir)
         await requestWorkerSession();
-      } catch (_) { }
+      } catch { }
     };
     window.addEventListener('focus', handleWindowFocus);
 
@@ -345,7 +346,7 @@ export function AuthProvider({ children }) {
         const profile = await getUserProfile(auth.currentUser.uid);
         try {
           auth.currentUser.profile = profile;
-        } catch (_) { }
+        } catch { }
         setUser(auth.currentUser);
       } catch (err) {
         console.warn('Profil yenilenemedi:', err);
@@ -362,7 +363,7 @@ export function AuthProvider({ children }) {
       const profile = await getUserProfile(updated.uid).catch(() => null);
       try {
         updated.profile = profile || user?.profile || null;
-      } catch (_) { }
+      } catch { }
       setUser(updated);
 
       if (updated.emailVerified && !isDatabaseReady()) {
@@ -411,7 +412,7 @@ export function AuthProvider({ children }) {
         const profile = await getUserProfile(auth.currentUser.uid);
         try {
           auth.currentUser.profile = profile;
-        } catch (_) { }
+        } catch { }
         setUser(auth.currentUser);
       } catch (err) {
         setDbError(err.message || 'Yeniden bağlanma başarısız');

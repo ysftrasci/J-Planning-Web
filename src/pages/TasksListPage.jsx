@@ -78,7 +78,7 @@ export default function TasksListPage() {
       setLoading(true);
       try {
         await waitForDatabaseReady(8000);
-      } catch (_) {
+      } catch {
         if (!isDatabaseReady()) {
           loadInFlightRef.current -= 1;
           setLoading(false);

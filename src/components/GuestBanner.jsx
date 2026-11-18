@@ -1,4 +1,4 @@
-import { UserPlus, Sparkles } from 'lucide-react';
+import { Sparkles } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext.jsx';
 import './GuestBanner.css';

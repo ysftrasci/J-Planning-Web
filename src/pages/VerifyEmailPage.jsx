@@ -67,7 +67,7 @@ export default function VerifyEmailPage() {
             navigate(getSuccessRedirect(), { replace: true });
           }
         }
-      } catch (_) {}
+      } catch {}
     };
 
     window.addEventListener('focus', handleFocus);

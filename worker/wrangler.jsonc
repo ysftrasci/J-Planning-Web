@@ -22,7 +22,7 @@
 		}
 	],
 	"triggers": {
-		"crons": ["0 * * * *"]
+		"crons": ["*/5 * * * *"]
 	},
 	"kv_namespaces": [
 		{

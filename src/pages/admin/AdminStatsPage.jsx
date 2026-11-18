@@ -12,7 +12,6 @@ import {
   Info,
   TrendingUp,
   Activity,
-  Database,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import './AdminStatsPage.css';

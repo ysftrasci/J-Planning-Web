@@ -141,7 +141,7 @@ export async function updateUserProfile(uid, updates) {
         await updateDoc(doc(db, 'userCodes', code), publicUpdates).catch(() => {});
       }
     }
-  } catch (e) {
+  } catch {
     // Kamusal profil güncelleme uyarısını yut
   }
 }

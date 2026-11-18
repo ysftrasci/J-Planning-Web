@@ -94,7 +94,7 @@ export class LocalSqliteConnection {
       getIdb().then((idb) => {
         idb.put(IDB_STORE, binaryData, GUEST_DB_KEY).catch(() => {});
       }).catch(() => {});
-    } catch (_) {}
+    } catch {}
   }
 
   async execAsync(sql) {
@@ -122,7 +122,7 @@ export class LocalSqliteConnection {
     } catch (err) {
       try {
         this._db.exec('ROLLBACK;');
-      } catch (_) {}
+      } catch {}
       throw err;
     }
   }
@@ -186,7 +186,7 @@ export class LocalSqliteConnection {
     try {
       this.flushSync();
       this._db.close();
-    } catch (_) {}
+    } catch {}
     this._closed = true;
   }
 }
@@ -268,7 +268,7 @@ export async function finalizeGuestMigration() {
     const idb = await getIdb();
     await idb.delete(IDB_STORE, GUEST_DB_KEY).catch(() => {});
     await idb.delete(IDB_STORE, GUEST_BACKUP_KEY).catch(() => {});
-  } catch (_) {}
+  } catch {}
 }
 
 /**
@@ -282,5 +282,5 @@ export async function rollbackGuestMigration() {
     if (backupBytes && backupBytes instanceof Uint8Array) {
       await idb.put(IDB_STORE, backupBytes, GUEST_DB_KEY);
     }
-  } catch (_) {}
+  } catch {}
 }

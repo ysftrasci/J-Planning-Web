@@ -53,7 +53,7 @@ async function main() {
   try {
     const adminModule = await import('firebase-admin');
     admin = adminModule.default || adminModule;
-  } catch (err) {
+  } catch {
     console.error('❌ HATA: firebase-admin paketi bulunamadı.');
     console.log('   Lütfen "npm install -D firebase-admin" komutunu çalıştırın.');
     process.exit(1);

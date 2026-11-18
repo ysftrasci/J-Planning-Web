@@ -21,7 +21,7 @@ export default function PWAInstallPrompt() {
       let dismissed = false;
       try {
         dismissed = !!localStorage.getItem('jplanning:pwa_dismissed');
-      } catch (e) {}
+      } catch {}
 
       if (isIosDevice && !dismissed) {
         setShowBanner(true);
@@ -39,7 +39,7 @@ export default function PWAInstallPrompt() {
       return () => {
         window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
       };
-    } catch (err) {
+    } catch {
       // PWA tespiti başarısız olursa uygulamayı çökertme
     }
   }, []);

@@ -1,35 +1,38 @@
-import { useEffect } from 'react';
+import { Suspense, useEffect } from 'react';
 import { Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import AppLayout from './AppLayout.jsx';
 import PlaceholderPage from '../pages/PlaceholderPage.jsx';
 import LoginPage from '../pages/LoginPage.jsx';
 import TasksListPage from '../pages/TasksListPage.jsx';
-import AddTaskPage from '../pages/AddTaskPage.jsx';
-import TaskDetailPage from '../pages/TaskDetailPage.jsx';
-import EditTaskPage from '../pages/EditTaskPage.jsx';
-import CategoriesPage from '../pages/CategoriesPage.jsx';
-import RewardsPage from '../pages/RewardsPage.jsx';
-import RewardHistoryPage from '../pages/RewardHistoryPage.jsx';
-import FriendsListPage from '../pages/FriendsListPage.jsx';
-import AddFriendPage from '../pages/AddFriendPage.jsx';
-import FriendDetailPage from '../pages/FriendDetailPage.jsx';
-import AssignedByMePage from '../pages/AssignedByMePage.jsx';
-import FocusPage from '../pages/FocusPage.jsx';
-import FocusHistoryPage from '../pages/FocusHistoryPage.jsx';
-import ProfilePage from '../pages/ProfilePage.jsx';
-import EditProfilePage from '../pages/EditProfilePage.jsx';
-import NotificationSettingsPage from '../pages/NotificationSettingsPage.jsx';
-import DangerZonePage from '../pages/DangerZonePage.jsx';
 import VerifyEmailPage from '../pages/VerifyEmailPage.jsx';
-import DailyNotesPage from '../pages/DailyNotesPage.jsx';
 import AccountDeletionPendingModal from '../components/AccountDeletionPendingModal.jsx';
 import GuestRestrictedView from '../components/GuestRestrictedView.jsx';
-import AdminPlaceholderPage from '../pages/admin/AdminPlaceholderPage.jsx';
-import AdminLayout from '../pages/admin/AdminLayout.jsx';
-import AdminUsersPage from '../pages/admin/AdminUsersPage.jsx';
-import AdminStatsPage from '../pages/admin/AdminStatsPage.jsx';
-import AdminAuditLogPage from '../pages/admin/AdminAuditLogPage.jsx';
 import { useAuth } from '../context/AuthContext.jsx';
+import { lazyPage } from './lazyPage.js';
+
+// Ana ekran (görev listesi) ve giriş sayfaları ilk yüklemede gelir; diğer sayfalar ihtiyaç anında.
+const AddTaskPage = lazyPage(() => import('../pages/AddTaskPage.jsx'));
+const TaskDetailPage = lazyPage(() => import('../pages/TaskDetailPage.jsx'));
+const EditTaskPage = lazyPage(() => import('../pages/EditTaskPage.jsx'));
+const CategoriesPage = lazyPage(() => import('../pages/CategoriesPage.jsx'));
+const RewardsPage = lazyPage(() => import('../pages/RewardsPage.jsx'));
+const RewardHistoryPage = lazyPage(() => import('../pages/RewardHistoryPage.jsx'));
+const FriendsListPage = lazyPage(() => import('../pages/FriendsListPage.jsx'));
+const AddFriendPage = lazyPage(() => import('../pages/AddFriendPage.jsx'));
+const FriendDetailPage = lazyPage(() => import('../pages/FriendDetailPage.jsx'));
+const AssignedByMePage = lazyPage(() => import('../pages/AssignedByMePage.jsx'));
+const FocusPage = lazyPage(() => import('../pages/FocusPage.jsx'));
+const FocusHistoryPage = lazyPage(() => import('../pages/FocusHistoryPage.jsx'));
+const ProfilePage = lazyPage(() => import('../pages/ProfilePage.jsx'));
+const EditProfilePage = lazyPage(() => import('../pages/EditProfilePage.jsx'));
+const NotificationSettingsPage = lazyPage(() => import('../pages/NotificationSettingsPage.jsx'));
+const DangerZonePage = lazyPage(() => import('../pages/DangerZonePage.jsx'));
+const DailyNotesPage = lazyPage(() => import('../pages/DailyNotesPage.jsx'));
+const AdminPlaceholderPage = lazyPage(() => import('../pages/admin/AdminPlaceholderPage.jsx'));
+const AdminLayout = lazyPage(() => import('../pages/admin/AdminLayout.jsx'));
+const AdminUsersPage = lazyPage(() => import('../pages/admin/AdminUsersPage.jsx'));
+const AdminStatsPage = lazyPage(() => import('../pages/admin/AdminStatsPage.jsx'));
+const AdminAuditLogPage = lazyPage(() => import('../pages/admin/AdminAuditLogPage.jsx'));
 
 function LoadingScreen() {
   return (
@@ -67,7 +70,7 @@ function readAuthRedirect() {
   try {
     const saved = window.sessionStorage.getItem(AUTH_REDIRECT_KEY);
     if (saved && saved.startsWith('/friends/add') && !saved.startsWith('//')) return saved;
-  } catch (_) {}
+  } catch {}
   return null;
 }
 
@@ -82,7 +85,7 @@ function RequireAuth({ children }) {
     if (!isFullyAuthed) return;
     try {
       window.sessionStorage.removeItem(AUTH_REDIRECT_KEY);
-    } catch (_) {}
+    } catch {}
   }, [isFullyAuthed, location.pathname]);
 
   if (initializing) return <LoadingScreen />;
@@ -92,7 +95,7 @@ function RequireAuth({ children }) {
     if (location.pathname.startsWith('/friends/add')) {
       try {
         window.sessionStorage.setItem(AUTH_REDIRECT_KEY, `${location.pathname}${location.search}`);
-      } catch (_) {}
+      } catch {}
     }
     return <Navigate to="/login" replace />;
   }
@@ -179,6 +182,7 @@ function RedirectIfAuthed({ children }) {
 
 export default function AppRouter() {
   return (
+    <Suspense fallback={<LoadingScreen />}>
     <Routes>
       <Route
         path="login"
@@ -317,5 +321,6 @@ export default function AppRouter() {
         />
       </Route>
     </Routes>
+    </Suspense>
   );
 }

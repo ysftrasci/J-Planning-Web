@@ -6,7 +6,7 @@
 // olarak geri yükler.
 
 import { getDb } from '../db/database';
-import { getSchedules, saveSchedules } from './notificationService';
+import { getSchedules, replaceAllSchedules } from './notificationService';
 
 const VALID_PRIORITIES = ['HIGH', 'MEDIUM', 'LOW', 'ZERO', 'EASY', 'HARD'];
 const VALID_PERIODS = ['DAILY', 'WEEKLY', 'MONTHLY', 'ONCE'];
@@ -90,7 +90,8 @@ export async function exportAllUserData() {
     checksum,
     signature: checksum,
     tables,
-    notificationSchedules: await getSchedules(),
+    // Zamanlamalar sunucudadır; okunamazsa yedek yine de alınır.
+    notificationSchedules: await getSchedules().catch(() => []),
   };
 
   const jsonString = JSON.stringify(backupData, null, 2);
@@ -431,9 +432,13 @@ export async function importUserData(jsonText) {
     );
   }
 
-  // Bildirim zamanlamaları veritabanı dışında (cihazda) tutulur; veriler başarıyla
-  // yazıldıktan sonra güncellenir.
+  // Bildirim zamanlamaları veritabanı dışında (sunucuda) tutulur; veriler başarıyla
+  // yazıldıktan sonra güncellenir. Bu adım başarısız olursa geri yükleme yine geçerlidir.
   if (Array.isArray(data.notificationSchedules)) {
-    await saveSchedules(data.notificationSchedules);
+    try {
+      await replaceAllSchedules(data.notificationSchedules);
+    } catch (e) {
+      console.warn('Bildirim zamanlamaları geri yüklenemedi:', e);
+    }
   }
 }

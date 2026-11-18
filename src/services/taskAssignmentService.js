@@ -34,6 +34,27 @@ function cleanCategoryName(categoryName) {
     : null;
 }
 
+const WORKER_URL = (import.meta.env.VITE_WORKER_URL || '/api/worker').replace(/\/+$/, '');
+
+// Atayan kişi: arkadaşının bu görevdeki ilerlemesi (seri/oran/dönem geçmişi için ham kayıtlar).
+// Worker yalnızca görevi atayan kişiye yanıt verir.
+export async function getAssignedTaskStats(assignmentId) {
+  const currentUser = auth.currentUser;
+  if (!currentUser) throw new Error('Oturum açmış kullanıcı bulunamadı.');
+  const idToken = await currentUser.getIdToken();
+  const res = await fetch(`${WORKER_URL}/assigned-tasks/${encodeURIComponent(assignmentId)}/stats`, {
+    headers: { Authorization: `Bearer ${idToken}` },
+  });
+  let data = null;
+  try {
+    data = await res.json();
+  } catch {
+    data = null;
+  }
+  if (!res.ok) throw new Error(data?.message || 'İstatistik alınamadı. Lütfen tekrar dene.');
+  return data;
+}
+
 export async function assignTaskToFriend({ assignedByUid, assignedByName, assignedToUid, assignedToName, friendshipId, title, description, categoryName, priority, period, intervalValue, subtaskCount, subtaskLabels }) {
   const cleanTitle = (title || '').trim().slice(0, 300);
   if (!cleanTitle) throw new Error('Görev adı boş olamaz.');
@@ -220,7 +241,7 @@ export async function syncCompletionStatusToFirestore(firestoreAssignmentId, {
         taskTitle: taskTitle || '',
       }).catch(() => {});
     }
-  } catch (e) {
+  } catch {
     // Firestore'a yazılamazsa (ör. internet yok) sessizce geç — yerel
     // (SQLite) durum zaten doğru, bir sonraki bağlantıda senkronize
     // etmeye çalışmak ileri bir geliştirme olabilir.

@@ -1,6 +1,6 @@
 import { useEffect, useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ChevronLeft, Hourglass, CheckCircle2, Clock, Pencil, Trash2, FileText, Tag, X } from 'lucide-react';
+import { ChevronLeft, Hourglass, CheckCircle2, Clock, Pencil, Trash2, FileText, Tag, X, BarChart3 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext.jsx';
 import { listenTasksIAssigned, deleteAssignedTask, updateAssignedTaskInFirestore } from '../services/taskAssignmentService';
 import { deleteTask } from '../db/taskRepository';
@@ -9,6 +9,7 @@ import { periodLabel, getPeriodKey } from '../utils/period';
 import EmptyState from '../components/EmptyState.jsx';
 import AppModal from '../components/AppModal.jsx';
 import AppButton from '../components/AppButton.jsx';
+import AssignedTaskStatsModal from '../components/AssignedTaskStatsModal.jsx';
 import './AssignedByMePage.css';
 
 const PRIORITY_LABEL = { HIGH: 'Yüksek', MEDIUM: 'Orta', LOW: 'Düşük', EASY: 'Kolay', HARD: 'Zor' };
@@ -100,6 +101,7 @@ export default function AssignedByMePage() {
 
   // Düzenleme modalı state'leri
   const [editingTask, setEditingTask] = useState(null);
+  const [statsTask, setStatsTask] = useState(null);
   const [editTitle, setEditTitle] = useState('');
   const [editDescription, setEditDescription] = useState('');
   const [editCategoryId, setEditCategoryId] = useState(null);
@@ -467,6 +469,18 @@ export default function AssignedByMePage() {
                           <span>{isPending ? 'Onay Bekliyor' : isDone ? 'Tamamlandı' : 'Bekliyor'}</span>
                         </span>
 
+                        {!isPending && (
+                          <button
+                            type="button"
+                            className="assigned-by-me-page__btn assigned-by-me-page__btn--edit"
+                            onClick={() => setStatsTask(item)}
+                            title="İlerlemeyi gör"
+                          >
+                            <BarChart3 size={12} />
+                            <span>İlerleme</span>
+                          </button>
+                        )}
+
                         <button
                           type="button"
                           className="assigned-by-me-page__btn assigned-by-me-page__btn--edit"
@@ -512,6 +526,8 @@ export default function AssignedByMePage() {
           )}
         </>
       )}
+
+      {statsTask && <AssignedTaskStatsModal assignment={statsTask} onClose={() => setStatsTask(null)} />}
 
       {/* Düzenleme Modalı */}
       {editingTask && (

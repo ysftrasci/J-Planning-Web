@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { X, Plus, ChevronDown, ChevronUp, Minus } from 'lucide-react';
+import { Plus, ChevronDown, ChevronUp, Minus } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { createTask, getActiveTasks } from '../db/taskRepository';
 import { getCategories } from '../db/categoryRepository';
@@ -141,7 +141,7 @@ export default function AddTaskPage() {
           setShowLimitModal(true);
           return;
         }
-      } catch (_) {}
+      } catch {}
     }
 
     const effectiveInterval = isOnce ? 1 : intervalValue;

@@ -287,7 +287,7 @@ export async function updateTask(taskId, {
       } catch (err) {
         try {
           await db.runAsync('ROLLBACK;');
-        } catch (_) {}
+        } catch {}
         throw err;
       }
     }
@@ -316,7 +316,7 @@ export async function deleteTask(taskId) {
   let db;
   try {
     db = getDb();
-  } catch (e) {
+  } catch {
     return;
   }
   if (!db) return;
@@ -370,7 +370,7 @@ export async function getCurrentPeriodStatus(task) {
   return { status: 'PENDING', completedSubtasks: 0 };
 }
 
-async function recalculateAndApplyJP(db, task, periodKey, existingRecord) {
+async function recalculateAndApplyJP(db, task, periodKey, _existingRecord) {
   // Tek seferlik görevlerde streak/bonus kavramı yok — sadece zorluk
   // seviyesine (priority alanı EASY/MEDIUM/HARD olarak kullanılır) göre
   // sabit JP verilir.
@@ -574,7 +574,7 @@ export async function cleanupInvalidPastRecords() {
   let db;
   try {
     db = getDb();
-  } catch (e) {
+  } catch {
     return;
   }
   if (!db) return;
@@ -595,13 +595,15 @@ export async function getAllTaskRecords() {
   return db.getAllAsync('SELECT * FROM task_records ORDER BY periodKey DESC');
 }
 
+const MAX_EXPIRED_PERIOD_SCAN = 3660;
+
 // Süresi dolan ama işaretlenmemiş periyotları otomatik FAILED yapar.
 // Toplu çekme ve bellek-içi Map indeksleme ile optimize edilmiştir (N+1 sorgu çözümü).
 export async function processExpiredPeriods() {
   let db;
   try {
     db = getDb();
-  } catch (e) {
+  } catch {
     return;
   }
   if (!db) return;
@@ -629,7 +631,10 @@ export async function processExpiredPeriods() {
     const periodKey = getPeriodKey(task, new Date());
     let checkKey = periodKey;
 
-    for (let i = 0; i < 60; i++) {
+    // Görevin oluşturulduğu döneme kadar tüm geçmiş taranır (eskiden yalnızca son 60 dönem
+    // taranıyordu; uzun süre açılmayan görevlerde daha eski dönemler hiç kaydedilmiyordu).
+    // Üst sınır yalnızca bozuk createdAt'e karşı güvenlik içindir (günlükte ~10 yıl).
+    for (let i = 0; i < MAX_EXPIRED_PERIOD_SCAN; i++) {
       if (checkKey < startPeriodKey) break;
 
       const endTs = getPeriodEndTimestamp(task, checkKey);
@@ -737,7 +742,7 @@ export async function updateTaskFromAssignment(assignedTaskDoc) {
   let db;
   try {
     db = getDb();
-  } catch (_) {
+  } catch {
     return false;
   }
   if (!db) return false;
@@ -811,7 +816,7 @@ export async function syncReceivedTasksWithFirestore(activeFirestoreAssignedTask
   let db;
   try {
     db = getDb();
-  } catch (e) {
+  } catch {
     return null;
   }
   if (!db) return null;
@@ -993,7 +998,7 @@ export async function migrateFreezeRemoval(dbInstance = null) {
     } catch (err) {
       try {
         await db.runAsync('ROLLBACK;');
-      } catch (_) {}
+      } catch {}
       throw err;
     }
   }
@@ -1066,14 +1071,14 @@ export async function migrateOnceCleanup(dbInstance = null) {
       } catch (err) {
         try {
           await db.runAsync('ROLLBACK;');
-        } catch (_) {}
+        } catch {}
         throw err;
       }
     }
 
     console.log(`[Migration] Tek seferlik onarım: ${deleteCount} kayıt silindi, ${fixCount} görev düzeltildi`);
     triggerAutoCloudSyncForCurrentUser();
-  } catch (_) {
+  } catch {
     // Hata durumunda hiçbir şey yazılmaz, sonraki açılışta tekrar dener
   }
 }

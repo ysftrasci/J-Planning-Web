@@ -1,6 +1,6 @@
 import AppModal from './AppModal.jsx';
 import AppButton from './AppButton.jsx';
-import { Sparkles, ArrowRight } from 'lucide-react';
+import { Sparkles } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 
 export default function GuestLimitModal({

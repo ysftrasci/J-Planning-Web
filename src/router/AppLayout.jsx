@@ -1,6 +1,6 @@
 import { NavLink, Outlet } from 'react-router-dom';
 import { CheckSquare, Gift, Users, Timer, User } from 'lucide-react';
-import { useState } from 'react';
+import { Suspense, useState } from 'react';
 import PWAInstallPrompt from '../components/PWAInstallPrompt.jsx';
 import { useAuth } from '../context/AuthContext.jsx';
 import GuestBanner from '../components/GuestBanner.jsx';
@@ -53,7 +53,10 @@ export default function AppLayout() {
       <GuestBanner />
       <DatabaseErrorBanner />
       <main className="app-layout__main">
-        <Outlet />
+        {/* Sayfa parçası yüklenirken alt menü ekranda kalsın */}
+        <Suspense fallback={<div className="app-layout__page-loading">Yükleniyor…</div>}>
+          <Outlet />
+        </Suspense>
       </main>
 
       <PWAInstallPrompt />

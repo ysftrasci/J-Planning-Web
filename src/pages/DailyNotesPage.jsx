@@ -205,19 +205,69 @@ export default function DailyNotesPage() {
         <div className="daily-notes-page__empty-text">Bu Ayda Özet Bulunmuyor</div>
       ) : (
         <div className="daily-notes-page__notes-list">
-          {monthNotes.map((note) => (
+          {monthNotes.map((note) => {
+            const isEditing = editingDateKey === note.dateKey;
+            return (
             <div key={note.id} className="daily-notes-page__note-item">
               <div className="daily-notes-page__note-header">
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                   <Calendar size={16} className="daily-notes-page__book-icon" />
                   <span className="daily-notes-page__note-date">{formatDateLabel(note.dateKey)}</span>
                 </div>
-                {note.studyTimeText && (
+                {note.studyTimeText && !isEditing && (
                   <span className="daily-notes-page__study-badge">
                     <Clock size={13} /> {note.studyTimeText}
                   </span>
                 )}
               </div>
+              {isEditing ? (
+                <div className="daily-notes-page__edit-box">
+                  <div className="daily-notes-page__field">
+                    <label className="daily-notes-page__field-label">
+                      <Clock size={16} />
+                      <span>Çalışma Süresi (opsiyonel)</span>
+                    </label>
+                    <input
+                      type="text"
+                      className="daily-notes-page__input"
+                      maxLength={50}
+                      placeholder="ör. 2 saat 30 dakika"
+                      value={editingStudyTimeText}
+                      onChange={(e) => setEditingStudyTimeText(e.target.value)}
+                    />
+                  </div>
+                  <div className="daily-notes-page__field">
+                    <div className="daily-notes-page__label-row">
+                      <label className="daily-notes-page__field-label">Günün Notu / Özeti</label>
+                      <span className="daily-notes-page__char-counter">{editingText.length} / 1000</span>
+                    </div>
+                    <textarea
+                      className="daily-notes-page__textarea"
+                      maxLength={1000}
+                      rows={4}
+                      value={editingText}
+                      onChange={(e) => setEditingText(e.target.value)}
+                    />
+                  </div>
+                  <div className="daily-notes-page__edit-actions">
+                    <button
+                      type="button"
+                      className="daily-notes-page__small-btn"
+                      onClick={() => setEditingDateKey(null)}
+                    >
+                      Vazgeç
+                    </button>
+                    <button
+                      type="button"
+                      className="daily-notes-page__save-btn"
+                      onClick={() => handleSaveEditingNote(note.dateKey)}
+                    >
+                      Güncelle
+                    </button>
+                  </div>
+                </div>
+              ) : (
+              <>
               {note.content && <p className="daily-notes-page__note-content">{note.content}</p>}
               <div className="daily-notes-page__note-actions">
                 <button
@@ -239,8 +289,11 @@ export default function DailyNotesPage() {
                   <Trash2 size={12} /> Sil
                 </button>
               </div>
+              </>
+              )}
             </div>
-          ))}
+            );
+          })}
         </div>
       )}
 

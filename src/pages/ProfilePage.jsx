@@ -15,7 +15,6 @@ import {
   Moon,
   Sun,
   Database,
-  Download,
   Upload,
   Trash2,
   AlertTriangle,
@@ -77,7 +76,7 @@ export default function ProfilePage() {
           url: inviteUrl,
         });
         return;
-      } catch (e) {
+      } catch {
         // Fallback to clipboard
       }
     }
@@ -143,7 +142,7 @@ export default function ProfilePage() {
         title: 'Başarılı 📦',
         body: 'Verileriniz .json yedek dosyası olarak indirildi.',
       });
-    } catch (e) {
+    } catch {
       setAlertMessage({ title: 'Hata', body: 'Veri dışa aktarılamadı.' });
     }
   };

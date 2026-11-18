@@ -128,3 +128,10 @@
   opacity: 0.6;
   cursor: default;
 }
+
+.app-layout__page-loading {
+  padding: var(--space-xl) var(--space-md);
+  text-align: center;
+  font-size: var(--font-caption-size);
+  color: var(--color-text-secondary);
+}

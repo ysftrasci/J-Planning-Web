@@ -10,7 +10,7 @@ export function triggerConfetti() {
       colors: ['#E06D8C', '#38BDF8', '#10B981', '#F59E0B', '#A855F7'],
       disableForReducedMotion: true,
     });
-  } catch (e) {
+  } catch {
     // Canvas desteklenmeyen ortamlarda sessizce yut
   }
 }

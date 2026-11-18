@@ -431,7 +431,7 @@ async function handleWorkerRequest(request, env, customKey = publicKey) {
       });
 
       return jsonResponse({ success: true, message: 'Kullanıcı hesabı ve veritabanı silindi.' }, 200, corsHeaders);
-    } catch (err) {
+    } catch {
       return jsonResponse({ error: 'UNAUTHORIZED' }, 401, corsHeaders);
     }
   }

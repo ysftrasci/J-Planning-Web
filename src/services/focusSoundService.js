@@ -33,7 +33,7 @@ export async function playFocusSound(soundKey) {
       // sessizce yutulur.
       currentAudio = null;
     });
-  } catch (e) {
+  } catch {
     currentAudio = null;
   }
 }
@@ -43,7 +43,7 @@ export async function stopFocusSound() {
     try {
       currentAudio.pause();
       currentAudio.currentTime = 0;
-    } catch (e) {
+    } catch {
       // Yoksay
     }
     currentAudio = null;

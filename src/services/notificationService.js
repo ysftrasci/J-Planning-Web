@@ -3,24 +3,7 @@ import { doc, updateDoc, arrayUnion, arrayRemove } from 'firebase/firestore';
 import { db, messaging, messagingReady, auth } from './firebase';
 import { getDb } from '../db/database';
 
-let lastTriggeredMinuteKey = '';
-
-function getStorageKey(uid) {
-  const userUid = uid || auth.currentUser?.uid;
-  if (!userUid) return null;
-  const userKey = `jplanning:${userUid}:notification_schedules`;
-
-  if (typeof localStorage !== 'undefined') {
-    if (!localStorage.getItem(userKey)) {
-      const legacyRaw = localStorage.getItem('jplanning:notification_schedules');
-      if (legacyRaw) {
-        localStorage.setItem(userKey, legacyRaw);
-        localStorage.removeItem('jplanning:notification_schedules');
-      }
-    }
-  }
-  return userKey;
-}
+const WORKER_URL = (import.meta.env.VITE_WORKER_URL || '/api/worker').replace(/\/+$/, '');
 
 const FCM_TOKEN_KEY = 'jplanning:current_fcm_token';
 const FCM_OWNER_KEY = 'jplanning:fcm_token_owner';
@@ -31,7 +14,7 @@ function readFcmOwner() {
   try {
     const raw = localStorage.getItem(FCM_OWNER_KEY);
     return raw ? JSON.parse(raw) : null;
-  } catch (_) {
+  } catch {
     return null;
   }
 }
@@ -94,7 +77,7 @@ export async function registerFCMPushToken(userUid, options = {}) {
       if (written && typeof localStorage !== 'undefined') {
         try {
           localStorage.setItem(FCM_OWNER_KEY, JSON.stringify({ uid: userUid, token, at: Date.now() }));
-        } catch (_) {}
+        } catch {}
       }
     }
     return token;
@@ -163,14 +146,6 @@ export const WEEKDAYS = [
   { value: 7, label: 'Cumartesi', short: 'Cmt' },
 ];
 
-function uuid() {
-  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
-    const r = (Math.random() * 16) | 0;
-    const v = c === 'x' ? r : (r & 0x3) | 0x8;
-    return v.toString(16);
-  });
-}
-
 export async function requestNotificationPermission() {
   if (!('Notification' in window)) return false;
   if (Notification.permission === 'granted') return true;
@@ -222,49 +197,175 @@ export async function sendWebNotification(title, body, tag) {
   return false;
 }
 
-export async function getSchedules(uid) {
-  const key = getStorageKey(uid);
-  if (!key) return [];
+// ─── Bildirim zamanlamaları ────────────────────────────────────────────────
+// Zamanlamalar sunucuda (Worker) tutulur ve Worker'ın 5 dakikalık cron'u push bildirimi
+// olarak gönderir: tüm cihazlarda ve uygulama kapalıyken çalışır.
+// Eski sürümler zamanlamaları bu cihazın localStorage'ında tutuyordu; girişte bunlar
+// bir kez sunucuya taşınır (syncNotificationSetup).
+
+export const SCHEDULE_MINUTE_STEP = 5;
+
+export function getDeviceTimeZone() {
   try {
-    const raw = localStorage.getItem(key);
-    const parsed = raw ? JSON.parse(raw) : [];
-    return Array.isArray(parsed) ? parsed : [];
-  } catch (_) {
-    // Bozuk kayıt tüm bildirim sayfasını kilitlemesin
-    return [];
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || 'Europe/Istanbul';
+  } catch {
+    return 'Europe/Istanbul';
   }
 }
 
-export async function saveSchedules(schedules, uid) {
-  const key = getStorageKey(uid);
-  if (!key) return;
-  localStorage.setItem(key, JSON.stringify(schedules));
+async function workerRequest(path, { method = 'GET', body } = {}) {
+  const currentUser = auth.currentUser;
+  if (!currentUser) throw new Error('Oturum açmış kullanıcı bulunamadı.');
+  const idToken = await currentUser.getIdToken();
+  const res = await fetch(`${WORKER_URL}${path}`, {
+    method,
+    headers: {
+      Authorization: `Bearer ${idToken}`,
+      ...(body ? { 'Content-Type': 'application/json' } : {}),
+    },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  let data = null;
+  try {
+    data = await res.json();
+  } catch {
+    data = null;
+  }
+  if (!res.ok) {
+    throw new Error(data?.message || 'Sunucuya ulaşılamadı. Lütfen tekrar dene.');
+  }
+  return data;
 }
 
-export async function addSchedule(schedule, uid) {
-  const schedules = await getSchedules(uid);
-  const newSchedule = { id: uuid(), ...schedule };
-  schedules.push(newSchedule);
-  await saveSchedules(schedules, uid);
-  return newSchedule.id;
+function cleanSchedulePayload(schedule) {
+  return {
+    weekdays: Array.isArray(schedule?.weekdays) ? schedule.weekdays : [],
+    hour: Number(schedule?.hour),
+    minute: Number(schedule?.minute),
+    label: typeof schedule?.label === 'string' ? schedule.label : '',
+    timeZone: getDeviceTimeZone(),
+  };
 }
 
-export async function updateSchedule(scheduleId, updatedData, uid) {
-  const schedules = await getSchedules(uid);
-  const updated = schedules.map((s) =>
-    s.id === scheduleId ? { ...s, ...updatedData } : s
+function sameSchedule(a, b) {
+  const days = (x) => [...(x.weekdays || [])].map(Number).sort((p, q) => p - q).join(',');
+  return (
+    days(a) === days(b) &&
+    Number(a.hour) === Number(b.hour) &&
+    Number(a.minute) === Number(b.minute) &&
+    (a.label || '').trim() === (b.label || '').trim()
   );
-  await saveSchedules(updated, uid);
 }
 
-export async function removeSchedule(scheduleId, uid) {
-  const schedules = await getSchedules(uid);
-  const updated = schedules.filter((s) => s.id !== scheduleId);
-  await saveSchedules(updated, uid);
+/** Giriş yapmış kullanıcının zamanlamaları (sunucudan). Misafirde boş liste. */
+export async function getSchedules() {
+  if (!auth.currentUser) return [];
+  const data = await workerRequest('/user/notification-schedules');
+  return Array.isArray(data?.schedules) ? data.schedules : [];
 }
 
-export async function removeAllSchedules(uid) {
-  await saveSchedules([], uid);
+export async function addSchedule(schedule) {
+  const data = await workerRequest('/user/notification-schedules', {
+    method: 'POST',
+    body: cleanSchedulePayload(schedule),
+  });
+  return data?.schedule?.id;
+}
+
+export async function updateSchedule(scheduleId, schedule) {
+  await workerRequest(`/user/notification-schedules/${encodeURIComponent(scheduleId)}`, {
+    method: 'PATCH',
+    body: cleanSchedulePayload(schedule),
+  });
+}
+
+export async function removeSchedule(scheduleId) {
+  await workerRequest(`/user/notification-schedules/${encodeURIComponent(scheduleId)}`, { method: 'DELETE' });
+}
+
+/** Yedekten geri yüklerken: mevcut zamanlamaları yedektekilerle değiştirir. */
+export async function replaceAllSchedules(schedules) {
+  if (!auth.currentUser || !Array.isArray(schedules)) return;
+  const existing = await getSchedules();
+  for (const s of existing) {
+    await removeSchedule(s.id);
+  }
+  for (const s of schedules.slice(0, 20)) {
+    if (!s || !Array.isArray(s.weekdays) || s.weekdays.length === 0) continue;
+    await addSchedule(s);
+  }
+}
+
+function readLegacyLocalSchedules(uid) {
+  if (typeof localStorage === 'undefined' || !uid) return { key: null, list: [] };
+  const key = `jplanning:${uid}:notification_schedules`;
+  try {
+    let raw = localStorage.getItem(key);
+    if (!raw) {
+      // Daha da eski sürüm: kullanıcıya bağlı olmayan anahtar
+      const legacyRaw = localStorage.getItem('jplanning:notification_schedules');
+      if (legacyRaw) {
+        localStorage.setItem(key, legacyRaw);
+        localStorage.removeItem('jplanning:notification_schedules');
+        raw = legacyRaw;
+      }
+    }
+    const parsed = raw ? JSON.parse(raw) : [];
+    return { key, list: Array.isArray(parsed) ? parsed : [] };
+  } catch {
+    return { key, list: [] };
+  }
+}
+
+let syncInFlight = null;
+
+/**
+ * Girişte çağrılır (arka planda, ana akışı bekletmez):
+ * 1. Cihaz saat dilimi değiştiyse sunucuya bildirir (hatırlatıcı ve zamanlamalar o saate göre çalışır).
+ * 2. Bu cihazda eski sürümden kalan zamanlamalar varsa sunucuya taşır ve cihazdan siler.
+ */
+export function syncNotificationSetup(uid) {
+  if (!uid) return Promise.resolve();
+  if (syncInFlight) return syncInFlight;
+
+  syncInFlight = (async () => {
+    const timeZone = getDeviceTimeZone();
+    const tzKey = `jplanning:${uid}:synced_time_zone`;
+    try {
+      if (localStorage.getItem(tzKey) !== timeZone) {
+        await workerRequest('/user/timezone', { method: 'POST', body: { timeZone } });
+        localStorage.setItem(tzKey, timeZone);
+      }
+    } catch (e) {
+      console.warn('[NotificationService] Saat dilimi kaydedilemedi:', e);
+    }
+
+    const { key, list } = readLegacyLocalSchedules(uid);
+    if (!key || list.length === 0) return;
+    try {
+      const serverList = await getSchedules();
+      const remaining = [];
+      for (const local of list) {
+        if (!local || !Array.isArray(local.weekdays) || local.weekdays.length === 0) continue;
+        if (serverList.some((s) => sameSchedule(s, local))) continue;
+        try {
+          await addSchedule(local);
+          serverList.push(local);
+        } catch (e) {
+          console.warn('[NotificationService] Zamanlama taşınamadı:', e);
+          remaining.push(local);
+        }
+      }
+      if (remaining.length > 0) localStorage.setItem(key, JSON.stringify(remaining));
+      else localStorage.removeItem(key);
+    } catch (e) {
+      console.warn('[NotificationService] Eski zamanlamalar taşınamadı:', e);
+    }
+  })().finally(() => {
+    syncInFlight = null;
+  });
+
+  return syncInFlight;
 }
 
 export function weekdayLabel(value) {
@@ -274,52 +375,6 @@ export function weekdayLabel(value) {
 export function formatTime(hour, minute) {
   return `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
 }
-
-// Zamanlanmış bildirim kontrolü (Uygulama açıkken veya PWA ortamında zamanı gelen bildirimi tetikler)
-export async function checkAndTriggerSchedules() {
-  const activeUid = auth.currentUser?.uid;
-  if (!activeUid) return;
-
-  const now = new Date();
-  // 1 = Pazar, 2 = Pazartesi ... 7 = Cumartesi (Expo/JS Date standardı)
-  const currentWeekday = now.getDay() + 1;
-  const currentHour = now.getHours();
-  const currentMinute = now.getMinutes();
-
-  const minuteKey = `${now.getFullYear()}-${now.getMonth()}-${now.getDate()}-${currentHour}:${currentMinute}`;
-  if (lastTriggeredMinuteKey === minuteKey) return;
-
-  const schedules = await getSchedules(activeUid);
-  const due = schedules.filter(
-    (schedule) =>
-      schedule &&
-      Array.isArray(schedule.weekdays) &&
-      schedule.weekdays.includes(currentWeekday) &&
-      Number(schedule.hour) === currentHour &&
-      Number(schedule.minute) === currentMinute
-  );
-  if (due.length === 0) return;
-
-  // Önce dakikayı işaretle: bildirim gösterimi sürerken ikinci tetikleme gelmesin.
-  lastTriggeredMinuteKey = minuteKey;
-
-  // Aynı dakikaya denk gelen TÜM zamanlamalar gösterilir; her biri kendi etiketiyle
-  // (tag) gönderilir ki biri diğerinin üzerine yazmasın.
-  for (const schedule of due) {
-    await sendWebNotification(
-      'J-Planning Hatırlatması 🔔',
-      schedule.label || schedule.body || 'Görevlerine göz atmayı unutma!',
-      `j-planning-schedule-${schedule.id || 'x'}`
-    );
-  }
-}
-
-// Uygulama açık olduğu sürece her 15 saniyede bir zamanlamaları kontrol et
-if (typeof window !== 'undefined') {
-  setInterval(checkAndTriggerSchedules, 15000);
-}
-
-const WORKER_URL = (import.meta.env.VITE_WORKER_URL || '/api/worker').replace(/\/+$/, '');
 
 /**
  * Kullanıcının sunucudaki (Cloudflare Worker & Control Plane) hatırlatıcı ayarlarını çeker.
@@ -344,6 +399,7 @@ export async function getUserReminderSettings() {
       return {
         reminderEnabled: Boolean(data.reminderEnabled),
         reminderHour: typeof data.reminderHour === 'number' ? data.reminderHour : 20,
+        timeZone: data.timeZone || null,
       };
     }
   } catch (err) {
@@ -363,7 +419,7 @@ export async function getUserReminderSettings() {
         reminderHour: hourRow ? parseInt(hourRow.value, 10) : 20,
       };
     }
-  } catch (_) {}
+  } catch {}
 
   return { reminderEnabled: false, reminderHour: 20 };
 }
@@ -384,7 +440,7 @@ export async function updateUserReminderSettings({ reminderEnabled, reminderHour
       'Content-Type': 'application/json',
       Authorization: `Bearer ${idToken}`,
     },
-    body: JSON.stringify({ reminderEnabled, reminderHour }),
+    body: JSON.stringify({ reminderEnabled, reminderHour, timeZone: getDeviceTimeZone() }),
   });
 
   if (!res.ok) {
@@ -392,7 +448,7 @@ export async function updateUserReminderSettings({ reminderEnabled, reminderHour
     try {
       const data = await res.json();
       if (data.message) errMessage = data.message;
-    } catch (_) {}
+    } catch {}
     throw new Error(errMessage);
   }
 
@@ -411,7 +467,7 @@ export async function updateUserReminderSettings({ reminderEnabled, reminderHour
         [String(reminderHour)]
       ).catch(() => {});
     }
-  } catch (_) {}
+  } catch {}
 
   return result;
 }
@@ -439,7 +495,7 @@ export async function triggerReminderTest() {
     try {
       const data = await res.json();
       if (data.message) errMessage = data.message;
-    } catch (_) {}
+    } catch {}
     throw new Error(errMessage);
   }
 

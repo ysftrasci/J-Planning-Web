@@ -149,7 +149,7 @@ export async function deleteAccountCompletely({ uid, password }) {
       try {
         const errData = await response.json();
         if (errData.message) errMessage = errData.message;
-      } catch (_) {}
+      } catch {}
       throw new Error(`Hesabın şu anda silinemedi (${errMessage}). Lütfen tekrar dene.`);
     }
   } catch (workerErr) {

@@ -1,4 +1,4 @@
-import { Lock, ArrowLeft, UserPlus } from 'lucide-react';
+import { Lock } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import AppButton from './AppButton.jsx';
 

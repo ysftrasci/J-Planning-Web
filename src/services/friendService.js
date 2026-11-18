@@ -70,7 +70,7 @@ function checkRateLimit(uid) {
   try {
     const raw = localStorage.getItem(minuteKey);
     if (raw) minuteAttempts = JSON.parse(raw);
-  } catch (e) {}
+  } catch {}
 
   minuteAttempts = Array.isArray(minuteAttempts)
     ? minuteAttempts.filter((ts) => typeof ts === 'number' && now - ts < RATE_LIMIT_WINDOW_MS)
@@ -82,7 +82,7 @@ function checkRateLimit(uid) {
     const backoffMs = Math.min(RATE_LIMIT_WINDOW_MS * Math.pow(2, violations), 5 * 60 * 1000);
     try {
       localStorage.setItem(blockKey, String(now + backoffMs));
-    } catch (e) {}
+    } catch {}
     throw new Error('Çok fazla arama yaptın. Güvenlik nedeniyle lütfen 1 dakika sonra tekrar dene.');
   }
 
@@ -91,7 +91,7 @@ function checkRateLimit(uid) {
   try {
     const raw = localStorage.getItem(dailyKey);
     if (raw) dailyAttempts = JSON.parse(raw);
-  } catch (e) {}
+  } catch {}
 
   dailyAttempts = Array.isArray(dailyAttempts)
     ? dailyAttempts.filter((ts) => typeof ts === 'number' && now - ts < DAILY_WINDOW_MS)
@@ -107,7 +107,7 @@ function checkRateLimit(uid) {
   try {
     localStorage.setItem(minuteKey, JSON.stringify(minuteAttempts));
     localStorage.setItem(dailyKey, JSON.stringify(dailyAttempts));
-  } catch (e) {}
+  } catch {}
 }
 
 // Kullanıcı kodu ile arkadaş isteği gönderir.
@@ -253,7 +253,7 @@ export function listenFriends(currentUserUid, callback, onError) {
               friendPhotoURL: liveProfile.photoURL || null,
             };
           }
-        } catch (e) {
+        } catch {
           // Profil okunamazsa, elimizdeki eski (snapshot) bilgiyle devam et.
         }
         return friend;

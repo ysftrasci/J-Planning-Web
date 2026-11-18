@@ -46,7 +46,7 @@ async function executeBatchStatements(db, statements) {
   } catch (err) {
     try {
       await db.runAsync('ROLLBACK');
-    } catch (_) {}
+    } catch {}
     throw err;
   }
 }
@@ -104,14 +104,14 @@ export async function findOrCreateCategoryByName(categoryName) {
     if (inFlightEnsurePromise) {
       try {
         await inFlightEnsurePromise;
-      } catch (_) {}
+      } catch {}
     }
 
     return serializeCategoryOp(async () => {
       let db;
       try {
         db = getDb();
-      } catch (_) {
+      } catch {
         return null;
       }
       if (!db) return null;
@@ -168,7 +168,7 @@ export async function ensureDefaultCategories() {
       let db;
       try {
         db = getDb();
-      } catch (_) {
+      } catch {
         return;
       }
       if (!db) return;

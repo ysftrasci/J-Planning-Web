@@ -8,7 +8,6 @@ import {
   Clock,
   AlertTriangle,
   Pencil,
-  Sparkles,
 } from 'lucide-react';
 import {
   WEEKDAYS,
@@ -25,6 +24,8 @@ import {
   getUserReminderSettings,
   updateUserReminderSettings,
   triggerReminderTest,
+  getDeviceTimeZone,
+  SCHEDULE_MINUTE_STEP,
 } from '../services/notificationService.js';
 import { useAuth } from '../context/AuthContext.jsx';
 import AppButton from '../components/AppButton.jsx';
@@ -41,6 +42,9 @@ export default function NotificationSettingsPage() {
   const [deleteScheduleTarget, setDeleteScheduleTarget] = useState(null);
   const [permStatus, setPermStatus] = useState('default');
   const [toastMessage, setToastMessage] = useState('');
+  const [schedulesLoading, setSchedulesLoading] = useState(true);
+  const [schedulesError, setSchedulesError] = useState('');
+  const deviceTimeZone = getDeviceTimeZone();
 
   // Otomatik Hatırlatıcı (Cron) State'leri
   const [reminderEnabled, setReminderEnabled] = useState(false);
@@ -49,8 +53,16 @@ export default function NotificationSettingsPage() {
   const [testingReminder, setTestingReminder] = useState(false);
 
   const loadSchedules = async () => {
-    const data = await getSchedules(user?.uid);
-    setSchedules(data);
+    setSchedulesError('');
+    try {
+      const data = await getSchedules();
+      setSchedules(data);
+    } catch (e) {
+      console.warn('Bildirim zamanlamaları yüklenemedi:', e);
+      setSchedulesError('Zamanlamalar yüklenemedi. Bağlantını kontrol edip sayfayı yenile.');
+    } finally {
+      setSchedulesLoading(false);
+    }
     const status = await getNotificationPermissionStatus();
     setPermStatus(status);
     if (status === 'granted' && user?.uid) {
@@ -190,7 +202,12 @@ export default function NotificationSettingsPage() {
 
   const confirmDelete = async () => {
     if (deleteScheduleTarget) {
-      await removeSchedule(deleteScheduleTarget.id, user?.uid);
+      try {
+        await removeSchedule(deleteScheduleTarget.id);
+      } catch (e) {
+        setToastMessage(`Zamanlama silinemedi: ${e.message}`);
+        setTimeout(() => setToastMessage(''), 4000);
+      }
       setDeleteScheduleTarget(null);
       await loadSchedules();
     }
@@ -263,7 +280,7 @@ export default function NotificationSettingsPage() {
           <div className="notification-settings-page__reminder-settings">
             <div className="notification-settings-page__hour-group">
               <label htmlFor="reminder-hour-select" className="notification-settings-page__hour-label">
-                Hatırlatma Saati (TR):
+                Hatırlatma Saati:
               </label>
               <select
                 id="reminder-hour-select"
@@ -300,10 +317,13 @@ export default function NotificationSettingsPage() {
       </div>
 
       <p className="notification-settings-page__intro">
-        Haftanın istediğin günlerinde, istediğin saatlerde ek bildirimler al. Dilediğin kadar zamanlama ekleyebilirsin.
+        Haftanın istediğin günlerinde, istediğin saatlerde ek bildirimler al. Bildirimler uygulama kapalıyken de
+        tüm cihazlarına gelir; en fazla 5 dakika gecikebilir. Saatler bu cihazın saat dilimine ({deviceTimeZone}) göredir.
       </p>
 
-      {schedules.length === 0 ? (
+      {schedulesError && <p className="notification-settings-page__error">{schedulesError}</p>}
+
+      {schedulesLoading ? null : schedules.length === 0 ? (
         <EmptyState
           icon={BellOff}
           title="Henüz bildirim zamanlaman yok"
@@ -326,6 +346,11 @@ export default function NotificationSettingsPage() {
                 <span className="notification-settings-page__days">
                   {item.weekdays.map((w) => weekdayLabel(w)).join(', ')}
                 </span>
+                {item.nextFireAt && (
+                  <span className="notification-settings-page__days">
+                    Sıradaki: {new Date(item.nextFireAt).toLocaleString('tr-TR', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
+                  </span>
+                )}
               </div>
               <div className="notification-settings-page__card-actions">
                 <button
@@ -355,6 +380,7 @@ export default function NotificationSettingsPage() {
           title="Yeni Zamanlama Ekle"
           variant="secondary"
           onClick={() => setShowAddForm(true)}
+          disabled={schedules.length >= 20 || Boolean(schedulesError)}
           style={{ flex: 1 }}
         />
         <AppButton
@@ -370,7 +396,6 @@ export default function NotificationSettingsPage() {
         <ScheduleFormModal
           open={showAddForm || !!editingSchedule}
           editingSchedule={editingSchedule}
-          userUid={user?.uid}
           onClose={() => {
             setShowAddForm(false);
             setEditingSchedule(null);
@@ -412,10 +437,16 @@ export default function NotificationSettingsPage() {
   );
 }
 
-function ScheduleFormModal({ open, editingSchedule, userUid, onClose, onSaved }) {
+const MINUTE_OPTIONS = Array.from({ length: 60 / SCHEDULE_MINUTE_STEP }, (_, i) => i * SCHEDULE_MINUTE_STEP);
+
+function ScheduleFormModal({ open, editingSchedule, onClose, onSaved }) {
   const [selectedDays, setSelectedDays] = useState(editingSchedule?.weekdays || []);
-  const [timeString, setTimeString] = useState(
-    editingSchedule ? formatTime(editingSchedule.hour, editingSchedule.minute) : '09:00'
+  const [hour, setHour] = useState(editingSchedule ? Number(editingSchedule.hour) : 9);
+  // Eski zamanlamalarda dakika 5'in katı olmayabilir: en yakın alt adıma yuvarlanır.
+  const [minute, setMinute] = useState(
+    editingSchedule
+      ? Math.floor(Number(editingSchedule.minute) / SCHEDULE_MINUTE_STEP) * SCHEDULE_MINUTE_STEP
+      : 0
   );
   const [label, setLabel] = useState(editingSchedule?.label || '');
   const [saving, setSaving] = useState(false);
@@ -441,25 +472,22 @@ function ScheduleFormModal({ open, editingSchedule, userUid, onClose, onSaved })
         setErrorMessage('Bildirim gönderebilmemiz için bildirim iznini açman gerekiyor.');
       }
 
-      const [hourStr, minuteStr] = (timeString || '').split(':');
-      const parsedHour = parseInt(hourStr, 10);
-      const parsedMinute = parseInt(minuteStr, 10);
-      // DİKKAT: 0 geçerli bir saattir (gece 00:xx). "|| 9" kullanılırsa 00, 09'a döner.
+      // DİKKAT: 0 geçerli bir saattir (gece 00:xx).
       const payload = {
         weekdays: selectedDays,
-        hour: Number.isNaN(parsedHour) ? 9 : Math.min(23, Math.max(0, parsedHour)),
-        minute: Number.isNaN(parsedMinute) ? 0 : Math.min(59, Math.max(0, parsedMinute)),
+        hour: Math.min(23, Math.max(0, Number(hour) || 0)),
+        minute: Math.min(59, Math.max(0, Number(minute) || 0)),
         label: label.trim(),
       };
 
       if (editingSchedule) {
-        await updateSchedule(editingSchedule.id, payload, userUid);
+        await updateSchedule(editingSchedule.id, payload);
       } else {
-        await addSchedule(payload, userUid);
+        await addSchedule(payload);
       }
       onSaved();
     } catch (e) {
-      setErrorMessage('Zamanlama kaydedilirken bir sorun oluştu.');
+      setErrorMessage(e?.message || 'Zamanlama kaydedilirken bir sorun oluştu.');
     } finally {
       setSaving(false);
     }
@@ -496,12 +524,27 @@ function ScheduleFormModal({ open, editingSchedule, userUid, onClose, onSaved })
         <label className="notification-settings-page__form-label">Saat</label>
         <div className="notification-settings-page__time-row">
           <Clock size={18} color="var(--color-text-secondary)" />
-          <input
-            type="time"
+          <select
             className="notification-settings-page__time-input"
-            value={timeString}
-            onChange={(e) => setTimeString(e.target.value)}
-          />
+            aria-label="Saat"
+            value={hour}
+            onChange={(e) => setHour(parseInt(e.target.value, 10))}
+          >
+            {Array.from({ length: 24 }, (_, h) => (
+              <option key={h} value={h}>{String(h).padStart(2, '0')}</option>
+            ))}
+          </select>
+          <span>:</span>
+          <select
+            className="notification-settings-page__time-input"
+            aria-label="Dakika"
+            value={minute}
+            onChange={(e) => setMinute(parseInt(e.target.value, 10))}
+          >
+            {MINUTE_OPTIONS.map((m) => (
+              <option key={m} value={m}>{String(m).padStart(2, '0')}</option>
+            ))}
+          </select>
         </div>
 
         <label className="notification-settings-page__form-label">Bildirim Mesajı / Hatırlatma Metni</label>

@@ -4,7 +4,7 @@
 const CACHE_NAME = 'j-planning-v9-turso';
 
 // Service Worker Kurulumu & Önbelleğe alma
-self.addEventListener('install', (event) => {
+self.addEventListener('install', () => {
   self.skipWaiting();
 });
 
@@ -49,7 +49,7 @@ self.addEventListener('push', (event) => {
     if (event.data) {
       payload = event.data.json();
     }
-  } catch (e) {
+  } catch {
     payload = { title: 'J-Planning 🔔', body: event.data ? event.data.text() : 'Görevlerinizi kontrol edin!' };
   }
 

@@ -1,7 +1,7 @@
 // J-Planning — Admin Paneli Placeholder Sayfası (Faz 1)
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { ShieldCheck, Activity, Users, Database, ArrowLeft, RefreshCw, CheckCircle2, AlertCircle } from 'lucide-react';
+import { ShieldCheck, Activity, ArrowLeft, RefreshCw, CheckCircle2, AlertCircle } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import './AdminPlaceholderPage.css';
 

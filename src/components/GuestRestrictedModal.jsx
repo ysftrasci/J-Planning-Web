@@ -1,6 +1,6 @@
 import AppModal from './AppModal.jsx';
 import AppButton from './AppButton.jsx';
-import { Lock, UserPlus } from 'lucide-react';
+import { Lock } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 
 export default function GuestRestrictedModal({

@@ -2,6 +2,13 @@ import { createRemoteJWKSet, jwtVerify, SignJWT, importPKCS8 } from 'jose';
 import { createClient } from '@libsql/client/web';
 import canonicalSchema from '../../schema.sql';
 import { getPeriodKey, getPeriodEndTimestamp } from './periodUtils.js';
+import {
+  DEFAULT_TIME_ZONE,
+  normalizeTimeZone,
+  getTimeZoneOffsetMs,
+  computeNextWeeklyFireAt,
+  computeNextDailyFireAt,
+} from './timeUtils.js';
 
 // Google Firebase Public JWKS Endpoint
 const GOOGLE_JWKS = createRemoteJWKSet(
@@ -212,7 +219,10 @@ async function ensureAuditLogSchema(client) {
 }
 
 /**
- * admin_users_index tablosunda reminder_enabled ve reminder_hour kolonlarının varlığını garanti eder
+ * Control plane şeması (bildirimler için):
+ * - admin_users_index: reminder_enabled, reminder_hour, timezone, reminder_next_at kolonları
+ * - notification_schedules: kullanıcının özel bildirim zamanlamaları
+ * İzolat başına bir kez çalışır.
  */
 let controlPlaneUsersIndexInitialized = false;
 async function ensureControlPlaneUsersIndexSchema(client) {
@@ -220,15 +230,39 @@ async function ensureControlPlaneUsersIndexSchema(client) {
   try {
     const tableInfo = await client.execute('PRAGMA table_info(admin_users_index);').catch(() => null);
     const existingCols = new Set(tableInfo?.rows?.map((r) => r.name) || []);
-    if (!existingCols.has('reminder_enabled')) {
-      await client.execute('ALTER TABLE admin_users_index ADD COLUMN reminder_enabled INTEGER NOT NULL DEFAULT 0;').catch(() => {});
+    const missingColumns = [
+      ['reminder_enabled', 'INTEGER NOT NULL DEFAULT 0'],
+      ['reminder_hour', 'INTEGER NOT NULL DEFAULT 20'],
+      ['timezone', 'TEXT'],
+      ['reminder_next_at', 'INTEGER'],
+    ].filter(([name]) => existingCols.size > 0 && !existingCols.has(name));
+    for (const [name, type] of missingColumns) {
+      await client.execute(`ALTER TABLE admin_users_index ADD COLUMN ${name} ${type};`).catch(() => {});
     }
-    if (!existingCols.has('reminder_hour')) {
-      await client.execute('ALTER TABLE admin_users_index ADD COLUMN reminder_hour INTEGER NOT NULL DEFAULT 20;').catch(() => {});
-    }
+
+    await client.batch(
+      [
+        `CREATE TABLE IF NOT EXISTS notification_schedules (
+          id TEXT PRIMARY KEY,
+          uid TEXT NOT NULL,
+          weekdays TEXT NOT NULL,
+          hour INTEGER NOT NULL,
+          minute INTEGER NOT NULL,
+          label TEXT,
+          timezone TEXT NOT NULL,
+          next_fire_at INTEGER,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL
+        );`,
+        'CREATE INDEX IF NOT EXISTS idx_notification_schedules_uid ON notification_schedules(uid);',
+        'CREATE INDEX IF NOT EXISTS idx_notification_schedules_next ON notification_schedules(next_fire_at);',
+        'CREATE INDEX IF NOT EXISTS idx_admin_users_reminder_next ON admin_users_index(reminder_next_at);',
+      ],
+      'write'
+    );
     controlPlaneUsersIndexInitialized = true;
   } catch (e) {
-    console.warn('[Control Plane Users Index Schema Warning]:', e.message);
+    console.warn('[Control Plane Schema Warning]:', e.message);
   }
 }
 
@@ -497,7 +531,7 @@ async function getGoogleAccessToken(serviceAccountJson) {
   if (typeof serviceAccountJson === 'string') {
     try {
       sa = JSON.parse(serviceAccountJson);
-    } catch (e) {
+    } catch {
       throw new Error('FIREBASE_SERVICE_ACCOUNT JSON formatı geçersiz. Geçerli bir Service Account JSON dizesi girilmelidir.');
     }
   } else if (typeof serviceAccountJson === 'object' && serviceAccountJson !== null) {
@@ -650,7 +684,7 @@ async function getUserDisplayName(projectId, accessToken, uid) {
     const data = await res.json();
     const name = data.fields?.displayName?.stringValue;
     return typeof name === 'string' && name.trim() ? name.trim() : null;
-  } catch (_) {
+  } catch {
     return null;
   }
 }
@@ -793,304 +827,411 @@ const NOTIFICATION_TEMPLATES = {
 };
 
 /**
- * Saatlik görev hatırlatıcı cron işleyicisi (Scheduled Handler)
- * - Türkiye saatine (UTC+3) göre şu anki saati belirler
- * - reminder_enabled = 1 ve reminder_hour = currentHour olan kullanıcıları sorgular
- * - Her kullanıcının Turso DB'sindeki tamamlanmamış ve bugün vadesi gelen görevleri sayar
- * - Görevi olan kullanıcılara tek özet push bildirimi gönderir
+ * ============================================================================
+ * Zamanlanmış işler: günlük hatırlatıcı + kullanıcı bildirim zamanlamaları
+ * ============================================================================
+ * Cron 5 dakikada bir çalışır. Her kayıt "bir sonraki gönderim anını" (UTC ms) saklar;
+ * cron yalnızca zamanı gelmiş kayıtları çeker. Ücretsiz planda çağrı başına ~50 alt istek
+ * sınırı olduğu için iş bir bütçeyle planlanır; bütçeye sığmayanlar sonraki çalışmaya kalır.
+ * Aynı kaydın iki kez gönderilmemesi için kayıtlar göndermeden ÖNCE sahiplenilir
+ * (next_* alanı koşullu UPDATE ile ileri alınır).
  */
-async function handleHourlyTaskReminders(env, simulatedHour = null, specificUid = null) {
-  const tGlobalStart = Date.now();
-  const timings = {};
-  const now = new Date();
-  // Türkiye Saati (UTC+3)
-  const turkeyHour = simulatedHour !== null ? simulatedHour : ((now.getUTCHours() + 3) % 24);
+const CRON_SUBREQUEST_BUDGET = 44;
+const MAX_PUSH_TOKENS_PER_USER = 5;
+const STALE_SCHEDULE_MS = 30 * 60 * 1000; // 30 dk'dan fazla geciken zamanlama gönderilmez, ileri alınır
+const STALE_REMINDER_MS = 60 * 60 * 1000; // 1 saatten fazla geciken hatırlatıcı gönderilmez
+const MAX_SCHEDULES_PER_USER = 20;
 
-  const tCpStart = Date.now();
-  const controlClient = getControlPlaneClient(env);
-  if (!controlClient) {
-    console.warn('[Reminders] Control plane client bulunamadı.');
-    return { success: false, reason: 'NO_CONTROL_CLIENT', message: 'Control plane veritabanına erişilemedi.' };
+function parseWeekdaysJson(value) {
+  try {
+    const arr = typeof value === 'string' ? JSON.parse(value) : value;
+    return Array.isArray(arr) ? arr.map(Number).filter((d) => Number.isInteger(d) && d >= 1 && d <= 7) : [];
+  } catch {
+    return [];
   }
+}
 
-  await ensureControlPlaneUsersIndexSchema(controlClient);
+function computeScheduleNextFireAt(row, afterMs) {
+  return computeNextWeeklyFireAt(
+    parseWeekdaysJson(row.weekdays),
+    Number(row.hour),
+    Number(row.minute),
+    normalizeTimeZone(row.timezone),
+    afterMs
+  );
+}
 
-  let users = [];
-  if (specificUid) {
-    // Test Modu: Sadece bu kullanıcının profilini çek (saat ve enabled filtrelerini bypass et)
-    try {
-      const usersRes = await controlClient.execute({
-        sql: 'SELECT uid, db_name, reminder_enabled, reminder_hour FROM admin_users_index WHERE uid = ? LIMIT 1;',
-        args: [specificUid],
+/** Kullanıcının cihaz anahtarları (en yeni MAX_PUSH_TOKENS_PER_USER tanesi). */
+async function getRecentFcmTokens(projectId, uid, accessToken) {
+  const tokens = await getTargetUserFcmTokens(projectId, uid, accessToken);
+  return tokens.slice(-MAX_PUSH_TOKENS_PER_USER);
+}
+
+/** Bir bildirimi tüm cihazlara gönderir; ölü anahtarları temizler. */
+async function sendPushToTokens(projectId, uid, tokens, payload, accessToken) {
+  const deadTokens = [];
+  const errors = [];
+  let delivered = 0;
+  const results = await Promise.all(tokens.map((token) => sendFcmMessage(projectId, token, payload, accessToken)));
+  results.forEach((res, i) => {
+    if (res.success) delivered++;
+    else {
+      if (res.isUnregistered) deadTokens.push(tokens[i]);
+      if (res.error) errors.push(res.error);
+    }
+  });
+  if (deadTokens.length > 0) {
+    await removeDeadFcmTokensFromFirestore(projectId, uid, deadTokens, accessToken);
+  }
+  return { delivered, cleaned: deadTokens.length, errors };
+}
+
+/**
+ * Tek kullanıcı için "bugün bitmesi gereken tamamlanmamış görevin var" hatırlatıcısı.
+ * user: { uid, db_name, timezone }
+ */
+async function processReminderForUser(env, { projectId, accessToken, nowMs }, user) {
+  const uid = user.uid;
+  const dbName = user.db_name || getDbNameForUser(uid);
+  const timeZone = normalizeTimeZone(user.timezone);
+  const ONE_DAY_MS = 24 * 60 * 60 * 1000;
+
+  try {
+    const tokens = await getRecentFcmTokens(projectId, uid, accessToken);
+    if (!tokens || tokens.length === 0) {
+      return {
+        uid,
+        status: 'NO_TOKENS',
+        message: 'Kullanıcının kayıtlı FCM bildirim anahtarı (cihaz tokenı) bulunamadı. Lütfen tarayıcı bildirim iznini verin.',
+        diagnostics: { fcmTokenCount: 0 },
+      };
+    }
+
+    const sessionInfo = await ensureUserDatabase(dbName, env);
+    const userDbClient = createClient({ url: sessionInfo.dbUrl, authToken: sessionInfo.token });
+
+    const tasksRes = await userDbClient.execute(
+      "SELECT id, title, period, intervalValue, subtaskCount, createdAt FROM tasks WHERE isArchived = 0 AND assignmentStatus != 'PENDING_ACCEPT' AND (assignmentDirection IS NULL OR assignmentDirection != 'SENT');"
+    );
+    const tasks = tasksRes?.rows || [];
+    if (tasks.length === 0) {
+      return {
+        uid,
+        status: 'NO_TASKS',
+        message: 'Kullanıcının hiç aktif görevi bulunmuyor.',
+        diagnostics: { fcmTokenCount: tokens.length, activeTasksCount: 0 },
+      };
+    }
+
+    // Periyot hesapları "yerel tarih" metodlarını kullanır; Worker UTC'de çalıştığı için
+    // zaman kullanıcının saat dilimi farkı kadar kaydırılarak verilir.
+    const offsetMs = getTimeZoneOffsetMs(nowMs, timeZone);
+    const shiftedNowMs = nowMs + offsetMs;
+    const shiftedNow = new Date(shiftedNowMs);
+
+    const dueTasks = [];
+    for (const task of tasks) {
+      const createdAtNum = Number(task.createdAt);
+      const shiftedTask = {
+        period: task.period,
+        intervalValue: task.intervalValue,
+        createdAt: Number.isFinite(createdAtNum) && createdAtNum > 0 ? createdAtNum + offsetMs : null,
+      };
+      const periodKey = getPeriodKey(shiftedTask, shiftedNow);
+      const periodEnd = getPeriodEndTimestamp(shiftedTask, periodKey);
+      // DAILY her gün; diğerleri periyodun son 24 saatinde; ONCE tamamlanana kadar
+      const isExpiringToday = task.period === 'ONCE' || (periodEnd - shiftedNowMs) <= ONE_DAY_MS;
+      if (isExpiringToday) dueTasks.push({ task, periodKey });
+    }
+
+    // Kayıtlar görev başına ayrı sorgu yerine TEK sorguda çekilir (alt istek sınırı).
+    const recordByTaskAndPeriod = new Map();
+    if (dueTasks.length > 0) {
+      const periodKeys = [...new Set(dueTasks.map((d) => d.periodKey))];
+      const placeholders = periodKeys.map(() => '?').join(', ');
+      const recordsRes = await userDbClient.execute({
+        sql: `SELECT taskId, periodKey, status, completedSubtasks FROM task_records WHERE periodKey IN (${placeholders});`,
+        args: periodKeys,
       });
-      if (usersRes?.rows?.length > 0) {
-        users = usersRes.rows;
-      } else {
-        // Control plane'de henüz kaydı yoksa bile varsayılan dbName ile test et
-        users = [{ uid: specificUid, db_name: getDbNameForUser(specificUid), reminder_enabled: 0, reminder_hour: turkeyHour }];
+      for (const row of recordsRes?.rows || []) {
+        recordByTaskAndPeriod.set(`${row.taskId}|${row.periodKey}`, row);
+      }
+    }
+
+    let uncompleted = 0;
+    for (const { task, periodKey } of dueTasks) {
+      const record = recordByTaskAndPeriod.get(`${task.id}|${periodKey}`);
+      const isCompleted =
+        record && (record.status === 'SUCCESSFUL' || Number(record.completedSubtasks) >= (Number(task.subtaskCount) || 1));
+      if (!isCompleted) uncompleted++;
+    }
+
+    const diagnostics = {
+      fcmTokenCount: tokens.length,
+      activeTasksCount: tasks.length,
+      dueTasksCount: dueTasks.length,
+      uncompletedTasksCount: uncompleted,
+    };
+
+    if (uncompleted === 0) {
+      return {
+        uid,
+        status: 'ALL_COMPLETED',
+        message: `Bugün tamamlanması gereken ${dueTasks.length} görevin tümü zaten tamamlanmış.`,
+        diagnostics,
+      };
+    }
+
+    const template = NOTIFICATION_TEMPLATES.TASK_REMINDER(uncompleted);
+    const { delivered, cleaned, errors } = await sendPushToTokens(projectId, uid, tokens, template, accessToken);
+    const cleanedNote = cleaned > 0 ? ` (${cleaned} ölü token temizlendi)` : '';
+
+    if (delivered > 0) {
+      return {
+        uid,
+        status: 'SENT',
+        uncompletedTasks: uncompleted,
+        deviceCount: delivered,
+        message: `${uncompleted} tamamlanmamış görev için ${delivered} cihaza bildirim gönderildi.${cleanedNote}`,
+        diagnostics: { ...diagnostics, deliveredDevices: delivered, cleanedDeadTokensCount: cleaned },
+      };
+    }
+    return {
+      uid,
+      status: 'FCM_SEND_FAILED',
+      message: `Bildirim cihazlara iletilemedi (FCM reddetti).${cleanedNote}`,
+      diagnostics: { ...diagnostics, cleanedDeadTokensCount: cleaned, errors },
+    };
+  } catch (userErr) {
+    console.warn(`[Reminders] Kullanıcı (${uid}) işleme hatası:`, userErr.message);
+    return { uid, status: 'ERROR', message: 'Hatırlatıcı işlenirken bir hata oluştu.' };
+  }
+}
+
+/**
+ * "Hatırlatıcıyı Test Et": yalnızca giriş yapan kullanıcının kendi hatırlatıcısını hemen çalıştırır.
+ * Zamanlamayı (reminder_next_at) değiştirmez.
+ */
+async function runReminderTestForUser(env, uid) {
+  const controlClient = getControlPlaneClient(env);
+  let user = { uid, db_name: getDbNameForUser(uid), timezone: DEFAULT_TIME_ZONE };
+  if (controlClient) {
+    await ensureControlPlaneUsersIndexSchema(controlClient);
+    try {
+      const res = await controlClient.execute({
+        sql: 'SELECT uid, db_name, timezone FROM admin_users_index WHERE uid = ? LIMIT 1;',
+        args: [uid],
+      });
+      const row = res?.rows?.[0];
+      if (row) {
+        user = { uid, db_name: row.db_name || user.db_name, timezone: row.timezone || user.timezone };
       }
     } catch (e) {
-      users = [{ uid: specificUid, db_name: getDbNameForUser(specificUid), reminder_enabled: 0, reminder_hour: turkeyHour }];
+      console.warn('[Reminders Test] Kullanıcı kaydı okunamadı:', e.message);
     }
-  } else {
-    // Gerçek Saatlik Cron: Sadece hatırlatıcısı açık ve saati uyuşan aktif kullanıcılar
-    const query = 'SELECT uid, db_name, reminder_enabled, reminder_hour FROM admin_users_index WHERE is_disabled = 0 AND reminder_enabled = 1 AND reminder_hour = ?;';
-    try {
-      const usersRes = await controlClient.execute({ sql: query, args: [turkeyHour] });
-      users = usersRes?.rows || [];
-    } catch (dbErr) {
-      console.warn('[Reminders] Kullanıcı listesi çekilemedi:', dbErr.message);
-      return { success: false, error: dbErr.message };
-    }
-  }
-  timings.controlPlaneMs = Date.now() - tCpStart;
-
-  if (users.length === 0) {
-    return {
-      success: true,
-      turkeyHour,
-      processedUsers: 0,
-      sentCount: 0,
-      message: specificUid
-        ? 'Kullanıcı bulunamadı veya hesap devre dışı.'
-        : `Saat ${turkeyHour}:00 için hatırlatma bekleyen aktif kullanıcı yok.`,
-      timings,
-    };
   }
 
   const projectId = env.FIREBASE_PROJECT_ID || 'j-planning';
-  let accessToken = null;
-  const tOAuthStart = Date.now();
+  let accessToken;
   try {
     accessToken = await getGoogleAccessToken(env.FIREBASE_SERVICE_ACCOUNT);
-    timings.googleOAuthMs = Date.now() - tOAuthStart;
   } catch (authErr) {
-    timings.googleOAuthMs = Date.now() - tOAuthStart;
-    console.warn('[Reminders] FCM access token alınamadı:', authErr.message);
-    return {
-      success: false,
-      error: authErr.message,
-      message: `FCM yetkilendirme hatası: ${authErr.message}`,
-      timings,
-    };
+    console.warn('[Reminders Test] FCM access token alınamadı:', authErr.message);
+    return { success: false, message: 'Bildirim servisine bağlanılamadı.' };
   }
 
-  let sentCount = 0;
-  let totalDevicesNotified = 0;
-  const results = [];
+  const r = await processReminderForUser(env, { projectId, accessToken, nowMs: Date.now() }, user);
+  return {
+    success: true,
+    isTest: true,
+    processedUsers: 1,
+    sentCount: r.status === 'SENT' ? 1 : 0,
+    deviceCount: r.deviceCount || 0,
+    status: r.status || 'OK',
+    uncompletedTasks: r.uncompletedTasks || 0,
+    message: r.message,
+    diagnostics: r.diagnostics || {},
+    details: [r],
+  };
+}
+
+/**
+ * 5 dakikalık cron işleyicisi.
+ */
+async function handleScheduledTick(env) {
   const nowMs = Date.now();
-  const ONE_DAY_MS = 24 * 60 * 60 * 1000;
+  const controlClient = getControlPlaneClient(env);
+  if (!controlClient) {
+    console.warn('[Cron] Control plane client bulunamadı.');
+    return;
+  }
 
-  for (const user of users) {
-    const uid = user.uid;
-    const dbName = user.db_name || getDbNameForUser(uid);
+  let budget = CRON_SUBREQUEST_BUDGET;
+  if (!controlPlaneUsersIndexInitialized) budget -= 4; // soğuk başlangıçta şema kontrolü
+  await ensureControlPlaneUsersIndexSchema(controlClient);
 
-    try {
-      // 1. FCM Token'ları çek
-      const tFcmTokensStart = Date.now();
-      const tokens = await getTargetUserFcmTokens(projectId, uid, accessToken);
-      timings.fcmTokensFetchMs = Date.now() - tFcmTokensStart;
+  let dueSchedules = [];
+  let dueReminders = [];
+  let missingReminderNext = [];
+  try {
+    const rs = await controlClient.batch(
+      [
+        {
+          sql: `SELECT s.id, s.uid, s.weekdays, s.hour, s.minute, s.label, s.timezone, s.next_fire_at
+                FROM notification_schedules s
+                JOIN admin_users_index u ON u.uid = s.uid
+                WHERE s.next_fire_at IS NOT NULL AND s.next_fire_at <= ? AND COALESCE(u.is_disabled, 0) = 0
+                ORDER BY s.next_fire_at LIMIT 30;`,
+          args: [nowMs],
+        },
+        {
+          sql: `SELECT uid, db_name, reminder_hour, timezone, reminder_next_at
+                FROM admin_users_index
+                WHERE COALESCE(is_disabled, 0) = 0 AND reminder_enabled = 1
+                  AND reminder_next_at IS NOT NULL AND reminder_next_at <= ?
+                ORDER BY reminder_next_at LIMIT 15;`,
+          args: [nowMs],
+        },
+        {
+          // Bu sürümden önce açılmış hatırlatıcılar: bir sonraki gönderim anı burada hesaplanır.
+          sql: 'SELECT uid, reminder_hour, timezone FROM admin_users_index WHERE reminder_enabled = 1 AND reminder_next_at IS NULL LIMIT 50;',
+          args: [],
+        },
+      ],
+      'read'
+    );
+    dueSchedules = rs[0]?.rows || [];
+    dueReminders = rs[1]?.rows || [];
+    missingReminderNext = rs[2]?.rows || [];
+  } catch (err) {
+    console.error('[Cron] Zamanı gelen işler okunamadı:', err.message);
+    return;
+  }
+  budget -= 1;
 
-      if (!tokens || tokens.length === 0) {
-        results.push({
-          uid,
-          status: 'NO_TOKENS',
-          message: 'Kullanıcının kayıtlı FCM bildirim anahtarı (cihaz tokenı) bulunamadı. Lütfen tarayıcı bildirim iznini verin.',
-          diagnostics: { fcmTokenCount: 0 },
-        });
-        continue;
-      }
+  if (dueSchedules.length === 0 && dueReminders.length === 0 && missingReminderNext.length === 0) return;
 
-      // 2. Kullanıcının Turso DB'sine bağlan (Önbellekli)
-      const tUserDbStart = Date.now();
-      const sessionInfo = await ensureUserDatabase(dbName, env);
-      const userDbClient = createClient({
-        url: sessionInfo.dbUrl,
-        authToken: sessionInfo.token,
+  budget -= 2; // sahiplenme yazımı + olası OAuth token isteği
+
+  // 1. Plan: hangi işler bu çalışmada gönderilecek, hangileri yalnızca ileri alınacak
+  const claimStatements = [];
+  const claimPlan = []; // claimStatements ile aynı sırada: { kind, send, row }
+
+  const schedulesByUid = new Map();
+  for (const row of dueSchedules) {
+    if (!schedulesByUid.has(row.uid)) schedulesByUid.set(row.uid, []);
+    schedulesByUid.get(row.uid).push(row);
+  }
+  for (const rows of schedulesByUid.values()) {
+    const fresh = rows.filter((r) => nowMs - Number(r.next_fire_at) <= STALE_SCHEDULE_MS);
+    // Kullanıcı başına tahmini maliyet: cihaz anahtarı okuma + zamanlama başına ~2 cihaz
+    const cost = fresh.length > 0 ? 1 + fresh.length * 2 : 0;
+    const canSend = fresh.length > 0 && budget >= cost;
+    if (canSend) budget -= cost;
+    for (const row of rows) {
+      const isFresh = fresh.includes(row);
+      if (isFresh && !canSend) continue; // bütçe yok: sonraki çalışmaya kalsın
+      const next = computeScheduleNextFireAt(row, Math.max(nowMs, Number(row.next_fire_at)));
+      claimStatements.push({
+        sql: 'UPDATE notification_schedules SET next_fire_at = ?, updated_at = ? WHERE id = ? AND next_fire_at = ?;',
+        args: [next, nowMs, row.id, row.next_fire_at],
       });
-      timings.userDbSessionMs = Date.now() - tUserDbStart;
-
-      // 3. Aktif görevleri çek
-      const tTasksStart = Date.now();
-      const tasksRes = await userDbClient.execute(
-        "SELECT id, title, period, intervalValue, subtaskCount, createdAt FROM tasks WHERE isArchived = 0 AND assignmentStatus != 'PENDING_ACCEPT' AND (assignmentDirection IS NULL OR assignmentDirection != 'SENT');"
-      );
-      const tasks = tasksRes?.rows || [];
-      timings.tasksFetchMs = Date.now() - tTasksStart;
-
-      if (tasks.length === 0) {
-        results.push({
-          uid,
-          status: 'NO_TASKS',
-          message: 'Kullanıcının hiç aktif görevi bulunmuyor.',
-          diagnostics: { fcmTokenCount: tokens.length, activeTasksCount: 0 },
-        });
-        continue;
-      }
-
-      // 4. Bugün biten ve tamamlanmamış görevleri hesapla
-      // - Worker UTC'de çalışır; periyot hesapları "yerel tarih" metodlarını kullandığı için
-      //   zaman Türkiye saatine (UTC+3) kaydırılarak verilir. Aksi halde 00:00-03:00 arası
-      //   bir önceki günün kaydına bakılır ve çok günlük periyotların başlangıcı kayar.
-      // - Kayıtlar görev başına ayrı sorgu yerine TEK sorguda çekilir (ücretsiz planda
-      //   çağrı başına 50 alt istek sınırı vardır).
-      const tRecordsStart = Date.now();
-      const TR_OFFSET_MS = 3 * 60 * 60 * 1000;
-      const shiftedNowMs = nowMs + TR_OFFSET_MS;
-      const shiftedNow = new Date(shiftedNowMs);
-
-      const dueTasks = [];
-      for (const task of tasks) {
-        const createdAtNum = Number(task.createdAt);
-        const shiftedTask = {
-          period: task.period,
-          intervalValue: task.intervalValue,
-          createdAt: Number.isFinite(createdAtNum) && createdAtNum > 0 ? createdAtNum + TR_OFFSET_MS : null,
-        };
-        const periodKey = getPeriodKey(shiftedTask, shiftedNow);
-        const periodEnd = getPeriodEndTimestamp(shiftedTask, periodKey);
-
-        // Kural: DAILY görevler her gün; diğerleri periyodun son 24 saatinde; ONCE görevler tamamlanana kadar
-        const isExpiringToday = task.period === 'ONCE' || (periodEnd - shiftedNowMs) <= ONE_DAY_MS;
-        if (isExpiringToday) dueTasks.push({ task, periodKey });
-      }
-
-      const recordByTaskAndPeriod = new Map();
-      if (dueTasks.length > 0) {
-        const periodKeys = [...new Set(dueTasks.map((d) => d.periodKey))];
-        const placeholders = periodKeys.map(() => '?').join(', ');
-        const recordsRes = await userDbClient.execute({
-          sql: `SELECT taskId, periodKey, status, completedSubtasks FROM task_records WHERE periodKey IN (${placeholders});`,
-          args: periodKeys,
-        });
-        for (const row of recordsRes?.rows || []) {
-          recordByTaskAndPeriod.set(`${row.taskId}|${row.periodKey}`, row);
-        }
-      }
-
-      const dueTasksCount = dueTasks.length;
-      let dueAndUncompletedCount = 0;
-      for (const { task, periodKey } of dueTasks) {
-        const record = recordByTaskAndPeriod.get(`${task.id}|${periodKey}`);
-        const isCompleted =
-          record &&
-          (record.status === 'SUCCESSFUL' || Number(record.completedSubtasks) >= (Number(task.subtaskCount) || 1));
-        if (!isCompleted) dueAndUncompletedCount++;
-      }
-      timings.recordsCheckMs = Date.now() - tRecordsStart;
-
-      if (dueAndUncompletedCount > 0) {
-        const template = NOTIFICATION_TEMPLATES.TASK_REMINDER(dueAndUncompletedCount);
-        let userDeliveredDevices = 0;
-        const fcmErrors = [];
-        const deadTokens = [];
-
-        // FCM gönderimlerini tüm cihazlara paralel yürüt ve süreleri ölç
-        const tFcmSendStart = Date.now();
-        const sendPromises = tokens.map(async (token) => {
-          const tSingleSend = Date.now();
-          const res = await sendFcmMessage(projectId, token, template, accessToken);
-          const dur = Date.now() - tSingleSend;
-          if (res.isUnregistered) {
-            deadTokens.push(token);
-          }
-          return { res, dur };
-        });
-        const sendResults = await Promise.all(sendPromises);
-        timings.fcmSendMs = Date.now() - tFcmSendStart;
-
-        for (const item of sendResults) {
-          if (item.res.success) {
-            userDeliveredDevices++;
-          } else if (item.res.error) {
-            fcmErrors.push(item.res.error);
-          }
-        }
-
-        // Ölü/geçersiz token'ları Firestore'dan otomatik temizle
-        let cleanedCount = 0;
-        if (deadTokens.length > 0) {
-          const tCleanupStart = Date.now();
-          await removeDeadFcmTokensFromFirestore(projectId, uid, deadTokens, accessToken);
-          timings.cleanupDeadTokensMs = Date.now() - tCleanupStart;
-          cleanedCount = deadTokens.length;
-        }
-
-        if (userDeliveredDevices > 0) {
-          sentCount++;
-          totalDevicesNotified += userDeliveredDevices;
-          results.push({
-            uid,
-            status: 'SENT',
-            uncompletedTasks: dueAndUncompletedCount,
-            deviceCount: userDeliveredDevices,
-            cleanedDeadTokensCount: cleanedCount,
-            message: `${dueAndUncompletedCount} tamamlanmamış görev için ${userDeliveredDevices} cihaza bildirim gönderildi.${cleanedCount > 0 ? ` (${cleanedCount} ölü token temizlendi)` : ''}`,
-            diagnostics: {
-              fcmTokenCount: tokens.length,
-              activeTasksCount: tasks.length,
-              dueTasksCount,
-              uncompletedTasksCount: dueAndUncompletedCount,
-              deliveredDevices: userDeliveredDevices,
-              cleanedDeadTokensCount: cleanedCount,
-            },
-          });
-        } else {
-          results.push({
-            uid,
-            status: 'FCM_SEND_FAILED',
-            message: `Bildirim cihazlara iletilemedi (FCM reddetti).${cleanedCount > 0 ? ` (${cleanedCount} ölü token temizlendi)` : ''}`,
-            diagnostics: {
-              fcmTokenCount: tokens.length,
-              activeTasksCount: tasks.length,
-              dueTasksCount,
-              uncompletedTasksCount: dueAndUncompletedCount,
-              cleanedDeadTokensCount: cleanedCount,
-              errors: fcmErrors,
-            },
-          });
-        }
-      } else {
-        results.push({
-          uid,
-          status: 'ALL_COMPLETED',
-          message: `Bugün tamamlanması gereken ${dueTasksCount} görevin tümü zaten tamamlanmış.`,
-          diagnostics: {
-            fcmTokenCount: tokens.length,
-            activeTasksCount: tasks.length,
-            dueTasksCount,
-            uncompletedTasksCount: 0,
-          },
-        });
-      }
-    } catch (userErr) {
-      console.warn(`[Reminders] Kullanıcı (${uid}) işleme hatası:`, userErr.message);
-      results.push({ uid, status: 'ERROR', error: userErr.message, message: `İşlem hatası: ${userErr.message}` });
+      claimPlan.push({ kind: 'schedule', send: isFresh, row });
     }
   }
 
-  timings.totalMs = Date.now() - tGlobalStart;
-  console.log(`[Reminders Timings] Toplam: ${timings.totalMs}ms | ControlPlane: ${timings.controlPlaneMs}ms | OAuth: ${timings.googleOAuthMs}ms | FCM Tokens: ${timings.fcmTokensFetchMs}ms | User DB: ${timings.userDbSessionMs}ms | Tasks: ${timings.tasksFetchMs}ms | Records: ${timings.recordsCheckMs}ms | FCM Send: ${timings.fcmSendMs || 0}ms | Cleanup: ${timings.cleanupDeadTokensMs || 0}ms`);
+  for (const user of dueReminders) {
+    const isFresh = nowMs - Number(user.reminder_next_at) <= STALE_REMINDER_MS;
+    const dbName = user.db_name || getDbNameForUser(user.uid);
+    const cached = userDbSessionCache.get(dbName);
+    const cost = 6 + (cached && nowMs < cached.expiresAt - 5 * 60 * 1000 ? 0 : 2);
+    if (isFresh && budget < cost) continue;
+    if (isFresh) budget -= cost;
+    const next = computeNextDailyFireAt(
+      Number(user.reminder_hour),
+      normalizeTimeZone(user.timezone),
+      Math.max(nowMs, Number(user.reminder_next_at))
+    );
+    claimStatements.push({
+      sql: 'UPDATE admin_users_index SET reminder_next_at = ? WHERE uid = ? AND reminder_next_at = ?;',
+      args: [next, user.uid, user.reminder_next_at],
+    });
+    claimPlan.push({ kind: 'reminder', send: isFresh, row: user });
+  }
 
-  const primaryResult = results[0] || {};
+  for (const user of missingReminderNext) {
+    const next = computeNextDailyFireAt(Number(user.reminder_hour), normalizeTimeZone(user.timezone), nowMs);
+    claimStatements.push({
+      sql: 'UPDATE admin_users_index SET reminder_next_at = ? WHERE uid = ? AND reminder_next_at IS NULL;',
+      args: [next, user.uid],
+    });
+    claimPlan.push({ kind: 'fixup', send: false, row: user });
+  }
 
-  return {
-    success: true,
-    isTest: Boolean(specificUid),
-    turkeyHour,
-    processedUsers: users.length,
-    sentCount,
-    deviceCount: totalDevicesNotified,
-    status: primaryResult.status || 'OK',
-    uncompletedTasks: primaryResult.uncompletedTasks || 0,
-    message: primaryResult.message || `Saat ${turkeyHour}:00 için işlem tamamlandı.`,
-    diagnostics: {
-      ...(primaryResult.diagnostics || {}),
-      timings,
-    },
-    timings,
-    details: results,
-  };
+  if (claimStatements.length === 0) return;
+
+  // 2. Sahiplen (tek istek). Başka bir çalışma aynı kaydı önce aldıysa rowsAffected 0 döner.
+  let claimResults;
+  try {
+    claimResults = await controlClient.batch(claimStatements, 'write');
+  } catch (err) {
+    console.error('[Cron] Kayıtlar sahiplenilemedi:', err.message);
+    return;
+  }
+
+  const scheduleSends = new Map(); // uid -> rows
+  const reminderSends = [];
+  claimPlan.forEach((plan, i) => {
+    if (!plan.send || !(claimResults[i]?.rowsAffected > 0)) return;
+    if (plan.kind === 'schedule') {
+      if (!scheduleSends.has(plan.row.uid)) scheduleSends.set(plan.row.uid, []);
+      scheduleSends.get(plan.row.uid).push(plan.row);
+    } else if (plan.kind === 'reminder') {
+      reminderSends.push(plan.row);
+    }
+  });
+
+  if (scheduleSends.size === 0 && reminderSends.length === 0) return;
+
+  const projectId = env.FIREBASE_PROJECT_ID || 'j-planning';
+  let accessToken;
+  try {
+    accessToken = await getGoogleAccessToken(env.FIREBASE_SERVICE_ACCOUNT);
+  } catch (authErr) {
+    console.error('[Cron] FCM access token alınamadı:', authErr.message);
+    return;
+  }
+
+  // 3. Kullanıcı zamanlamaları
+  let scheduleCount = 0;
+  for (const [uid, rows] of scheduleSends) {
+    try {
+      const tokens = await getRecentFcmTokens(projectId, uid, accessToken);
+      if (tokens.length === 0) continue;
+      for (const row of rows) {
+        const body = cleanNotificationText(row.label || '', 160) || 'Görevlerine göz atmayı unutma!';
+        await sendPushToTokens(
+          projectId,
+          uid,
+          tokens,
+          { title: 'J-Planning Hatırlatması 🔔', body, tag: `j-planning-schedule-${row.id}`, data: { url: '/' } },
+          accessToken
+        );
+        scheduleCount++;
+      }
+    } catch (err) {
+      console.warn(`[Cron] Zamanlama bildirimi gönderilemedi (${uid}):`, err.message);
+    }
+  }
+
+  // 4. Günlük hatırlatıcılar
+  let reminderCount = 0;
+  for (const user of reminderSends) {
+    const r = await processReminderForUser(env, { projectId, accessToken, nowMs }, user);
+    if (r.status === 'SENT') reminderCount++;
+  }
+
+  console.log(`[Cron] ${scheduleCount} zamanlama, ${reminderCount} hatırlatıcı gönderildi (kalan bütçe tahmini: ${budget}).`);
 }
 
 // Bellek içi yedek rate limiter
@@ -2288,6 +2429,9 @@ export default {
               sql: 'DELETE FROM admin_users_index WHERE uid = ?;',
               args: [targetUid],
             });
+            await controlClient
+              .execute({ sql: 'DELETE FROM notification_schedules WHERE uid = ?;', args: [targetUid] })
+              .catch((e) => console.warn('[Admin delete] Bildirim zamanlamaları silinemedi:', e.message));
             steps.controlPlane = { status: 'SUCCESS', rowsAffected: delRes.rowsAffected ?? 1 };
           } catch (cpDelErr) {
             steps.controlPlane = { status: 'FAILED', error: cpDelErr.message };
@@ -2601,6 +2745,9 @@ export default {
               sql: 'DELETE FROM admin_users_index WHERE uid = ?;',
               args: [uid],
             });
+            await controlClient
+              .execute({ sql: 'DELETE FROM notification_schedules WHERE uid = ?;', args: [uid] })
+              .catch((e) => console.warn('[Worker /account] Bildirim zamanlamaları silinemedi:', e.message));
             console.log(`[Worker /account] ${uid} control plane kaydı silindi.`);
           } catch (cpErr) {
             console.warn(`[Worker /account] Control Plane kaydı silinirken hata:`, cpErr.message);
@@ -2973,7 +3120,7 @@ export default {
         await ensureControlPlaneUsersIndexSchema(controlClient);
 
         const rowRes = await controlClient.execute({
-          sql: 'SELECT reminder_enabled, reminder_hour FROM admin_users_index WHERE uid = ? LIMIT 1;',
+          sql: 'SELECT reminder_enabled, reminder_hour, timezone FROM admin_users_index WHERE uid = ? LIMIT 1;',
           args: [uid],
         });
 
@@ -2985,6 +3132,7 @@ export default {
           success: true,
           reminderEnabled,
           reminderHour,
+          timeZone: normalizeTimeZone(row?.timezone),
         }, 200, corsHeaders);
       } catch (err) {
         const isAuth = err.message?.includes('Token') || err.message?.includes('Authorization');
@@ -3005,6 +3153,7 @@ export default {
 
         const body = await request.json().catch(() => ({}));
         const { reminderEnabled, reminderHour } = body;
+        const timeZone = normalizeTimeZone(body.timeZone);
 
         if (typeof reminderEnabled !== 'boolean') {
           return jsonResponse({ error: 'VALIDATION_ERROR', message: 'reminderEnabled (boolean) alanı zorunludur.' }, 400, corsHeaders);
@@ -3023,20 +3172,23 @@ export default {
 
         const now = Date.now();
         const enabledInt = reminderEnabled ? 1 : 0;
+        // Bir sonraki gönderim anı kullanıcının saat dilimine göre (cron 5 dakikada bir bakar)
+        const reminderNextAt = reminderEnabled ? computeNextDailyFireAt(reminderHour, timeZone, now) : null;
 
         // 1. Önce Control Plane DB (admin_users_index) güncelle - Başarısız olursa hata fırlat
         const updateRes = await controlClient.execute({
-          sql: 'UPDATE admin_users_index SET reminder_enabled = ?, reminder_hour = ?, updated_at = ? WHERE uid = ?;',
-          args: [enabledInt, reminderHour, now, uid],
+          sql: 'UPDATE admin_users_index SET reminder_enabled = ?, reminder_hour = ?, timezone = ?, reminder_next_at = ?, updated_at = ? WHERE uid = ?;',
+          args: [enabledInt, reminderHour, timeZone, reminderNextAt, now, uid],
         });
 
         // Eğer admin_users_index'te henüz bu kullanıcı yoksa oluştur
         if (updateRes.rowsAffected === 0) {
           await controlClient.execute({
-            sql: `INSERT INTO admin_users_index (uid, reminder_enabled, reminder_hour, created_at, updated_at)
-                  VALUES (?, ?, ?, ?, ?)
-                  ON CONFLICT(uid) DO UPDATE SET reminder_enabled = excluded.reminder_enabled, reminder_hour = excluded.reminder_hour, updated_at = excluded.updated_at;`,
-            args: [uid, enabledInt, reminderHour, now, now],
+            sql: `INSERT INTO admin_users_index (uid, reminder_enabled, reminder_hour, timezone, reminder_next_at, created_at, updated_at)
+                  VALUES (?, ?, ?, ?, ?, ?, ?)
+                  ON CONFLICT(uid) DO UPDATE SET reminder_enabled = excluded.reminder_enabled, reminder_hour = excluded.reminder_hour,
+                    timezone = excluded.timezone, reminder_next_at = excluded.reminder_next_at, updated_at = excluded.updated_at;`,
+            args: [uid, enabledInt, reminderHour, timeZone, reminderNextAt, now, now],
           });
         }
 
@@ -3081,6 +3233,280 @@ export default {
       }
     }
 
+    // GET /assigned-tasks/:id/stats
+    // Görevi ATAYAN kişi, arkadaşının bu görevdeki ilerlemesini görür: periyot ayarı ve dönem
+    // kayıtları (durum + yapılan adım sayısı). Not, JP ve diğer görevler gönderilmez.
+    const assignedStatsMatch = url.pathname.match(/^\/assigned-tasks\/([A-Za-z0-9_-]{1,128})\/stats$/);
+    if (request.method === 'GET' && assignedStatsMatch) {
+      try {
+        const authHeader = request.headers.get('Authorization');
+        const projectId = env.FIREBASE_PROJECT_ID || 'j-planning';
+        const { uid } = await verifyFirebaseToken(authHeader, projectId);
+        const assignmentId = assignedStatsMatch[1];
+
+        const accessToken = await getGoogleAccessToken(env.FIREBASE_SERVICE_ACCOUNT);
+        const docRes = await fetch(
+          `https://firestore.googleapis.com/v1/projects/${projectId}/databases/(default)/documents/assignedTasks/${encodeURIComponent(assignmentId)}?mask.fieldPaths=assignedByUid&mask.fieldPaths=assignedToUid&mask.fieldPaths=status`,
+          { headers: { Authorization: `Bearer ${accessToken}` } }
+        );
+        if (docRes.status === 404) {
+          return jsonResponse({ error: 'NOT_FOUND', message: 'Görev bulunamadı.' }, 404, corsHeaders);
+        }
+        if (!docRes.ok) {
+          throw new Error(`Atama okunamadı (${docRes.status})`);
+        }
+        const fields = (await docRes.json()).fields || {};
+        const assignedByUid = fields.assignedByUid?.stringValue;
+        const assignedToUid = fields.assignedToUid?.stringValue;
+        const status = fields.status?.stringValue;
+
+        // Yalnızca görevi atayan kişi görebilir.
+        if (!assignedByUid || assignedByUid !== uid || !assignedToUid) {
+          return jsonResponse({ error: 'FORBIDDEN', message: 'Bu görevin istatistiğini görme yetkin yok.' }, 403, corsHeaders);
+        }
+        if (status !== 'ACCEPTED') {
+          return jsonResponse({ success: true, accepted: false, task: null, records: [] }, 200, corsHeaders);
+        }
+
+        let dbName = getDbNameForUser(assignedToUid);
+        const controlClient = getControlPlaneClient(env);
+        if (controlClient) {
+          const metaRes = await controlClient
+            .execute({ sql: 'SELECT db_name FROM admin_users_index WHERE uid = ? LIMIT 1;', args: [assignedToUid] })
+            .catch(() => null);
+          dbName = metaRes?.rows?.[0]?.db_name || dbName;
+        }
+
+        const sessionInfo = await ensureUserDatabase(dbName, env);
+        const userDbClient = createClient({ url: sessionInfo.dbUrl, authToken: sessionInfo.token });
+        const taskRes = await userDbClient.execute({
+          sql: 'SELECT id, period, intervalValue, subtaskCount, createdAt FROM tasks WHERE firestoreAssignmentId = ? LIMIT 1;',
+          args: [assignmentId],
+        });
+        const taskRow = taskRes?.rows?.[0];
+        if (!taskRow) {
+          // Kabul edildi ama arkadaşın cihazında henüz oluşmadı
+          return jsonResponse({ success: true, accepted: true, task: null, records: [] }, 200, corsHeaders);
+        }
+
+        const recordsRes = await userDbClient.execute({
+          sql: 'SELECT periodKey, status, completedSubtasks FROM task_records WHERE taskId = ? ORDER BY periodKey DESC LIMIT 400;',
+          args: [taskRow.id],
+        });
+
+        return jsonResponse(
+          {
+            success: true,
+            accepted: true,
+            task: {
+              period: taskRow.period,
+              intervalValue: Number(taskRow.intervalValue) || 1,
+              subtaskCount: Number(taskRow.subtaskCount) || 1,
+              createdAt: Number(taskRow.createdAt) || null,
+            },
+            records: (recordsRes?.rows || []).map((r) => ({
+              periodKey: r.periodKey,
+              status: r.status,
+              completedSubtasks: Number(r.completedSubtasks) || 0,
+            })),
+          },
+          200,
+          corsHeaders
+        );
+      } catch (err) {
+        const isAuth =
+          err.name?.startsWith('JWT') ||
+          err.name?.startsWith('JWS') ||
+          err.message?.includes('Authorization') ||
+          err.message?.includes('Token');
+        if (isAuth) {
+          return jsonResponse({ error: 'UNAUTHORIZED', message: 'Oturum doğrulanamadı.' }, 401, corsHeaders);
+        }
+        console.error('[Worker /assigned-tasks/:id/stats Error]:', err.message);
+        return jsonResponse({ error: 'INTERNAL_ERROR', message: 'İstatistik alınamadı.' }, 500, corsHeaders);
+      }
+    }
+
+    // ─── Bildirim zamanlamaları (kullanıcının kendi) ───────────────────────────
+    // GET    /user/notification-schedules          → liste
+    // POST   /user/notification-schedules          → ekle
+    // PATCH  /user/notification-schedules/:id      → güncelle
+    // DELETE /user/notification-schedules/:id      → sil
+    // POST   /user/timezone                        → cihaz saat dilimini kaydet, zamanları yeniden hesapla
+    const scheduleItemMatch = url.pathname.match(/^\/user\/notification-schedules\/([A-Za-z0-9_-]{1,64})$/);
+    if (
+      url.pathname === '/user/notification-schedules' ||
+      scheduleItemMatch ||
+      (request.method === 'POST' && url.pathname === '/user/timezone')
+    ) {
+      try {
+        const authHeader = request.headers.get('Authorization');
+        const projectId = env.FIREBASE_PROJECT_ID || 'j-planning';
+        const { uid } = await verifyFirebaseToken(authHeader, projectId);
+
+        const controlClient = getControlPlaneClient(env);
+        if (!controlClient) {
+          return jsonResponse({ error: 'CONFIG_ERROR', message: 'Sunucu yapılandırması eksik.' }, 500, corsHeaders);
+        }
+        await ensureControlPlaneUsersIndexSchema(controlClient);
+        const now = Date.now();
+
+        const toScheduleJson = (row) => ({
+          id: row.id,
+          weekdays: parseWeekdaysJson(row.weekdays),
+          hour: Number(row.hour),
+          minute: Number(row.minute),
+          label: row.label || '',
+          nextFireAt: row.next_fire_at != null ? Number(row.next_fire_at) : null,
+        });
+
+        const parseScheduleBody = (body) => {
+          const weekdays = Array.isArray(body?.weekdays)
+            ? [...new Set(body.weekdays.map(Number))].filter((d) => Number.isInteger(d) && d >= 1 && d <= 7).sort((a, b) => a - b)
+            : [];
+          const hour = Number(body?.hour);
+          const minute = Number(body?.minute);
+          if (weekdays.length === 0) return { error: 'En az bir gün seçilmelidir.' };
+          if (!Number.isInteger(hour) || hour < 0 || hour > 23) return { error: 'Saat 0-23 arasında olmalıdır.' };
+          if (!Number.isInteger(minute) || minute < 0 || minute > 59) return { error: 'Dakika 0-59 arasında olmalıdır.' };
+          return {
+            weekdays,
+            hour,
+            minute,
+            label: cleanNotificationText(typeof body?.label === 'string' ? body.label : '', 120),
+            timeZone: normalizeTimeZone(body?.timeZone),
+          };
+        };
+
+        // POST /user/timezone
+        if (url.pathname === '/user/timezone') {
+          const body = await request.json().catch(() => ({}));
+          const timeZone = normalizeTimeZone(body?.timeZone);
+
+          const userRes = await controlClient.execute({
+            sql: 'SELECT reminder_enabled, reminder_hour FROM admin_users_index WHERE uid = ? LIMIT 1;',
+            args: [uid],
+          });
+          const userRow = userRes?.rows?.[0];
+          const stmts = [];
+          if (userRow) {
+            const reminderNext = Number(userRow.reminder_enabled) === 1
+              ? computeNextDailyFireAt(Number(userRow.reminder_hour), timeZone, now)
+              : null;
+            stmts.push({
+              sql: 'UPDATE admin_users_index SET timezone = ?, reminder_next_at = ?, updated_at = ? WHERE uid = ?;',
+              args: [timeZone, reminderNext, now, uid],
+            });
+          } else {
+            stmts.push({
+              sql: `INSERT INTO admin_users_index (uid, timezone, created_at, updated_at) VALUES (?, ?, ?, ?)
+                    ON CONFLICT(uid) DO UPDATE SET timezone = excluded.timezone, updated_at = excluded.updated_at;`,
+              args: [uid, timeZone, now, now],
+            });
+          }
+
+          const schedulesRes = await controlClient.execute({
+            sql: 'SELECT id, weekdays, hour, minute FROM notification_schedules WHERE uid = ?;',
+            args: [uid],
+          });
+          for (const row of schedulesRes?.rows || []) {
+            const next = computeScheduleNextFireAt({ ...row, timezone: timeZone }, now);
+            stmts.push({
+              sql: 'UPDATE notification_schedules SET timezone = ?, next_fire_at = ?, updated_at = ? WHERE id = ? AND uid = ?;',
+              args: [timeZone, next, now, row.id, uid],
+            });
+          }
+          await controlClient.batch(stmts, 'write');
+          return jsonResponse({ success: true, timeZone }, 200, corsHeaders);
+        }
+
+        // GET /user/notification-schedules
+        if (request.method === 'GET' && !scheduleItemMatch) {
+          const res = await controlClient.execute({
+            sql: 'SELECT id, weekdays, hour, minute, label, next_fire_at FROM notification_schedules WHERE uid = ? ORDER BY hour, minute, created_at;',
+            args: [uid],
+          });
+          return jsonResponse({ success: true, schedules: (res?.rows || []).map(toScheduleJson) }, 200, corsHeaders);
+        }
+
+        // POST /user/notification-schedules
+        if (request.method === 'POST' && !scheduleItemMatch) {
+          const parsed = parseScheduleBody(await request.json().catch(() => ({})));
+          if (parsed.error) {
+            return jsonResponse({ error: 'VALIDATION_ERROR', message: parsed.error }, 400, corsHeaders);
+          }
+          const countRes = await controlClient.execute({
+            sql: 'SELECT COUNT(*) AS c FROM notification_schedules WHERE uid = ?;',
+            args: [uid],
+          });
+          if (Number(countRes?.rows?.[0]?.c || 0) >= MAX_SCHEDULES_PER_USER) {
+            return jsonResponse(
+              { error: 'LIMIT_REACHED', message: `En fazla ${MAX_SCHEDULES_PER_USER} bildirim zamanlaması ekleyebilirsin.` },
+              400,
+              corsHeaders
+            );
+          }
+          const id = crypto.randomUUID();
+          const next = computeNextWeeklyFireAt(parsed.weekdays, parsed.hour, parsed.minute, parsed.timeZone, now);
+          await controlClient.execute({
+            sql: `INSERT INTO notification_schedules (id, uid, weekdays, hour, minute, label, timezone, next_fire_at, created_at, updated_at)
+                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
+            args: [id, uid, JSON.stringify(parsed.weekdays), parsed.hour, parsed.minute, parsed.label, parsed.timeZone, next, now, now],
+          });
+          return jsonResponse(
+            { success: true, schedule: toScheduleJson({ id, ...parsed, weekdays: parsed.weekdays, next_fire_at: next }) },
+            200,
+            corsHeaders
+          );
+        }
+
+        // PATCH /user/notification-schedules/:id
+        if (request.method === 'PATCH' && scheduleItemMatch) {
+          const parsed = parseScheduleBody(await request.json().catch(() => ({})));
+          if (parsed.error) {
+            return jsonResponse({ error: 'VALIDATION_ERROR', message: parsed.error }, 400, corsHeaders);
+          }
+          const next = computeNextWeeklyFireAt(parsed.weekdays, parsed.hour, parsed.minute, parsed.timeZone, now);
+          const res = await controlClient.execute({
+            sql: `UPDATE notification_schedules
+                  SET weekdays = ?, hour = ?, minute = ?, label = ?, timezone = ?, next_fire_at = ?, updated_at = ?
+                  WHERE id = ? AND uid = ?;`,
+            args: [JSON.stringify(parsed.weekdays), parsed.hour, parsed.minute, parsed.label, parsed.timeZone, next, now, scheduleItemMatch[1], uid],
+          });
+          if (!res.rowsAffected) {
+            return jsonResponse({ error: 'NOT_FOUND', message: 'Zamanlama bulunamadı.' }, 404, corsHeaders);
+          }
+          return jsonResponse(
+            { success: true, schedule: toScheduleJson({ id: scheduleItemMatch[1], ...parsed, weekdays: parsed.weekdays, next_fire_at: next }) },
+            200,
+            corsHeaders
+          );
+        }
+
+        // DELETE /user/notification-schedules/:id
+        if (request.method === 'DELETE' && scheduleItemMatch) {
+          await controlClient.execute({
+            sql: 'DELETE FROM notification_schedules WHERE id = ? AND uid = ?;',
+            args: [scheduleItemMatch[1], uid],
+          });
+          return jsonResponse({ success: true }, 200, corsHeaders);
+        }
+
+        return jsonResponse({ error: 'METHOD_NOT_ALLOWED', message: 'Desteklenmeyen istek.' }, 405, corsHeaders);
+      } catch (err) {
+        const isAuth =
+          err.name?.startsWith('JWT') ||
+          err.name?.startsWith('JWS') ||
+          err.message?.includes('Authorization') ||
+          err.message?.includes('Token');
+        if (isAuth) {
+          return jsonResponse({ error: 'UNAUTHORIZED', message: 'Oturum doğrulanamadı.' }, 401, corsHeaders);
+        }
+        console.error('[Worker /user/notification-schedules Error]:', err.message);
+        return jsonResponse({ error: 'INTERNAL_ERROR', message: 'Bildirim zamanlamaları işlenemedi.' }, 500, corsHeaders);
+      }
+    }
+
     // POST /test/trigger-reminders (Giriş yapmış kullanıcının KENDİ hatırlatıcı push bildirimini test etmesi)
     if (request.method === 'POST' && url.pathname === '/test/trigger-reminders') {
       try {
@@ -3109,7 +3535,7 @@ export default {
 
         // 3. SIKI KORUMA: YALNIZCA doğrulanmış kullanıcının KENDİ hesabı hedeflenir.
         // Dışarıdan gelen body parametreleri asla başka bir kullanıcıyı hedefleyemez.
-        const result = await handleHourlyTaskReminders(env, null, uid);
+        const result = await runReminderTestForUser(env, uid);
 
         return jsonResponse(
           {
@@ -3165,6 +3591,6 @@ export default {
     }
   },
   async scheduled(event, env, ctx) {
-    ctx.waitUntil(handleHourlyTaskReminders(env));
+    ctx.waitUntil(handleScheduledTick(env));
   },
 };
